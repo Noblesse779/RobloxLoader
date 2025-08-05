@@ -56,8 +56,8 @@ local function getClosestEnemy()
 	for _, player in pairs(players) do
 		if player ~= localPlayer and player.Team ~= localPlayer.Team then
 			local char = player.Character
-			if char and char:FindFirstChild("HumanoidRootPart") and char:FindFirstChild("Humanoid") and char.Humanoid.Health > 0 then
-				local dist = (char.HumanoidRootPart.Position - hrp.Position).Magnitude
+			if char and char:FindFirstChild("Head") and char:FindFirstChild("Humanoid") and char.Humanoid.Health > 0 then
+				local dist = (char.Head.Position - hrp.Position).Magnitude
 				if dist < shortestDist then
 					shortestDist = dist
 					closest = player
@@ -69,15 +69,25 @@ local function getClosestEnemy()
 	return closest
 end
 
--- สลับสถานะล็อกเป้า
-lockButton.MouseButton1Click:Connect(function()
+-- ฟังก์ชันหมุนกล้องแบบนุ่มนวล (lerp)
+local function smoothLookAt(currentCFrame, targetPos, alpha)
+	local lookVector = (targetPos - currentCFrame.Position).Unit
+	local targetCFrame = CFrame.new(currentCFrame.Position, currentCFrame.Position + lookVector)
+	return currentCFrame:Lerp(targetCFrame, alpha)
+end
+
+-- สลับสถานะล็อกเป้า (จากปุ่ม GUI หรือปุ่ม F)
+local function toggleAiming()
 	aiming = not aiming
 	if aiming then
 		lockButton.Text = "🎯 Lock Nearest Enemy ON"
 	else
 		lockButton.Text = "🎯 Lock Nearest Enemy OFF"
 	end
-end)
+end
+
+-- สลับสถานะล็อกเป้าด้วยปุ่ม GUI
+lockButton.MouseButton1Click:Connect(toggleAiming)
 
 -- สลับสถานะเดินอิสระ
 walkButton.MouseButton1Click:Connect(function()
@@ -92,7 +102,7 @@ end)
 -- ตัวแปรเก็บทิศทางเดิน
 local moveDirection = Vector3.new(0,0,0)
 
--- อัปเดตทิศทางเดินตามปุ่มกด (ถ้าเปิดเดิน)
+-- ควบคุมเดิน
 UserInputService.InputBegan:Connect(function(input, gameProcessed)
 	if gameProcessed then return end
 	if not walkEnabled then return end
@@ -106,6 +116,8 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
 			moveDirection = moveDirection + Vector3.new(-1,0,0)
 		elseif input.KeyCode == Enum.KeyCode.D then
 			moveDirection = moveDirection + Vector3.new(1,0,0)
+		elseif input.KeyCode == Enum.KeyCode.F then
+			toggleAiming()
 		end
 	end
 end)
@@ -128,12 +140,13 @@ UserInputService.InputEnded:Connect(function(input, gameProcessed)
 end)
 
 -- อัปเดตกล้องและเดินทุกเฟรม
-RunService.RenderStepped:Connect(function()
+RunService.RenderStepped:Connect(function(dt)
 	-- ระบบล็อกเป้า
 	if aiming then
 		local target = getClosestEnemy()
-		if target and target.Character and target.Character:FindFirstChild("HumanoidRootPart") then
-			camera.CFrame = CFrame.new(camera.CFrame.Position, target.Character.HumanoidRootPart.Position)
+		if target and target.Character and target.Character:FindFirstChild("Head") then
+			local targetPos = target.Character.Head.Position
+			camera.CFrame = smoothLookAt(camera.CFrame, targetPos, 0.2)
 		end
 	end
 
