@@ -105,7 +105,6 @@ local function hiddenAnchor(parent, name, cframe)
 		Transparency = 1,
 		CanCollide = false,
 		CanTouch = false,
-		CanQuery = false,
 	})
 end
 
@@ -673,6 +672,7 @@ end
 -- เริ่มเกม
 -- ============================================================
 
+print("🌈 Rainbow Obby: กำลังโหลดแมพ...")
 Lighting.ClockTime = 14
 
 local map = workspace:FindFirstChild(MAP_NAME) or buildMap()
@@ -681,4 +681,9 @@ wireMap(map)
 Players.PlayerAdded:Connect(onPlayerAdded)
 for _, player in ipairs(Players:GetPlayers()) do
 	onPlayerAdded(player)
+	-- ตัวละครเกิดไปก่อนสคริปต์ทำงานเสร็จ (เช่น ที่จุดเกิดเดิมของ Baseplate) ย้ายไปล็อบบี้
+	if player.Character then
+		sendToCheckpoint(player)
+	end
 end
+print(("🌈 Rainbow Obby: พร้อมเล่นแล้ว! (%d จุดเซฟ) แมพอยู่บนฟ้าที่ความสูง %d studs"):format(lastCheckpoint, BASE_Y))
