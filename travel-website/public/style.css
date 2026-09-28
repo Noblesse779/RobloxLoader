@@ -341,6 +341,14 @@ section h2 {
   font-size: 0.9rem;
 }
 
+.admin-link {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  text-decoration: underline;
+}
+
+.admin-link:hover { color: var(--primary); }
+
 /* Modal */
 .modal {
   position: fixed;
