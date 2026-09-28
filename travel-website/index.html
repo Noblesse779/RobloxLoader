@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>เที่ยวรอบโลก | ค้นหาจุดหมายปลายทางในฝัน</title>
+<meta name="description" content="เว็บไซต์รวมสถานที่ท่องเที่ยวยอดนิยมทั่วโลก ค้นหาแรงบันดาลใจสำหรับทริปครั้งต่อไปของคุณ">
+<link rel="preconnect" href="https://images.unsplash.com">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="site-header">
+  <nav class="navbar">
+    <a href="#top" class="logo">🌏 เที่ยวรอบโลก</a>
+    <ul class="nav-links">
+      <li><a href="#destinations">จุดหมายปลายทาง</a></li>
+      <li><a href="#continents">ทวีป</a></li>
+      <li><a href="#tips">เคล็ดลับเที่ยว</a></li>
+      <li><a href="#newsletter">ติดตามข่าวสาร</a></li>
+    </ul>
+    <button class="nav-toggle" id="navToggle" aria-label="เปิดเมนู">☰</button>
+  </nav>
+</header>
+
+<main id="top">
+  <section class="hero">
+    <div class="hero-content">
+      <h1>ค้นพบโลกใบนี้ <span>ทีละก้าว</span></h1>
+      <p>รวมสถานที่ท่องเที่ยวสุดพิเศษจากทุกทวีป พร้อมแรงบันดาลใจสำหรับทริปในฝันของคุณ</p>
+      <div class="hero-search">
+        <input type="text" id="searchInput" placeholder="ค้นหาเมืองหรือประเทศ เช่น โตเกียว, ปารีส...">
+        <button id="searchBtn">ค้นหา</button>
+      </div>
+      <div class="hero-stats">
+        <div><strong>150+</strong><span>จุดหมายปลายทาง</span></div>
+        <div><strong>6</strong><span>ทวีป</span></div>
+        <div><strong>25K+</strong><span>นักเดินทาง</span></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="continents" id="continents">
+    <h2>เลือกทวีปที่อยากไป</h2>
+    <div class="filter-bar" id="filterBar">
+      <button class="filter-btn active" data-filter="all">ทั้งหมด</button>
+      <button class="filter-btn" data-filter="asia">เอเชีย</button>
+      <button class="filter-btn" data-filter="europe">ยุโรป</button>
+      <button class="filter-btn" data-filter="america">อเมริกา</button>
+      <button class="filter-btn" data-filter="africa">แอฟริกา</button>
+      <button class="filter-btn" data-filter="oceania">โอเชียเนีย</button>
+    </div>
+  </section>
+
+  <section class="destinations" id="destinations">
+    <h2>สถานที่ท่องเที่ยวยอดนิยม</h2>
+    <div class="card-grid" id="cardGrid"></div>
+    <p class="no-results" id="noResults" hidden>ไม่พบสถานที่ที่ค้นหา ลองคำอื่นดูนะ</p>
+  </section>
+
+  <section class="tips" id="tips">
+    <h2>เคล็ดลับก่อนออกเดินทาง</h2>
+    <div class="tips-grid">
+      <div class="tip-card">
+        <div class="tip-icon">🎒</div>
+        <h3>แพ็คกระเป๋าให้เบา</h3>
+        <p>เลือกเสื้อผ้าที่มิกซ์แอนด์แมตช์ได้ ลดของที่ไม่จำเป็น เพื่อการเดินทางที่คล่องตัวขึ้น</p>
+      </div>
+      <div class="tip-card">
+        <div class="tip-icon">📅</div>
+        <h3>วางแผนล่วงหน้า</h3>
+        <p>ตรวจสอบฤดูกาลและเทศกาลของปลายทาง เพื่อให้ได้ประสบการณ์ที่ดีที่สุด</p>
+      </div>
+      <div class="tip-card">
+        <div class="tip-icon">💳</div>
+        <h3>เตรียมงบประมาณ</h3>
+        <p>ตั้งงบสำหรับที่พัก อาหาร และกิจกรรม พร้อมสำรองฉุกเฉินไว้เสมอ</p>
+      </div>
+      <div class="tip-card">
+        <div class="tip-icon">🛡️</div>
+        <h3>ทำประกันการเดินทาง</h3>
+        <p>ป้องกันความเสี่ยงจากเหตุการณ์ไม่คาดฝันระหว่างทริปของคุณ</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="newsletter" id="newsletter">
+    <h2>รับแรงบันดาลใจการเดินทางใหม่ๆ</h2>
+    <p>สมัครรับข่าวสารจุดหมายปลายทางสุดฮิตและโปรโมชั่นดีๆ ก่อนใคร</p>
+    <form id="newsletterForm">
+      <input type="email" id="emailInput" placeholder="กรอกอีเมลของคุณ" required>
+      <button type="submit">สมัครสมาชิก</button>
+    </form>
+    <p class="form-message" id="formMessage"></p>
+  </section>
+</main>
+
+<footer class="site-footer">
+  <p>&copy; 2026 เที่ยวรอบโลก. สร้างด้วย ❤️ สำหรับนักเดินทางทุกคน</p>
+</footer>
+
+<div class="modal" id="modal" hidden>
+  <div class="modal-content">
+    <button class="modal-close" id="modalClose">&times;</button>
+    <img id="modalImage" src="" alt="">
+    <div class="modal-body">
+      <span class="modal-flag" id="modalFlag"></span>
+      <h3 id="modalTitle"></h3>
+      <p id="modalDesc"></p>
+      <ul class="modal-facts" id="modalFacts"></ul>
+    </div>
+  </div>
+</div>
+
+<script src="script.js"></script>
+</body>
+</html>
