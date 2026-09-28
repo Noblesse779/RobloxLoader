@@ -1,0 +1,117 @@
+-- LocalScript: แสดงข้อมูลพื้นฐานฝั่ง Client
+-- วางไว้ที่ StarterPlayer > StarterPlayerScripts
+-- Score มาจาก Server (ดู ScoreData.server.lua) ฝั่ง Client แค่อ่านมาแสดง
+local Players = game:GetService("Players")
+local ContentProvider = game:GetService("ContentProvider")
+
+local player = Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
+
+-- 1. ข้อมูลพื้นฐานของผู้เล่น (อยู่บนเครื่อง Client)
+-- ใช้ลิสต์แทน dictionary เพื่อให้ print ออกมาตามลำดับเสมอ (pairs ไม่รับประกันลำดับ)
+local basicData = {
+	{ "UserId", player.UserId },
+	{ "Name", player.Name },
+	{ "DisplayName", player.DisplayName },
+	{ "AccountAge", player.AccountAge },
+	{ "MembershipType", player.MembershipType.Name },
+}
+
+print("===== ข้อมูลพื้นฐานบน Client =====")
+for _, entry in ipairs(basicData) do
+	print(entry[1] .. ":", entry[2])
+end
+
+-- 2. ตรวจสอบว่ามี Meshes / Textures / Sounds ใน Workspace หรือไม่
+-- สแกนครั้งเดียวตอนเริ่ม ถ้าเปิด StreamingEnabled อาจนับได้ไม่ครบ
+local function scanWorkspaceAssets()
+	local meshes, textures, sounds = 0, 0, 0
+
+	for _, obj in ipairs(workspace:GetDescendants()) do
+		if obj:IsA("MeshPart") or obj:IsA("SpecialMesh") then
+			meshes += 1
+		elseif obj:IsA("Decal") or obj:IsA("Texture") then
+			textures += 1
+		elseif obj:IsA("Sound") then
+			sounds += 1
+		end
+	end
+
+	print("\n===== สรุป Assets ใน Workspace (ฝั่ง Client) =====")
+	print("จำนวน Mesh:", meshes)
+	print("จำนวน Texture/Decal:", textures)
+	print("จำนวน Sound:", sounds)
+end
+
+scanWorkspaceAssets()
+
+-- 3. ตัวอย่างการ Preload Assets (ทำให้โหลดลงเครื่อง Client เร็วขึ้น)
+local assetsToPreload = {
+	-- ใส่ AssetId ที่ต้องการ preload ได้ เช่น
+	-- "rbxassetid://123456789",
+}
+
+if #assetsToPreload > 0 then
+	ContentProvider:PreloadAsync(assetsToPreload)
+	print("\nPreload Assets เสร็จแล้ว (ถูก cache บนเครื่อง Client)")
+end
+
+-- 4. ค่าตั้งค่าชั่วคราวบน Client (ไม่ถาวร หายเมื่อออกจากเกม)
+-- ข้อมูลสำคัญอย่าง Score อย่าเก็บที่นี่ เพราะผู้เล่นแก้ค่าบน Client ได้
+local clientMemory = {
+	Settings = {
+		MusicVolume = 0.5,
+		GraphicsQuality = 5,
+	},
+}
+
+-- 5. แสดงข้อมูลบนหน้าจอ (UI ฝั่ง Client)
+-- ลบ GUI เก่าก่อน กันซ้ำในกรณีที่สคริปต์ถูกรันใหม่ (เช่น วางไว้ใน StarterGui)
+local oldGui = playerGui:FindFirstChild("ClientInfoGui")
+if oldGui then
+	oldGui:Destroy()
+end
+
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "ClientInfoGui"
+screenGui.ResetOnSpawn = false -- ไม่ให้ UI หายตอนตัวละครตายแล้วเกิดใหม่
+screenGui.Parent = playerGui
+
+local label = Instance.new("TextLabel")
+label.Size = UDim2.new(0, 400, 0, 120)
+label.Position = UDim2.new(0, 20, 0, 20)
+label.BackgroundTransparency = 0.3
+label.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+label.TextColor3 = Color3.fromRGB(255, 255, 255)
+label.TextScaled = true
+label.Font = Enum.Font.Gotham
+label.Text = "กำลังโหลดข้อมูล Client..."
+label.Parent = screenGui
+
+-- อัปเดตข้อความทุก 1 วินาที
+-- อ่านตำแหน่งตรงนี้เลย ไม่ต้องใช้ Heartbeat เก็บทุกเฟรม เพราะแสดงผลแค่วินาทีละครั้ง
+task.spawn(function()
+	local lastPosition = Vector3.zero
+
+	-- ลูปหยุดเองเมื่อ label ถูกลบออกจาก PlayerGui
+	while label:IsDescendantOf(playerGui) do
+		local character = player.Character
+		local rootPart = character and character:FindFirstChild("HumanoidRootPart")
+		if rootPart then
+			lastPosition = rootPart.Position
+		end
+
+		label.Text = string.format(
+			"ชื่อ: %s\nUserId: %d\nตำแหน่งล่าสุด: (%.1f, %.1f, %.1f)\nScore: %d",
+			player.DisplayName,
+			player.UserId,
+			lastPosition.X,
+			lastPosition.Y,
+			lastPosition.Z,
+			player:GetAttribute("Score") or 0 -- Server เป็นคนตั้งค่า (Attribute ส่งจาก Server มาให้อัตโนมัติ)
+		)
+		task.wait(1)
+	end
+end)
+
+print("\nLocalScript เริ่มทำงานบน Client เรียบร้อย")
