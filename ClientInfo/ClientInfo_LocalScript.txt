@@ -1,6 +1,6 @@
 -- LocalScript: แสดงข้อมูลพื้นฐานฝั่ง Client
 -- วางไว้ที่ StarterPlayer > StarterPlayerScripts
--- Score มาจาก Server (ดู ScoreData.server.lua) ฝั่ง Client แค่อ่านมาแสดง
+-- Score มาจาก Server (ดู ScoreData_Script.txt) ฝั่ง Client แค่อ่านมาแสดง
 local Players = game:GetService("Players")
 local ContentProvider = game:GetService("ContentProvider")
 
