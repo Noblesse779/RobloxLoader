@@ -1489,6 +1489,10 @@ local function subStep(g, h)
 	updatePhase(g) -- 1
 	local ph = g.phase
 	if ph ~= "playing" and ph ~= "stageClear" and ph ~= "gameOver" then
+		-- เฟสที่ไม่จำลอง (เช่น tally): รถถังที่ค้างอยู่ไม่ได้ขยับใน tick นี้ ไม่งั้นตีนตะขาบยังหมุนค้าง
+		for _, t in ipairs(g.tanks) do
+			t.moving = false
+		end
 		return
 	end
 	local active = ph ~= "gameOver" -- ตอน game over ผู้เล่นขยับไม่ได้ แต่ศัตรูยังเดินต่อ
