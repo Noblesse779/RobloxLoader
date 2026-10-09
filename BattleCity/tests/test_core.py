@@ -56,7 +56,9 @@ SPEC_DEFAULTS = {
     "MAX_ENEMIES": [4, 6], "BONUS_ENEMIES": [4, 11, 18], "SPAWN_ANIM_TIME": 1.0, "ENEMY_SPAWN_BASE": 190,
     "RESPAWN_DELAY": 0.5, "SHIELD_SPAWN": 3, "SHIELD_HELMET": 10, "FREEZE_TIME": 10, "SHOVEL_TIME": 20,
     "SHOVEL_FLASH_TIME": 3, "SHOVEL_FLASH_PERIOD": 0.25, "PLAYER_FREEZE_TIME": 3, "ICE_SLIDE_PX": 24,
-    "FIRE_COOLDOWN": 0.12, "AI_TURN_CHANCE": 0.125, "AI_FIRE_RATE": 1.2, "AI_BLOCKED_FIRE_CHANCE": 0.5,
+    "FIRE_COOLDOWN": 0.12, "AI_TURN_CHANCE": 0.125, "AI_FIRE_RATE": 0.8, "AI_BLOCKED_FIRE_CHANCE": 0.3,
+    "AI_FIRE_RATE_PER_STAGE": 0.015, "AI_BASE_CHANCE_START": 0.05, "AI_BASE_CHANCE_MAX": 0.25,
+    "AI_BASE_RAMP_TIME": 25, "AI_PLAYER_CHANCE": 0.2,
     "INTRO_TIME": 2.5, "STAGE_CLEAR_DELAY": 3, "GAMEOVER_TIME": 4, "TALLY_TIME": 6, "FINAL_TIME": 3,
 }
 
@@ -1663,10 +1665,36 @@ def test_ai_turns_at_8px_crossings_when_turn_chance_is_one():
     assert len(dirs) >= 2
 
 
+def _trapped_enemy_dir_freq(seed, n, skip=0, **overrides):
+    """ด่านเหล็กทั้งแผ่น: ศัตรูที่จุดเกิด (96,0) ถูกขังทุกทิศ จึงสุ่มทิศใหม่ทุก tick ให้นับสัดส่วนได้ตรงๆ"""
+    cfg = arena(MAX_ENEMIES=[1, 1], ENEMY_SPAWN_BASE=100000, **overrides)
+    sim = Sim(layout=make_layout(fill="S"), config=cfg, seed=seed)
+    sim.start()
+    sim.run_until(lambda: len(sim.enemies()) == 1, 2)
+    e = sim.enemies()[0]
+    for _ in range(skip):
+        sim.step()
+    counts = [0, 0, 0, 0]
+    for _ in range(n):
+        sim.step()
+        counts[int(e.dir)] += 1
+    assert (e.x, e.y) == (96, 0)
+    return [c / float(n) for c in counts]
+
+
+def test_ai_base_chance_ramps_with_tank_age():
+    # ไม่มีผู้เล่นให้ไล่ (AI_PLAYER_CHANCE=0): ทิศ DOWN = สุ่มได้ DOWN (1/4 ของส่วนสุ่ม) + ไปฐาน
+    # คันที่เพิ่งเกิด: ไปฐาน ~0.05 -> DOWN ~ 0.05 + 0.95/4; อายุเกิน AI_BASE_RAMP_TIME: ~0.25 + 0.75/4
+    young = _trapped_enemy_dir_freq(5, 240, AI_PLAYER_CHANCE=0, AI_BASE_RAMP_TIME=1000)
+    old = _trapped_enemy_dir_freq(5, 3000, skip=int(26 * 60), AI_PLAYER_CHANCE=0)
+    assert abs(young[DOWN] - (0.05 + 0.95 / 4)) <= 0.07, young
+    assert abs(old[DOWN] - (0.25 + 0.75 / 4)) <= 0.04, old
+
+
 def test_ai_direction_choice_weights():
-    # ด่านเหล็กทั้งแผ่น: ศัตรูที่จุดเกิด (96,0) ถูกขังทุกทิศ จึงสุ่มทิศใหม่ทุก tick ให้นับสัดส่วนได้ตรงๆ
-    # SPEC: 0.5 สุ่ม 4 ทิศ, 0.25 ไปฐาน (dx=0 -> DOWN เสมอ), 0.25 ไปผู้เล่น (DOWN, สุ่ม 30% ใช้แกน x -> LEFT)
-    cfg = arena(MAX_ENEMIES=[1, 1], ENEMY_SPAWN_BASE=100000)
+    # ตรึงน้ำหนักไว้ที่ 0.5 สุ่ม 4 ทิศ, 0.25 ไปฐาน (dx=0 -> DOWN เสมอ), 0.25 ไปผู้เล่น (DOWN, สุ่ม 30% ใช้แกน x -> LEFT)
+    cfg = arena(MAX_ENEMIES=[1, 1], ENEMY_SPAWN_BASE=100000, AI_BASE_CHANCE_START=0.25,
+                AI_BASE_CHANCE_MAX=0.25, AI_PLAYER_CHANCE=0.25)
     sim = Sim(layout=make_layout(fill="S"), config=cfg, seed=99)
     sim.start()
     sim.run_until(lambda: len(sim.enemies()) == 1, 2)

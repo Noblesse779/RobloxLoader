@@ -77,8 +77,15 @@ local DEFAULT_CONFIG = {
 	ICE_SLIDE_PX = 24,
 	FIRE_COOLDOWN = 0.12,
 	AI_TURN_CHANCE = 0.125,
-	AI_FIRE_RATE = 1.2,
-	AI_BLOCKED_FIRE_CHANCE = 0.5,
+	AI_FIRE_RATE = 0.8,
+	AI_FIRE_RATE_PER_STAGE = 0.015, -- ด่านหลัง ๆ ศัตรูยิงถี่ขึ้น (นับถึงด่าน 35)
+	AI_BLOCKED_FIRE_CHANCE = 0.3,
+	-- โอกาสเลี้ยวไปหาฐานเพิ่มตามอายุรถถังศัตรู: คันที่เพิ่งเกิดเดินสุ่มเป็นหลัก ผู้เล่นมีเวลาสกัด
+	-- อยู่นานจนครบ AI_BASE_RAMP_TIME วิ ถึงจะมุ่งหาฐานเต็มที่ (คล้าย NES ที่ปล่อยไว้นานแล้วฐานแตก)
+	AI_BASE_CHANCE_START = 0.05,
+	AI_BASE_CHANCE_MAX = 0.25,
+	AI_BASE_RAMP_TIME = 25,
+	AI_PLAYER_CHANCE = 0.2,
 	INTRO_TIME = 2.5,
 	STAGE_CLEAR_DELAY = 3,
 	GAMEOVER_TIME = 4,
@@ -887,12 +894,20 @@ local function towardDir(g, tank, tx, ty)
 end
 
 local function chooseDir(g, tank)
+	local cfg = g.config
+	local ramp = tonumber(cfg.AI_BASE_RAMP_TIME) or 0
+	local k = 1
+	if ramp > 0 then
+		k = math.min(1, (g.time - (tank.bornAt or g.time)) / ramp)
+	end
+	local baseChance = cfg.AI_BASE_CHANCE_START + (cfg.AI_BASE_CHANCE_MAX - cfg.AI_BASE_CHANCE_START) * k
+	local playerChance = cfg.AI_PLAYER_CHANCE
 	local r = rand(g)
-	if r < 0.5 then
+	if r >= baseChance + playerChance then
 		return randInt(g, 4) - 1
 	end
 	local tx, ty = BASE_CX, BASE_CY
-	if r >= 0.75 then
+	if r >= baseChance then
 		local best
 		local cx, cy = tank.x + 8, tank.y + 8
 		for _, t in ipairs(g.tanks) do
@@ -935,7 +950,8 @@ local function updateEnemy(g, tank, h)
 			turnTank(g, tank, chooseDir(g, tank))
 		end
 	end
-	if tank.bullets == 0 and rand(g) < cfg.AI_FIRE_RATE * h then
+	local fireRate = cfg.AI_FIRE_RATE + (tonumber(cfg.AI_FIRE_RATE_PER_STAGE) or 0) * (math.min(g.stageNumber, 35) - 1)
+	if tank.bullets == 0 and rand(g) < fireRate * h then
 		tryFire(g, tank)
 	end
 end
@@ -964,6 +980,7 @@ local function newTank(g, team, slot, kind, x, y, dir, hp)
 		cooldown = 0, -- ภายใน: เวลาที่เหลือก่อนยิงนัดถัดไปได้
 		slide = 0, -- ภายใน: ระยะไถลบนน้ำแข็งที่เหลือ
 		lastInput = -1, -- ภายใน: ทิศที่กดเมื่อ tick ก่อน
+		bornAt = g.time, -- ภายใน: เวลาที่เกิด (ใช้คิดอายุของ AI)
 	}
 	g.tanks[#g.tanks + 1] = t
 	g._tankById[t.id] = t
