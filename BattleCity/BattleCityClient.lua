@@ -13,6 +13,7 @@ local StarterGui = game:GetService("StarterGui")
 local GuiService = game:GetService("GuiService")
 
 local player = Players.LocalPlayer
+print("[TANK CITY] client started for " .. player.Name)
 
 ---------------------------------------------------------------- ค่าคงที่
 local MARGIN = 8 -- ขอบรอบสนามที่ต้องเห็นเสมอ (stud)

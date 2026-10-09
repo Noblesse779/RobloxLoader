@@ -374,8 +374,13 @@ FREEZE_ENEMIES_LUA = "_G.BC_TEST.game.freezeTimer = 1000"
 
 
 # --------------------------------------------------------------------------- harness
-def make_world(signal_behavior="Immediate", wrap_core=True, stages=FIXTURE_STAGES, before=None, server_src=None):
+def make_world(signal_behavior="Immediate", wrap_core=True, stages=FIXTURE_STAGES, before=None, server_src=None,
+               client_placeholder=True):
     w = World(signal_behavior=signal_behavior)
+    if client_placeholder:
+        # ผู้ใช้จริงวาง LocalScript นี้ไว้ ถ้าไม่มี server จะเตือนใน Output (ดู test_warns_when_client_script_missing)
+        w.eval("local s = Instance.new('LocalScript'); s.Name = 'BattleCityClient'; "
+               "s.Parent = game:GetService('StarterPlayer'):WaitForChild('StarterPlayerScripts')")
     if before:
         before(w)
     if wrap_core:
@@ -526,7 +531,7 @@ def test_server_uses_only_known_globals():
     allowed = {
         "game", "workspace", "script", "Instance", "Enum", "Vector3", "CFrame", "Color3", "UDim2", "TweenInfo",
         "math", "string", "table", "os", "task", "tostring", "tonumber", "type", "pairs", "ipairs", "pcall",
-        "require", "warn",
+        "require", "warn", "print",
     }
     access = _lua51_global_access(src)
     sets = sorted(n for op, n in access if op == "set")
@@ -1016,3 +1021,29 @@ def test_deferred_signals_quick_join_and_leave():
     assert attrs["P1Name"] == "Ben" and attrs["P2Present"] is False
     assert g(w, "g.players[2] == nil")
     clean(w)
+
+
+def test_warns_when_client_script_missing_or_misplaced():
+    w = make_world(client_placeholder=False)
+    w.advance(0.2)
+    assert any("BattleCityClient" in x and "StarterPlayerScripts" in x for x in w.warnings()), w.warnings()
+
+    def misplaced(world):
+        world.eval("local s = Instance.new('LocalScript'); s.Name = 'BattleCityClient'; "
+                   "s.Parent = game:GetService('StarterGui')")
+    w = make_world(client_placeholder=False, before=misplaced)
+    w.advance(0.2)
+    assert any("StarterGui.BattleCityClient" in x for x in w.warnings()), w.warnings()
+
+    w = make_world()
+    w.advance(0.2)
+    assert not any("BattleCityClient" in x for x in w.warnings()), w.warnings()
+
+
+def test_template_fog_is_turned_off():
+    def fog(world):
+        world.eval("local a = Instance.new('Atmosphere'); a.Density = 0.3; a.Haze = 1; a.Parent = game:GetService('Lighting'); "
+                   "local d = Instance.new('DepthOfFieldEffect'); d.Enabled = true; d.Parent = game:GetService('Lighting')")
+    w = make_world(before=fog)
+    assert w.eval("return game:GetService('Lighting'):FindFirstChildOfClass('Atmosphere').Density") == 0
+    assert w.eval("return game:GetService('Lighting'):FindFirstChildOfClass('DepthOfFieldEffect').Enabled") is False

@@ -942,6 +942,9 @@ def test_with_real_server_script():
     w = World()
     w.add_module("ServerScriptService", "BattleCityCore", luaenv.path("BattleCityCore.lua"))
     w.add_module_source("ServerScriptService", "BattleCityStages", TINY_STAGES)
+    # ตัวจริงของผู้ใช้อยู่ใน StarterPlayerScripts (ไม่งั้น server จะเตือนว่าวางผิดที่)
+    w.eval("local s = Instance.new('LocalScript'); s.Name = 'BattleCityClient'; "
+           "s.Parent = game:GetService('StarterPlayer'):WaitForChild('StarterPlayerScripts')")
     ok, err, _ = w.run_script(luaenv.path("BattleCityServer.lua"))
     assert ok, err
     p = w.add_player("Alice", 1)

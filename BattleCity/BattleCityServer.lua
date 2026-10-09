@@ -23,6 +23,59 @@ local Stages = require(script.Parent:WaitForChild("BattleCityStages"))
 if type(Stages) ~= "table" then
 	Stages = {}
 end
+print("[TANK CITY] server started (" .. #Stages .. " stages)")
+
+-- ช่วยคนติดตั้ง: ถ้า LocalScript ฝั่งผู้เล่นวางผิดที่ จอจะไม่ขึ้นเกมเลย จึงบอกใน Output ให้ชัด
+-- (เกมนี้ไม่มีตัวละคร: สคริปต์ใน StarterGui / StarterCharacterScripts จะไม่ถูกรัน)
+local function isClientScript(o)
+	if o:IsA("LocalScript") then
+		return true
+	end
+	local ok, ctx = pcall(function()
+		return o.RunContext
+	end)
+	return ok and ctx == Enum.RunContext.Client
+end
+task.defer(function()
+	local StarterPlayer = game:GetService("StarterPlayer")
+	local sps = StarterPlayer:FindFirstChild("StarterPlayerScripts")
+	local client = sps and sps:FindFirstChild("BattleCityClient")
+	if client and isClientScript(client) then
+		return
+	end
+	if client then
+		warn("[TANK CITY] StarterPlayerScripts.BattleCityClient ต้องเป็น LocalScript (ตอนนี้เป็น " .. client.ClassName .. ")")
+		return
+	end
+	local found
+	for _, root in ipairs({ StarterPlayer, game:GetService("StarterGui"), game:GetService("ReplicatedStorage"), game:GetService("ServerScriptService"), workspace }) do
+		found = root:FindFirstChild("BattleCityClient", true)
+		if found then
+			break
+		end
+	end
+	if found then
+		warn("[TANK CITY] เจอ BattleCityClient ที่ " .. found:GetFullName() .. " — ต้องย้ายไปไว้ใน StarterPlayer > StarterPlayerScripts ไม่อย่างนั้นจอจะไม่ขึ้นเกม")
+	else
+		warn("[TANK CITY] ไม่พบ LocalScript ชื่อ BattleCityClient ใน StarterPlayer > StarterPlayerScripts — จอจะไม่ขึ้นเกม")
+	end
+end)
+
+-- กล้องมองสนามจากที่สูงหลายร้อย stud: หมอก Atmosphere / เบลอระยะไกล ของเทมเพลต Baseplate จะทำให้ภาพขาวซีด จึงปิดไว้
+do
+	local Lighting = game:GetService("Lighting")
+	for _, o in ipairs(Lighting:GetChildren()) do
+		if o:IsA("Atmosphere") then
+			pcall(function()
+				o.Density = 0
+				o.Haze = 0
+				o.Glare = 0
+			end)
+		elseif o:IsA("DepthOfFieldEffect") then
+			o.Enabled = false
+		end
+	end
+end
 
 -- เสียง: ใส่ id ของเสียงเอง (เช่น "rbxassetid://123" หรือแค่ตัวเลข) ว่างไว้ = ไม่เล่น
 local SOUNDS = {
