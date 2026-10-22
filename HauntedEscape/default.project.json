@@ -1,0 +1,23 @@
+{
+  "name": "HauntedEscape",
+  "tree": {
+    "$className": "DataModel",
+    "ReplicatedStorage": {
+      "HorrorShared": {
+        "$path": "src/ReplicatedStorage/HorrorShared"
+      }
+    },
+    "ServerScriptService": {
+      "HorrorServer": {
+        "$path": "src/ServerScriptService/HorrorServer"
+      }
+    },
+    "StarterPlayer": {
+      "StarterPlayerScripts": {
+        "HorrorClient": {
+          "$path": "src/StarterPlayer/StarterPlayerScripts/HorrorClient.client.lua"
+        }
+      }
+    }
+  }
+}
