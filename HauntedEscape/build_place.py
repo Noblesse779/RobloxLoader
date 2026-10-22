@@ -17,8 +17,8 @@ def ref():
     return "RBX%08d" % ref_counter[0]
 
 
-def item(cls, name, children="", source=None):
-    props = '<string name="Name">%s</string>' % escape(name)
+def item(cls, name, children="", source=None, extra=""):
+    props = '<string name="Name">%s</string>' % escape(name) + extra
     if source is not None:
         assert "]]>" not in source
         props += '<ProtectedString name="Source"><![CDATA[%s]]></ProtectedString>' % source
@@ -67,10 +67,18 @@ def main():
     sps = item("StarterPlayerScripts", "StarterPlayerScripts",
                item("LocalScript", "HorrorClient", source=read(client_path)))
     sp = item("StarterPlayer", "StarterPlayer", sps)
+    # แสงแบบ Future = เงาจริงจากไฟฉาย/โคมไฟ (สคริปต์ตั้งค่านี้เองไม่ได้ ต้องฝังในไฟล์เพลส)
+    lighting = item("Lighting", "Lighting", extra=(
+        '<token name="Technology">4</token>'
+        '<bool name="GlobalShadows">true</bool>'
+        '<float name="EnvironmentDiffuseScale">1</float>'
+        '<float name="EnvironmentSpecularScale">1</float>'
+        '<float name="ClockTime">0</float>'
+    ))
     xml = ('<roblox xmlns:xmime="http://www.w3.org/2005/05/xmlmime" '
            'xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" '
            'xsi:noNamespaceSchemaLocation="http://www.roblox.com/roblox.xsd" version="4">\n'
-           + rs + sss + sp + "</roblox>\n")
+           + lighting + rs + sss + sp + "</roblox>\n")
     with open(OUT, "w", encoding="utf-8") as f:
         f.write(xml)
     print("wrote", OUT)

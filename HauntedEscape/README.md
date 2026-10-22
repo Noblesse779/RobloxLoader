@@ -75,6 +75,19 @@ rojo build -o HauntedEscape.rbxlx
 
 ---
 
+## 🖼️ ใส่รูปผี (ทำให้ตุ้งแช่น่ากลัวขึ้นมาก)
+1. ใน Studio เปิด **View → Asset Manager** → กด **Bulk Import** → เลือกรูป
+2. คลิกขวาที่รูป → **Copy Asset ID**
+3. วางใน `Config.lua` ส่วน `Config.Images`
+```lua
+Config.Images = {
+	Jumpscare = "rbxassetid://xxxxxxxx", -- หน้าผีเต็มจอ
+	GhostFace = "rbxassetid://xxxxxxxx", -- หน้าบนตัวผี 3D
+	Painting  = "rbxassetid://xxxxxxxx", -- รูปแขวนผนังล็อบบี้
+}
+```
+> ถ้าก๊อปสคริปต์ใส่เพลสเอง (ไม่ได้เปิดจากไฟล์ .rbxlx) ให้ตั้ง **Lighting → Technology = Future** เองด้วย เงาจะสวยขึ้นมาก
+
 ## 🔊 ใส่เสียง (แนะนำมาก!)
 เปิด `Config.lua` ส่วน `Config.Sounds` ใส่ Sound ID จาก Creator Store เช่น
 

@@ -117,6 +117,11 @@ local function writing(parent, pos, facing, text, width)
 	return p
 end
 
+-- พื้นแบบ Terrain (หญ้า/โคลนสวยกว่าพาร์ทมาก) ผิวบนอยู่ที่ y ของ center
+local function ground(center, sizeXZ, material)
+	workspace.Terrain:FillBlock(CFrame.new(center - Vector3.new(0, 4, 0)), Vector3.new(sizeXZ.X, 8, sizeXZ.Y), material)
+end
+
 local function deadTree(parent, pos, rng)
 	local h = rng:NextNumber(16, 30)
 	local w = rng:NextNumber(1.6, 2.8)
@@ -476,9 +481,17 @@ local function buildLobby(root)
 		for _, z in ipairs({ -10, 10, 30 }) do
 			local pos = O + Vector3.new(sd * (W / 2 - 1.2), 13, z)
 			part(f, Vector3.new(0.4, 8, 6), CFrame.new(pos), Color3.fromRGB(60, 45, 20), M.Wood)
-			part(f, Vector3.new(0.2, 7, 5), CFrame.new(pos - Vector3.new(sd * 0.25, 0, 0)), Color3.fromRGB(15, 15, 18))
-			for _, ez in ipairs({ -0.7, 0.7 }) do
-				part(f, Vector3.new(0.2, 0.4, 0.4), CFrame.new(pos + Vector3.new(-sd * 0.4, 1, ez)), Color3.fromRGB(255, 30, 30), M.Neon, { CanCollide = false })
+			local canvas = part(f, Vector3.new(5, 7, 0.2), CFrame.lookAt(pos - Vector3.new(sd * 0.25, 0, 0), pos - Vector3.new(sd * 5, 0, 0)), Color3.fromRGB(15, 15, 18))
+			local painting = Config.Images.Painting
+			if painting and painting ~= "" then
+				local decal = Instance.new("Decal")
+				decal.Face = Enum.NormalId.Front
+				decal.Texture = tonumber(painting) and ("rbxassetid://" .. painting) or painting
+				decal.Parent = canvas
+			else
+				for _, ez in ipairs({ -0.7, 0.7 }) do
+					part(f, Vector3.new(0.2, 0.4, 0.4), CFrame.new(pos + Vector3.new(-sd * 0.4, 1, ez)), Color3.fromRGB(255, 30, 30), M.Neon, { CanCollide = false })
+				end
 			end
 		end
 	end
@@ -588,8 +601,8 @@ local function buildStage1(root)
 	local rng = Random.new(11)
 	local LEN = 420
 
-	part(f, Vector3.new(150, 2, LEN + 40), CFrame.new(O + Vector3.new(0, -1, LEN / 2)), Color3.fromRGB(30, 36, 24), M.Grass)
-	part(f, Vector3.new(12, 0.2, LEN + 20), CFrame.new(O + Vector3.new(0, 0.1, LEN / 2)), Color3.fromRGB(62, 46, 33), M.Ground)
+	ground(O + Vector3.new(0, 0, LEN / 2), Vector2.new(160, LEN + 40), M.Grass)
+	ground(O + Vector3.new(0, 0, LEN / 2), Vector2.new(12, LEN + 20), M.Mud)
 	invisible(f, Vector3.new(2, 40, LEN + 40), CFrame.new(O + Vector3.new(-17, 20, LEN / 2)), true)
 	invisible(f, Vector3.new(2, 40, LEN + 40), CFrame.new(O + Vector3.new(17, 20, LEN / 2)), true)
 	invisible(f, Vector3.new(36, 40, 2), CFrame.new(O + Vector3.new(0, 20, -6)), true)
@@ -752,8 +765,8 @@ local function buildStage3(root)
 	local S = 200
 	local altar = O + Vector3.new(0, 0, 105)
 
-	part(f, Vector3.new(S + 60, 2, S + 60), CFrame.new(O + Vector3.new(0, -1, S / 2)), Color3.fromRGB(28, 36, 26), M.Grass)
-	part(f, Vector3.new(8, 0.2, S), CFrame.new(O + Vector3.new(0, 0.1, S / 2)), Color3.fromRGB(62, 50, 38), M.Ground)
+	ground(O + Vector3.new(0, 0, S / 2), Vector2.new(S + 60, S + 60), M.Grass)
+	ground(O + Vector3.new(0, 0, S / 2), Vector2.new(8, S), M.Mud)
 
 	-- กำแพงล่องหน + รั้วเหล็ก
 	invisible(f, Vector3.new(2, 50, S + 4), CFrame.new(O + Vector3.new(-S / 2 - 1, 25, S / 2)), true)
@@ -1051,8 +1064,8 @@ local function buildEnding(root)
 	local f = folder("Ending", root)
 	local rng = Random.new(55)
 
-	part(f, Vector3.new(160, 2, 160), CFrame.new(O + Vector3.new(0, -1, 60)), Color3.fromRGB(85, 150, 70), M.Grass)
-	part(f, Vector3.new(10, 0.2, 120), CFrame.new(O + Vector3.new(0, 0.1, 60)), Color3.fromRGB(170, 140, 100), M.Sand)
+	ground(O + Vector3.new(0, 0, 60), Vector2.new(160, 160), M.LeafyGrass)
+	ground(O + Vector3.new(0, 0, 60), Vector2.new(10, 120), M.Sand)
 	invisible(f, Vector3.new(2, 40, 160), CFrame.new(O + Vector3.new(-60, 20, 60)), true)
 	invisible(f, Vector3.new(2, 40, 160), CFrame.new(O + Vector3.new(60, 20, 60)), true)
 	invisible(f, Vector3.new(120, 40, 2), CFrame.new(O + Vector3.new(0, 20, -4)), true)

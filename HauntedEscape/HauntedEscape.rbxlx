@@ -1,4 +1,5 @@
 <roblox xmlns:xmime="http://www.w3.org/2005/05/xmlmime" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://www.roblox.com/roblox.xsd" version="4">
+<Item class="Lighting" referent="RBX00000015"><Properties><string name="Name">Lighting</string><token name="Technology">4</token><bool name="GlobalShadows">true</bool><float name="EnvironmentDiffuseScale">1</float><float name="EnvironmentSpecularScale">1</float><float name="ClockTime">0</float></Properties></Item>
 <Item class="ReplicatedStorage" referent="RBX00000004"><Properties><string name="Name">ReplicatedStorage</string></Properties><Item class="Folder" referent="RBX00000003"><Properties><string name="Name">HorrorShared</string></Properties><Item class="ModuleScript" referent="RBX00000001"><Properties><string name="Name">Config</string><ProtectedString name="Source"><![CDATA[--[[
 	Config : ตั้งค่าทั้งหมดของเกม HAUNTED ESCAPE
 	อยากปรับความยาก / ความเร็วผี / เสียง แก้ที่ไฟล์นี้ไฟล์เดียว
@@ -81,6 +82,15 @@ Config.Quest = {
 	Fuses = 4, -- ด่าน 4
 }
 
+-- ===== รูปภาพ =====
+-- อัปโหลดรูปใน Roblox Studio (Asset Manager) แล้วเอา ID มาใส่ เช่น "rbxassetid://1234567890" หรือแค่ตัวเลข
+-- เว้นว่างไว้ = ใช้หน้าผีที่วาดด้วยโค้ดแทน
+Config.Images = {
+	Jumpscare = "", -- รูปหน้าผีเต็มจอตอนตุ้งแช่
+	GhostFace = "", -- รูปหน้าที่แปะบนตัวผี 3D (ใช้รูปเดียวกับ Jumpscare ก็ได้)
+	Painting = "", -- รูปภาพหลอน ๆ ที่แขวนในล็อบบี้
+}
+
 -- ===== เสียง =====
 -- ใส่ Sound ID จาก Toolbox / Creator Store ได้เลย เช่น "rbxassetid://1234567890"
 -- ถ้าเว้นว่างไว้ เกมยังเล่นได้ปกติ แค่ไม่มีเสียงนั้น
@@ -100,14 +110,18 @@ Config.Sounds = {
 return Config
 ]]></ProtectedString></Properties></Item>
 <Item class="ModuleScript" referent="RBX00000002"><Properties><string name="Name">GhostModel</string><ProtectedString name="Source"><![CDATA[--[[
-	GhostModel : สร้างโมเดลผีจากพาร์ทล้วน ๆ (ไม่ต้องใช้ asset)
+	GhostModel : สร้างโมเดลผีจากพาร์ทล้วน ๆ
+	ผีผู้หญิงตัวสูงผอม คอเอียง ผมดำยาวปิดหน้า แขนยาวเกือบถึงพื้น
+	ถ้าใส่รูปไว้ที่ Config.Images.GhostFace จะเอารูปนั้นมาแปะเป็นหน้า
 	ใช้ทั้งฝั่งเซิร์ฟเวอร์ (ผีไล่) และฝั่งไคลเอนต์ (ผีตุ้งแช่)
 	ด้านหน้าของผี = LookVector ของ PrimaryPart
 ]]
 
+local Config = require(script.Parent:WaitForChild("Config"))
+
 local GhostModel = {}
 
-GhostModel.HeadHeight = 3.2 -- ระยะจากจุดกลางตัวถึงหัว (คูณ scale)
+GhostModel.HeadHeight = 3.9 -- ระยะจากจุดกลางตัวถึงหัว (คูณ scale)
 
 local function add(model, root, name, size, offset, color, material, shape)
 	local p = Instance.new("Part")
@@ -120,7 +134,7 @@ local function add(model, root, name, size, offset, color, material, shape)
 	p.CanCollide = false
 	p.CanQuery = false
 	p.CanTouch = false
-	p.CastShadow = false
+	p.CastShadow = true
 	p.TopSurface = Enum.SurfaceType.Smooth
 	p.BottomSurface = Enum.SurfaceType.Smooth
 	if shape == "Ellipsoid" then
@@ -134,11 +148,23 @@ local function add(model, root, name, size, offset, color, material, shape)
 	return p
 end
 
+local function imageId(id)
+	if id == nil or id == "" then
+		return nil
+	end
+	if tonumber(id) then
+		return "rbxassetid://" .. id
+	end
+	return id
+end
+
 function GhostModel.create(opts)
 	opts = opts or {}
 	local s = opts.scale or 1
-	local skin = opts.color or Color3.fromRGB(225, 225, 232)
-	local black = Color3.fromRGB(8, 8, 10)
+	local skin = opts.color or Color3.fromRGB(196, 198, 200)
+	local dress = Color3.fromRGB(170, 165, 150)
+	local black = Color3.fromRGB(5, 5, 6)
+	local dirt = Color3.fromRGB(90, 80, 70)
 
 	local model = Instance.new("Model")
 	model.Name = opts.name or "Ghost"
@@ -155,52 +181,73 @@ function GhostModel.create(opts)
 	root.Parent = model
 	model.PrimaryPart = root
 
-	-- ตัว (ชุดขาวยาว)
-	local body = add(model, root, "Body", Vector3.new(3, 5.5, 2.6) * s, CFrame.new(0, -0.4 * s, 0), skin, nil, "Ellipsoid")
-	body.Transparency = 0.15
-
-	-- ชายผ้าขาด ๆ ด้านล่าง
-	for i = -1, 1 do
-		add(model, root, "Rag", Vector3.new(0.7, 2.2, 0.4) * s,
-			CFrame.new(i * 0.9 * s, -2.9 * s, -0.4 * s) * CFrame.Angles(0, 0, math.rad(i * 12)), skin).Transparency = 0.3
+	-- ชุดขาวเก่า ๆ ยาวลากพื้น
+	add(model, root, "Dress", Vector3.new(2.4, 6.6, 1.8) * s, CFrame.new(0, -0.6 * s, 0.15 * s), dress, Enum.Material.Fabric, "Ellipsoid")
+	for i = -2, 2 do
+		local strip = add(model, root, "Rag", Vector3.new(0.45, 2.8 + math.abs(i) * 0.3, 0.12) * s,
+			CFrame.new(i * 0.42 * s, -3.6 * s, -0.55 * s) * CFrame.Angles(math.rad(8), 0, math.rad(i * 5)), dirt, Enum.Material.Fabric)
+		strip.Transparency = 0.2
 	end
 
-	-- หัว
+	-- ไหล่ห่อ ตัวโน้มไปข้างหน้า
+	add(model, root, "Shoulders", Vector3.new(2.3, 0.7, 1.1) * s, CFrame.new(0, 2.5 * s, -0.25 * s) * CFrame.Angles(math.rad(-15), 0, 0), dress, Enum.Material.Fabric)
+	add(model, root, "Neck", Vector3.new(0.45, 1.1, 0.45) * s, CFrame.new(0.1 * s, 3.05 * s, -0.5 * s) * CFrame.Angles(math.rad(-25), 0, math.rad(-12)), skin)
+
+	-- หัวเอียงผิดรูป
 	local h = GhostModel.HeadHeight * s
-	add(model, root, "Head", Vector3.new(2.3, 2.6, 2.3) * s, CFrame.new(0, h, 0), skin, nil, "Ellipsoid")
+	local headCF = CFrame.new(0.25 * s, h, -0.75 * s) * CFrame.Angles(math.rad(12), 0, math.rad(-22))
+	add(model, root, "Head", Vector3.new(1.55, 1.95, 1.6) * s, headCF, skin, Enum.Material.SmoothPlastic, "Ellipsoid")
 
-	-- ตาดำโบ๋ + ลูกตาแดง
-	for _, x in ipairs({ -0.45, 0.45 }) do
-		add(model, root, "Eye", Vector3.new(0.65, 0.8, 0.4) * s, CFrame.new(x * s, h + 0.25 * s, -1.0 * s), black, nil, "Ellipsoid")
-		add(model, root, "Pupil", Vector3.new(0.22, 0.22, 0.22) * s, CFrame.new(x * s, h + 0.25 * s, -1.2 * s),
-			Color3.fromRGB(255, 20, 20), Enum.Material.Neon, Enum.PartType.Ball)
-		-- คราบเลือดไหลจากตา
-		add(model, root, "Blood", Vector3.new(0.12, 0.9, 0.1) * s, CFrame.new(x * s, h - 0.4 * s, -1.08 * s),
-			Color3.fromRGB(120, 0, 0))
+	local face = imageId(Config.Images and Config.Images.GhostFace)
+	if face then
+		local plate = add(model, root, "FacePlate", Vector3.new(1.45, 1.8, 0.05) * s, headCF * CFrame.new(0, -0.05 * s, -0.78 * s), skin)
+		plate.Transparency = 1
+		local decal = Instance.new("Decal")
+		decal.Face = Enum.NormalId.Front
+		decal.Texture = face
+		decal.Parent = plate
+	else
+		-- เบ้าตาดำ + ตาเรืองแสงขาว
+		for _, x in ipairs({ -0.33, 0.33 }) do
+			add(model, root, "Eye", Vector3.new(0.48, 0.42, 0.3) * s, headCF * CFrame.new(x * s, 0.18 * s, -0.68 * s), black, nil, "Ellipsoid")
+			add(model, root, "Pupil", Vector3.new(0.12, 0.12, 0.12) * s, headCF * CFrame.new(x * s, 0.18 * s, -0.82 * s),
+				Color3.fromRGB(255, 255, 230), Enum.Material.Neon, Enum.PartType.Ball)
+		end
+		-- ปากฉีกกว้างแนวตั้ง
+		add(model, root, "Mouth", Vector3.new(0.42, 0.85, 0.3) * s, headCF * CFrame.new(0, -0.5 * s, -0.68 * s), black, nil, "Ellipsoid")
 	end
 
-	-- ปากอ้ากว้าง
-	add(model, root, "Mouth", Vector3.new(0.55, 0.9, 0.4) * s, CFrame.new(0, h - 0.6 * s, -0.98 * s), black, nil, "Ellipsoid")
-
-	-- ผมดำยาว
-	add(model, root, "HairBack", Vector3.new(2.5, 4.5, 0.6) * s, CFrame.new(0, h - 1.2 * s, 0.85 * s), black)
-	add(model, root, "HairTop", Vector3.new(2.5, 0.8, 2.4) * s, CFrame.new(0, h + 1.05 * s, 0.05 * s), black)
-	for _, x in ipairs({ -1.15, 1.15 }) do
-		add(model, root, "HairSide", Vector3.new(0.45, 4.2, 1.8) * s, CFrame.new(x * s, h - 1.0 * s, -0.1 * s), black)
+	-- ผมดำยาวปิดหน้าครึ่งนึง
+	add(model, root, "HairTop", Vector3.new(1.75, 0.7, 1.75) * s, headCF * CFrame.new(0, 0.75 * s, 0.05 * s), black, Enum.Material.Fabric, "Ellipsoid")
+	add(model, root, "HairBack", Vector3.new(1.8, 5.2, 0.5) * s, headCF * CFrame.new(0, -2.0 * s, 0.6 * s), black, Enum.Material.Fabric)
+	local strands = { -0.75, -0.55, -0.35, 0.45, 0.65, 0.8 }
+	for k, x in ipairs(strands) do
+		local len = (3.2 + (k % 3) * 0.6) * s
+		add(model, root, "Hair", Vector3.new(0.18 * s, len, 0.12 * s),
+			headCF * CFrame.new(x * s, 0.55 * s - len / 2, -0.62 * s) * CFrame.Angles(math.rad(4), 0, math.rad((x > 0 and -1 or 1) * 3)),
+			black, Enum.Material.Fabric)
+	end
+	for _, x in ipairs({ -0.85, 0.85 }) do
+		add(model, root, "HairSide", Vector3.new(0.3, 4.4, 1.4) * s, headCF * CFrame.new(x * s, -1.6 * s, 0), black, Enum.Material.Fabric)
 	end
 
-	-- แขนยื่นมาข้างหน้า
-	for _, x in ipairs({ -1.5, 1.5 }) do
-		add(model, root, "Arm", Vector3.new(0.45, 0.45, 3.2) * s,
-			CFrame.new(x * s, 1.2 * s, -1.5 * s) * CFrame.Angles(math.rad(-10), math.rad(-x * 4), 0), skin)
-		add(model, root, "Hand", Vector3.new(0.6, 0.25, 0.9) * s, CFrame.new(x * s, 1.0 * s, -3.2 * s), skin)
+	-- แขนยาวผิดปกติ ห้อยเกือบถึงพื้น + นิ้วยาว
+	for _, side in ipairs({ -1, 1 }) do
+		local shoulder = CFrame.new(side * 1.15 * s, 2.4 * s, -0.4 * s)
+		local arm = shoulder * CFrame.Angles(math.rad(-18), 0, math.rad(side * 6)) * CFrame.new(0, -2.9 * s, 0)
+		add(model, root, "Arm", Vector3.new(0.32, 5.8, 0.32) * s, arm, skin)
+		local hand = arm * CFrame.new(0, -3.0 * s, 0)
+		add(model, root, "Hand", Vector3.new(0.4, 0.5, 0.2) * s, hand, skin)
+		for f = -1, 1 do
+			add(model, root, "Finger", Vector3.new(0.08, 1.1, 0.08) * s, hand * CFrame.new(f * 0.13 * s, -0.75 * s, 0) * CFrame.Angles(math.rad(10), 0, math.rad(f * 6)), skin)
+		end
 	end
 
-	-- แสงแดงจาง ๆ รอบตัว
+	-- แสงสลัวรอบตัว
 	local glow = Instance.new("PointLight")
-	glow.Color = Color3.fromRGB(255, 60, 60)
-	glow.Range = 10 * s
-	glow.Brightness = 0.8
+	glow.Color = Color3.fromRGB(180, 200, 255)
+	glow.Range = 9 * s
+	glow.Brightness = 0.6
 	glow.Shadows = false
 	glow.Parent = root
 
@@ -497,7 +544,15 @@ local function step(g, dt)
 
 	g.bobT += dt
 	local p = g.pos + Vector3.new(0, math.sin(g.bobT * 2.5) * 0.35 * g.scale, 0)
-	g.model:PivotTo(CFrame.lookAt(p, p + g.look))
+	local cf = CFrame.lookAt(p, p + g.look)
+	-- กระตุกแบบผิดธรรมชาติเป็นระยะ
+	if g.glitchUntil and os.clock() < g.glitchUntil then
+		cf *= g.glitchCF
+	elseif math.random() < 0.015 then
+		g.glitchUntil = os.clock() + 0.12
+		g.glitchCF = CFrame.Angles(math.rad(math.random(-15, 15)), math.rad(math.random(-40, 40)), math.rad(math.random(-25, 25)))
+	end
+	g.model:PivotTo(cf)
 
 	-- โจมตี
 	if player and root then
@@ -846,6 +901,11 @@ local function writing(parent, pos, facing, text, width)
 	t.Rotation = math.random(-6, 6)
 	t.Parent = sg
 	return p
+end
+
+-- พื้นแบบ Terrain (หญ้า/โคลนสวยกว่าพาร์ทมาก) ผิวบนอยู่ที่ y ของ center
+local function ground(center, sizeXZ, material)
+	workspace.Terrain:FillBlock(CFrame.new(center - Vector3.new(0, 4, 0)), Vector3.new(sizeXZ.X, 8, sizeXZ.Y), material)
 end
 
 local function deadTree(parent, pos, rng)
@@ -1207,9 +1267,17 @@ local function buildLobby(root)
 		for _, z in ipairs({ -10, 10, 30 }) do
 			local pos = O + Vector3.new(sd * (W / 2 - 1.2), 13, z)
 			part(f, Vector3.new(0.4, 8, 6), CFrame.new(pos), Color3.fromRGB(60, 45, 20), M.Wood)
-			part(f, Vector3.new(0.2, 7, 5), CFrame.new(pos - Vector3.new(sd * 0.25, 0, 0)), Color3.fromRGB(15, 15, 18))
-			for _, ez in ipairs({ -0.7, 0.7 }) do
-				part(f, Vector3.new(0.2, 0.4, 0.4), CFrame.new(pos + Vector3.new(-sd * 0.4, 1, ez)), Color3.fromRGB(255, 30, 30), M.Neon, { CanCollide = false })
+			local canvas = part(f, Vector3.new(5, 7, 0.2), CFrame.lookAt(pos - Vector3.new(sd * 0.25, 0, 0), pos - Vector3.new(sd * 5, 0, 0)), Color3.fromRGB(15, 15, 18))
+			local painting = Config.Images.Painting
+			if painting and painting ~= "" then
+				local decal = Instance.new("Decal")
+				decal.Face = Enum.NormalId.Front
+				decal.Texture = tonumber(painting) and ("rbxassetid://" .. painting) or painting
+				decal.Parent = canvas
+			else
+				for _, ez in ipairs({ -0.7, 0.7 }) do
+					part(f, Vector3.new(0.2, 0.4, 0.4), CFrame.new(pos + Vector3.new(-sd * 0.4, 1, ez)), Color3.fromRGB(255, 30, 30), M.Neon, { CanCollide = false })
+				end
 			end
 		end
 	end
@@ -1319,8 +1387,8 @@ local function buildStage1(root)
 	local rng = Random.new(11)
 	local LEN = 420
 
-	part(f, Vector3.new(150, 2, LEN + 40), CFrame.new(O + Vector3.new(0, -1, LEN / 2)), Color3.fromRGB(30, 36, 24), M.Grass)
-	part(f, Vector3.new(12, 0.2, LEN + 20), CFrame.new(O + Vector3.new(0, 0.1, LEN / 2)), Color3.fromRGB(62, 46, 33), M.Ground)
+	ground(O + Vector3.new(0, 0, LEN / 2), Vector2.new(160, LEN + 40), M.Grass)
+	ground(O + Vector3.new(0, 0, LEN / 2), Vector2.new(12, LEN + 20), M.Mud)
 	invisible(f, Vector3.new(2, 40, LEN + 40), CFrame.new(O + Vector3.new(-17, 20, LEN / 2)), true)
 	invisible(f, Vector3.new(2, 40, LEN + 40), CFrame.new(O + Vector3.new(17, 20, LEN / 2)), true)
 	invisible(f, Vector3.new(36, 40, 2), CFrame.new(O + Vector3.new(0, 20, -6)), true)
@@ -1483,8 +1551,8 @@ local function buildStage3(root)
 	local S = 200
 	local altar = O + Vector3.new(0, 0, 105)
 
-	part(f, Vector3.new(S + 60, 2, S + 60), CFrame.new(O + Vector3.new(0, -1, S / 2)), Color3.fromRGB(28, 36, 26), M.Grass)
-	part(f, Vector3.new(8, 0.2, S), CFrame.new(O + Vector3.new(0, 0.1, S / 2)), Color3.fromRGB(62, 50, 38), M.Ground)
+	ground(O + Vector3.new(0, 0, S / 2), Vector2.new(S + 60, S + 60), M.Grass)
+	ground(O + Vector3.new(0, 0, S / 2), Vector2.new(8, S), M.Mud)
 
 	-- กำแพงล่องหน + รั้วเหล็ก
 	invisible(f, Vector3.new(2, 50, S + 4), CFrame.new(O + Vector3.new(-S / 2 - 1, 25, S / 2)), true)
@@ -1782,8 +1850,8 @@ local function buildEnding(root)
 	local f = folder("Ending", root)
 	local rng = Random.new(55)
 
-	part(f, Vector3.new(160, 2, 160), CFrame.new(O + Vector3.new(0, -1, 60)), Color3.fromRGB(85, 150, 70), M.Grass)
-	part(f, Vector3.new(10, 0.2, 120), CFrame.new(O + Vector3.new(0, 0.1, 60)), Color3.fromRGB(170, 140, 100), M.Sand)
+	ground(O + Vector3.new(0, 0, 60), Vector2.new(160, 160), M.LeafyGrass)
+	ground(O + Vector3.new(0, 0, 60), Vector2.new(10, 120), M.Sand)
 	invisible(f, Vector3.new(2, 40, 160), CFrame.new(O + Vector3.new(-60, 20, 60)), true)
 	invisible(f, Vector3.new(2, 40, 160), CFrame.new(O + Vector3.new(60, 20, 60)), true)
 	invisible(f, Vector3.new(120, 40, 2), CFrame.new(O + Vector3.new(0, 20, -4)), true)
@@ -2686,6 +2754,7 @@ local Lighting = game:GetService("Lighting")
 local SoundService = game:GetService("SoundService")
 local ContextActionService = game:GetService("ContextActionService")
 local CollectionService = game:GetService("CollectionService")
+local ContentProvider = game:GetService("ContentProvider")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local player = Players.LocalPlayer
@@ -2967,6 +3036,33 @@ facePart({ Position = UDim2.fromScale(0.5, 0.02), Size = UDim2.fromScale(1.15, 0
 facePart({ Position = UDim2.fromScale(0.02, 0.55), Size = UDim2.fromScale(0.2, 1.1), BackgroundColor3 = Color3.new(0, 0, 0), ZIndex = 29 })
 facePart({ Position = UDim2.fromScale(0.98, 0.55), Size = UDim2.fromScale(0.2, 1.1), BackgroundColor3 = Color3.new(0, 0, 0), ZIndex = 29 })
 
+-- รูปตุ้งแช่ (ถ้าใส่ไว้ใน Config.Images.Jumpscare จะใช้รูปนี้แทนหน้าที่วาดด้วยโค้ด)
+local function imageId(id)
+	if id == nil or id == "" then
+		return nil
+	end
+	return tonumber(id) and ("rbxassetid://" .. id) or id
+end
+local scareImageId = imageId(Config.Images and Config.Images.Jumpscare)
+local scareImage = make("ImageLabel", {
+	AnchorPoint = Vector2.new(0.5, 0.5),
+	Position = UDim2.fromScale(0.5, 0.5),
+	Size = UDim2.fromScale(1, 1),
+	BackgroundTransparency = 1,
+	Image = scareImageId or "",
+	ScaleType = Enum.ScaleType.Crop,
+	Visible = scareImageId ~= nil,
+	ZIndex = 30,
+}, scareFrame)
+if scareImageId then
+	face.Visible = false
+	task.spawn(function()
+		pcall(function()
+			ContentProvider:PreloadAsync({ scareImage })
+		end)
+	end)
+end
+
 -- หน้าจบ
 local endFrame = make("Frame", {
 	AnchorPoint = Vector2.new(0.5, 0.5),
@@ -3054,6 +3150,9 @@ local function showFace(duration)
 	scareFrame.Visible = true
 	face.Size = UDim2.fromScale(0.25, 0.25)
 	TweenService:Create(face, TweenInfo.new(0.12, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Size = UDim2.fromScale(1.1, 1.1) }):Play()
+	scareImage.Size = UDim2.fromScale(0.4, 0.4)
+	scareImage.Rotation = math.random(-8, 8)
+	TweenService:Create(scareImage, TweenInfo.new(0.1, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Size = UDim2.fromScale(1.25, 1.25) }):Play()
 	redFlash(0.7)
 	shake(duration, 7)
 	task.delay(duration, function()
@@ -3225,6 +3324,64 @@ end)
 
 local atmosphere = Lighting:FindFirstChildOfClass("Atmosphere") or make("Atmosphere", {}, Lighting)
 local cc = make("ColorCorrectionEffect", { Name = "HorrorCC" }, Lighting)
+local bloom = make("BloomEffect", { Name = "HorrorBloom", Intensity = 0.7, Size = 28, Threshold = 1.4 }, Lighting)
+local dof = make("DepthOfFieldEffect", {
+	Name = "HorrorDOF",
+	FarIntensity = 0.35,
+	FocusDistance = 12,
+	InFocusRadius = 28,
+	NearIntensity = 0,
+}, Lighting)
+
+-- หมอกลอยต่ำ + ฝุ่นรอบตัวผู้เล่น (เห็นแค่เครื่องเรา)
+local fxPart = make("Part", {
+	Name = "HorrorFX",
+	Size = Vector3.new(60, 1, 60),
+	Transparency = 1,
+	Anchored = true,
+	CanCollide = false,
+	CanQuery = false,
+	CanTouch = false,
+}, workspace)
+local mist = make("ParticleEmitter", {
+	Texture = "rbxasset://textures/particles/smoke_main.dds",
+	Color = ColorSequence.new(Color3.fromRGB(160, 165, 175)),
+	LightInfluence = 1,
+	Transparency = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 1),
+		NumberSequenceKeypoint.new(0.4, 0.86),
+		NumberSequenceKeypoint.new(1, 1),
+	}),
+	Size = NumberSequence.new(12, 20),
+	Lifetime = NumberRange.new(8, 12),
+	Rate = 6,
+	Speed = NumberRange.new(0.5, 1.5),
+	SpreadAngle = Vector2.new(180, 0),
+	Rotation = NumberRange.new(0, 360),
+	RotSpeed = NumberRange.new(-8, 8),
+	EmissionDirection = Enum.NormalId.Top,
+	Enabled = false,
+}, fxPart)
+local dust = make("ParticleEmitter", {
+	Color = ColorSequence.new(Color3.fromRGB(230, 225, 210)),
+	LightInfluence = 1,
+	LightEmission = 0.2,
+	Transparency = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 1),
+		NumberSequenceKeypoint.new(0.5, 0.5),
+		NumberSequenceKeypoint.new(1, 1),
+	}),
+	Size = NumberSequence.new(0.08),
+	Lifetime = NumberRange.new(6, 10),
+	Rate = 25,
+	Speed = NumberRange.new(0.2, 0.6),
+	SpreadAngle = Vector2.new(180, 180),
+	Enabled = false,
+}, fxPart)
+RunService.RenderStepped:Connect(function()
+	local camPos = camera.CFrame.Position
+	fxPart.CFrame = CFrame.new(camPos.X, camPos.Y - 4, camPos.Z)
+end)
 
 local PRESETS = {
 	[0] = { Clock = 0, Brightness = 1, Ambient = Color3.fromRGB(60, 48, 60), Outdoor = Color3.fromRGB(60, 48, 60), Fog = Color3.fromRGB(25, 15, 25), Density = 0.3, Sat = -0.1, Contrast = 0.05, Tint = Color3.fromRGB(255, 235, 235) },
@@ -3253,6 +3410,12 @@ local function applyLighting(stage)
 	cc.Saturation = p.Sat
 	cc.Contrast = p.Contrast
 	cc.TintColor = p.Tint
+	local inGame = stage >= 1 and stage <= 4
+	mist.Enabled = stage == 1 or stage == 3
+	dust.Enabled = stage ~= 5
+	bloom.Intensity = stage == 5 and 0.4 or 0.8
+	dof.FarIntensity = inGame and 0.4 or 0.15
+	dof.InFocusRadius = (stage == 2 or stage == 4) and 20 or 35
 end
 
 -- ไฟกะพริบ (ทำฝั่งไคลเอนต์เพื่อไม่ให้หนักเน็ต)

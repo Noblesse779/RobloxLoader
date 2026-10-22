@@ -11,6 +11,7 @@ local Lighting = game:GetService("Lighting")
 local SoundService = game:GetService("SoundService")
 local ContextActionService = game:GetService("ContextActionService")
 local CollectionService = game:GetService("CollectionService")
+local ContentProvider = game:GetService("ContentProvider")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local player = Players.LocalPlayer
@@ -292,6 +293,33 @@ facePart({ Position = UDim2.fromScale(0.5, 0.02), Size = UDim2.fromScale(1.15, 0
 facePart({ Position = UDim2.fromScale(0.02, 0.55), Size = UDim2.fromScale(0.2, 1.1), BackgroundColor3 = Color3.new(0, 0, 0), ZIndex = 29 })
 facePart({ Position = UDim2.fromScale(0.98, 0.55), Size = UDim2.fromScale(0.2, 1.1), BackgroundColor3 = Color3.new(0, 0, 0), ZIndex = 29 })
 
+-- รูปตุ้งแช่ (ถ้าใส่ไว้ใน Config.Images.Jumpscare จะใช้รูปนี้แทนหน้าที่วาดด้วยโค้ด)
+local function imageId(id)
+	if id == nil or id == "" then
+		return nil
+	end
+	return tonumber(id) and ("rbxassetid://" .. id) or id
+end
+local scareImageId = imageId(Config.Images and Config.Images.Jumpscare)
+local scareImage = make("ImageLabel", {
+	AnchorPoint = Vector2.new(0.5, 0.5),
+	Position = UDim2.fromScale(0.5, 0.5),
+	Size = UDim2.fromScale(1, 1),
+	BackgroundTransparency = 1,
+	Image = scareImageId or "",
+	ScaleType = Enum.ScaleType.Crop,
+	Visible = scareImageId ~= nil,
+	ZIndex = 30,
+}, scareFrame)
+if scareImageId then
+	face.Visible = false
+	task.spawn(function()
+		pcall(function()
+			ContentProvider:PreloadAsync({ scareImage })
+		end)
+	end)
+end
+
 -- หน้าจบ
 local endFrame = make("Frame", {
 	AnchorPoint = Vector2.new(0.5, 0.5),
@@ -379,6 +407,9 @@ local function showFace(duration)
 	scareFrame.Visible = true
 	face.Size = UDim2.fromScale(0.25, 0.25)
 	TweenService:Create(face, TweenInfo.new(0.12, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Size = UDim2.fromScale(1.1, 1.1) }):Play()
+	scareImage.Size = UDim2.fromScale(0.4, 0.4)
+	scareImage.Rotation = math.random(-8, 8)
+	TweenService:Create(scareImage, TweenInfo.new(0.1, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Size = UDim2.fromScale(1.25, 1.25) }):Play()
 	redFlash(0.7)
 	shake(duration, 7)
 	task.delay(duration, function()
@@ -550,6 +581,64 @@ end)
 
 local atmosphere = Lighting:FindFirstChildOfClass("Atmosphere") or make("Atmosphere", {}, Lighting)
 local cc = make("ColorCorrectionEffect", { Name = "HorrorCC" }, Lighting)
+local bloom = make("BloomEffect", { Name = "HorrorBloom", Intensity = 0.7, Size = 28, Threshold = 1.4 }, Lighting)
+local dof = make("DepthOfFieldEffect", {
+	Name = "HorrorDOF",
+	FarIntensity = 0.35,
+	FocusDistance = 12,
+	InFocusRadius = 28,
+	NearIntensity = 0,
+}, Lighting)
+
+-- หมอกลอยต่ำ + ฝุ่นรอบตัวผู้เล่น (เห็นแค่เครื่องเรา)
+local fxPart = make("Part", {
+	Name = "HorrorFX",
+	Size = Vector3.new(60, 1, 60),
+	Transparency = 1,
+	Anchored = true,
+	CanCollide = false,
+	CanQuery = false,
+	CanTouch = false,
+}, workspace)
+local mist = make("ParticleEmitter", {
+	Texture = "rbxasset://textures/particles/smoke_main.dds",
+	Color = ColorSequence.new(Color3.fromRGB(160, 165, 175)),
+	LightInfluence = 1,
+	Transparency = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 1),
+		NumberSequenceKeypoint.new(0.4, 0.86),
+		NumberSequenceKeypoint.new(1, 1),
+	}),
+	Size = NumberSequence.new(12, 20),
+	Lifetime = NumberRange.new(8, 12),
+	Rate = 6,
+	Speed = NumberRange.new(0.5, 1.5),
+	SpreadAngle = Vector2.new(180, 0),
+	Rotation = NumberRange.new(0, 360),
+	RotSpeed = NumberRange.new(-8, 8),
+	EmissionDirection = Enum.NormalId.Top,
+	Enabled = false,
+}, fxPart)
+local dust = make("ParticleEmitter", {
+	Color = ColorSequence.new(Color3.fromRGB(230, 225, 210)),
+	LightInfluence = 1,
+	LightEmission = 0.2,
+	Transparency = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 1),
+		NumberSequenceKeypoint.new(0.5, 0.5),
+		NumberSequenceKeypoint.new(1, 1),
+	}),
+	Size = NumberSequence.new(0.08),
+	Lifetime = NumberRange.new(6, 10),
+	Rate = 25,
+	Speed = NumberRange.new(0.2, 0.6),
+	SpreadAngle = Vector2.new(180, 180),
+	Enabled = false,
+}, fxPart)
+RunService.RenderStepped:Connect(function()
+	local camPos = camera.CFrame.Position
+	fxPart.CFrame = CFrame.new(camPos.X, camPos.Y - 4, camPos.Z)
+end)
 
 local PRESETS = {
 	[0] = { Clock = 0, Brightness = 1, Ambient = Color3.fromRGB(60, 48, 60), Outdoor = Color3.fromRGB(60, 48, 60), Fog = Color3.fromRGB(25, 15, 25), Density = 0.3, Sat = -0.1, Contrast = 0.05, Tint = Color3.fromRGB(255, 235, 235) },
@@ -578,6 +667,12 @@ local function applyLighting(stage)
 	cc.Saturation = p.Sat
 	cc.Contrast = p.Contrast
 	cc.TintColor = p.Tint
+	local inGame = stage >= 1 and stage <= 4
+	mist.Enabled = stage == 1 or stage == 3
+	dust.Enabled = stage ~= 5
+	bloom.Intensity = stage == 5 and 0.4 or 0.8
+	dof.FarIntensity = inGame and 0.4 or 0.15
+	dof.InFocusRadius = (stage == 2 or stage == 4) and 20 or 35
 end
 
 -- ไฟกะพริบ (ทำฝั่งไคลเอนต์เพื่อไม่ให้หนักเน็ต)

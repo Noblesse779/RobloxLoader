@@ -198,7 +198,15 @@ local function step(g, dt)
 
 	g.bobT += dt
 	local p = g.pos + Vector3.new(0, math.sin(g.bobT * 2.5) * 0.35 * g.scale, 0)
-	g.model:PivotTo(CFrame.lookAt(p, p + g.look))
+	local cf = CFrame.lookAt(p, p + g.look)
+	-- กระตุกแบบผิดธรรมชาติเป็นระยะ
+	if g.glitchUntil and os.clock() < g.glitchUntil then
+		cf *= g.glitchCF
+	elseif math.random() < 0.015 then
+		g.glitchUntil = os.clock() + 0.12
+		g.glitchCF = CFrame.Angles(math.rad(math.random(-15, 15)), math.rad(math.random(-40, 40)), math.rad(math.random(-25, 25)))
+	end
+	g.model:PivotTo(cf)
 
 	-- โจมตี
 	if player and root then
