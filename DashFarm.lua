@@ -18,8 +18,7 @@ end
 
 local settings = {
     autoDash = false,
-    autoTrain = false,   -- ถือของช่อง 1 แล้วคลิกเพิ่มพลังรัวๆ
-    trainDelay = 0.15,   -- คลิกทุกกี่วิ
+    autoTrain = false,   -- ถือของช่อง 1 ไว้ตลอด (ถือแล้วชาร์จพลังเอง ไม่ต้องคลิก)
     clickX2 = true,      -- เจอปุ่ม x2 เด้งบนจอ กดให้ (ตอนเปิดฝึกพลังหรือชาร์จอัตโนมัติ)
     autoPlace = false,
     antiAfk = false,
@@ -737,7 +736,7 @@ task.spawn(function()
 end)
 
 ---------------------------------------------------------------- ฝึกพลัง (ช่อง 1) + ปุ่ม x2
--- ช่อง 1 ในแถบด้านล่างคือของฝึกพลัง (ออร่าสีฟ้า) ถือแล้วคลิก ได้ +10 พลังต่อครั้ง
+-- ช่อง 1 ในแถบด้านล่างคือของฝึกพลัง (ออร่าสีฟ้า) แค่ถือไว้ก็ชาร์จพลังเอง (+10 เป็นระยะ)
 -- บางครั้งมีวงกลม "x2" เด้งกลางจอ กดแล้วได้พลังคูณ 2
 
 -- ของฝึกพลัง = Tool ในกระเป๋าที่ไม่ใช่ตัวละคร
@@ -795,7 +794,7 @@ task.spawn(function()
     end
 end)
 
-local trainClicks = 0
+-- ถือของช่อง 1 ไว้ตลอด ถ้าหลุดมือ (ตาย / บิน / วางตัวละคร) หยิบกลับมาให้
 task.spawn(function()
     while alive() do
         if settings.autoTrain and busy == 0 then
@@ -804,21 +803,15 @@ task.spawn(function()
             if tool and hum then
                 if tool.Parent ~= LocalPlayer.Character then
                     hum:EquipTool(tool)
-                    task.wait(0.2)
                 end
-                tool:Activate() -- เหมือนคลิกตอนถือของ
-                trainClicks += 1
-                if settings.autoDash == false then
-                    setStatus(("ฝึกพลัง (คลิกไป %d ครั้ง)"):format(trainClicks))
+                if not settings.autoDash then
+                    setStatus("ถือของช่อง 1 ชาร์จพลังอยู่")
                 end
             elseif not tool then
                 setStatus("หาของฝึกพลัง (ช่อง 1) ไม่เจอ")
-                task.wait(1)
             end
-            task.wait(math.max(0.05, settings.trainDelay))
-        else
-            task.wait(0.3)
         end
+        task.wait(0.5)
     end
 end)
 
@@ -920,17 +913,10 @@ local Tabs = {
 -- หลัก
 local trainSection = Tabs.main:AddSection("ฝึกพลัง (ของช่อง 1)")
 trainSection:AddToggle("DFTrain", {
-    Title = "ฝึกพลังอัตโนมัติ",
-    Description = "ถือของช่อง 1 แล้วคลิกรัวๆ (หยุดเองตอนบิน/วางตัวละคร)",
+    Title = "ถือของช่อง 1 ชาร์จพลังอัตโนมัติ",
+    Description = "ถือไว้ตลอด หลุดมือหยิบให้ใหม่ (พักเองตอนบิน/วางตัวละคร)",
     Default = false,
 }):OnChanged(function(v) settings.autoTrain = v end)
-trainSection:AddInput("DFTrainDelay", {
-    Title = "คลิกทุก (วินาที)",
-    Default = tostring(settings.trainDelay),
-    Numeric = true,
-    Finished = true,
-    Callback = function(v) settings.trainDelay = tonumber(v) or settings.trainDelay end,
-})
 trainSection:AddToggle("DFX2", {
     Title = "กดปุ่ม x2 ให้อัตโนมัติ",
     Description = "วงกลม x2 เด้งกลางจอตอนฝึก/ชาร์จ จะกดให้ทันที",
@@ -1107,8 +1093,8 @@ Window:SelectTab(1)
 task.spawn(function()
     while alive() and not Fluent.Unloaded do
         pcall(function()
-            statusPara:SetDesc(("%s\nบินแล้ว %d รอบ  •  วางตัวละครแล้ว %d ตัว  •  รีเบิร์ธ %d ครั้ง  •  เจอตัวไล่ %d ครั้ง\nฝึกพลังคลิกไป %d ครั้ง  •  กด x2 ไป %d ครั้ง\nรีเบิร์ธ: %s")
-                :format(status, dashCount, placedCount, rebirthCount, chaseEscapes, trainClicks, x2Count, rebirthInfo))
+            statusPara:SetDesc(("%s\nบินแล้ว %d รอบ  •  วางตัวละครแล้ว %d ตัว  •  รีเบิร์ธ %d ครั้ง  •  เจอตัวไล่ %d ครั้ง\nกด x2 ไป %d ครั้ง\nรีเบิร์ธ: %s")
+                :format(status, dashCount, placedCount, rebirthCount, chaseEscapes, x2Count, rebirthInfo))
         end)
         local lines = {}
         for i, t in ipairs(getCharacterTools()) do
