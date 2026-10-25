@@ -871,6 +871,39 @@ end)
         function(v) settings.jumpOn = v end, "jumpOn")
     addNumber(moveSection, "แรงกระโดด", settings.jump, function(n) settings.jump = n end, "jump")
 
+    ---- ฟรีแคม
+    -- ปุ่มข้างเมาส์ (Mouse4/Mouse5) Roblox ไม่ส่งมาให้สคริปต์ เลยใช้ปุ่มคีย์บอร์ดหรือปุ่มกลางเมาส์แทน
+    local FREECAM_KEYS = { "P", "V", "C", "X", "Z", "G", "B", "N", "M", "ปุ่มกลางเมาส์" }
+    uiHooks.freecamToggled = function() end -- กำหนดจริงในส่วนฟรีแคม
+    local freecamSection = Tabs.char:AddSection("ฟรีแคม")
+    local freecamToggle = freecamSection:AddToggle("AFFreecam", {
+        Title = "ฟรีแคม",
+        Description = "WASD เลื่อนกล้อง • Q/E ลง/ขึ้น • คลิกขวาค้างหมุนกล้อง • Shift เร็วขึ้น (ตัวละครอยู่ที่เดิม ตกปลาต่อได้)",
+        Default = false,
+    })
+    freecamToggle:OnChanged(function(v)
+        uiHooks.freecamToggled(v)
+    end)
+    local freecamKeyName = "P"
+    freecamSection:AddDropdown("AFFreecamKey", {
+        Title = "ปุ่มเปิด/ปิดฟรีแคม",
+        Values = FREECAM_KEYS,
+        Default = 1,
+    }):OnChanged(function(v)
+        freecamKeyName = v
+    end)
+    local freecamSpeed = 1
+    freecamSection:AddInput("AFFreecamSpeed", {
+        Title = "ความเร็วกล้อง",
+        Default = "1",
+        Numeric = true,
+        Finished = true,
+        Callback = function(text)
+            local n = tonumber(text)
+            if n and n > 0 then freecamSpeed = n end
+        end,
+    })
+
     ---- หน้า แจ้งเตือน
     local rareSection = Tabs.alert:AddSection("ปลาหายาก / ปลาชนิดใหม่")
     addToggle(rareSection, "เตือนเมื่อได้ปลาหายาก", "ระดับที่ไม่ใช่ \"ทั่วไป\" หรือปลาชนิดใหม่",
@@ -1994,4 +2027,91 @@ end)
             notify("เข้าเกมใหม่แล้ว", "โหลดตั้งค่าก่อนหลุด และตกปลาต่อ")
         end)
     end
+
+    ---------------------------------------------------------------- 15) ฟรีแคม
+    local ContextActionService = game:GetService("ContextActionService")
+    local MOVE = {
+        W = Vector3.new(0, 0, -1), S = Vector3.new(0, 0, 1),
+        A = Vector3.new(-1, 0, 0), D = Vector3.new(1, 0, 0),
+        E = Vector3.new(0, 1, 0), Q = Vector3.new(0, -1, 0),
+    }
+    local cam = { on = false, held = {}, pitch = 0, yaw = 0, pos = Vector3.zero }
+
+    -- กินปุ่ม WASDQE ระหว่างฟรีแคม ตัวละครจะไม่เดินตาม
+    local function sinkMove(_, state, input)
+        local name = input.KeyCode.Name
+        if MOVE[name] then
+            cam.held[name] = state == Enum.UserInputState.Begin
+        end
+        return Enum.ContextActionResult.Sink
+    end
+
+    local function setFreecam(on)
+        if cam.on == on then return end
+        cam.on = on
+        local camera = workspace.CurrentCamera
+        if on then
+            local cf = camera.CFrame
+            cam.pos = cf.Position
+            cam.pitch, cam.yaw = cf:ToEulerAnglesYXZ()
+            camera.CameraType = Enum.CameraType.Scriptable
+            ContextActionService:BindActionAtPriority("AFFreecam", sinkMove, false,
+                Enum.ContextActionPriority.High.Value + 100,
+                Enum.KeyCode.W, Enum.KeyCode.A, Enum.KeyCode.S, Enum.KeyCode.D, Enum.KeyCode.Q, Enum.KeyCode.E)
+        else
+            ContextActionService:UnbindAction("AFFreecam")
+            table.clear(cam.held)
+            UserInputService.MouseBehavior = Enum.MouseBehavior.Default
+            camera.CameraType = Enum.CameraType.Custom
+            local hum = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+            if hum then camera.CameraSubject = hum end
+        end
+        -- ให้สวิตช์ในหน้าต่างตรงกับสถานะ (กดปุ่มลัดก็ขยับตาม)
+        if freecamToggle.Value ~= on then
+            pcall(function() freecamToggle:SetValue(on) end)
+        end
+    end
+    uiHooks.freecamToggled = setFreecam
+
+    connections[#connections + 1] = RunService.RenderStepped:Connect(function(dt)
+        if not cam.on then return end
+        -- คลิกขวาค้าง = หมุนกล้อง
+        if UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton2) then
+            UserInputService.MouseBehavior = Enum.MouseBehavior.LockCurrentPosition
+            local delta = UserInputService:GetMouseDelta()
+            cam.yaw -= delta.X * 0.004
+            cam.pitch = math.clamp(cam.pitch - delta.Y * 0.004, -1.45, 1.45)
+        else
+            UserInputService.MouseBehavior = Enum.MouseBehavior.Default
+        end
+        local move = Vector3.zero
+        for name, down in pairs(cam.held) do
+            if down then move += MOVE[name] end
+        end
+        local rot = CFrame.fromEulerAnglesYXZ(cam.pitch, cam.yaw, 0)
+        local fast = UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) and 3 or 1
+        cam.pos += rot:VectorToWorldSpace(move) * (40 * freecamSpeed * fast * dt)
+        workspace.CurrentCamera.CFrame = CFrame.new(cam.pos) * rot
+    end)
+
+    -- ปุ่มลัดเปิด/ปิด
+    connections[#connections + 1] = UserInputService.InputBegan:Connect(function(input, gameProcessed)
+        if gameProcessed then return end
+        local hit
+        if freecamKeyName == "ปุ่มกลางเมาส์" then
+            hit = input.UserInputType == Enum.UserInputType.MouseButton3
+        else
+            hit = input.KeyCode.Name == freecamKeyName
+        end
+        if hit then
+            setFreecam(not cam.on)
+        end
+    end)
+
+    -- ปิดสคริปต์/รันใหม่ = คืนกล้องปกติ
+    ScreenGui.AncestryChanged:Connect(function()
+        if not ScreenGui.Parent then
+            setFreecam(false)
+        end
+    end)
 end)()
