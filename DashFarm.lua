@@ -21,6 +21,8 @@ local settings = {
     autoPlace = false,
     antiAfk = false,
     autoRebirth = false,
+    autoUpgrade = false,
+    upgradeEvery = 5, -- กดป้ายอัพเกรดทุกกี่วิ (เงินไม่พอ เกมไม่ให้อัพเอง)
     rebirthCheckEvery = 2, -- เช็คหลอดรีเบิร์ธทุกกี่วิ
     chargeTimeout = 20, -- ชาร์จนานสุดกี่วิ (ถ้าอ่าน % ไม่ได้ จะปล่อยตอนครบเวลานี้)
     placeEvery = 30,    -- เช็คแท่นว่าง/ตัวใหม่ทุกกี่วิ
@@ -395,6 +397,136 @@ task.spawn(function()
     end
 end)
 
+---------------------------------------------------------------- อัพเกรดตัวละคร
+-- ป้ายเหลือง "$150  เลเวล 1 > เลเวล 2" หน้าแท่น ต้องเอาเมาส์คลิก (ไม่มี remote ให้ดัก)
+-- น่าจะเป็น ClickDetector หรือปุ่มบน SurfaceGui
+local function guiText(root)
+    local parts = {}
+    for _, d in ipairs(root:GetDescendants()) do
+        if (d:IsA("TextLabel") or d:IsA("TextButton")) and d.Text ~= "" then
+            table.insert(parts, d.Text)
+        end
+    end
+    return table.concat(parts, " ")
+end
+
+local function costOf(text)
+    -- "$21.6K" -> 21600
+    local num = text:match("%$%s*([%d%.,]+%s*%a*)")
+    return num and parseNumber(num) or math.huge
+end
+
+-- รวบรวมป้ายอัพเกรดในฐานของเรา: { kind, target, part, cost }
+local function findUpgradeTargets()
+    local plot = getMyPlot()
+    if not plot then return nil, "หาฐานของเราไม่เจอ" end
+    local list = {}
+    local seen = {}
+
+    -- ClickDetector ที่ชิ้นส่วนมีข้อความ "เลเวล"
+    for _, cd in ipairs(plot:GetDescendants()) do
+        if cd:IsA("ClickDetector") and cd.Parent and cd.Parent:IsA("BasePart") then
+            local holder = cd.Parent.Parent or cd.Parent
+            local text = guiText(cd.Parent) .. " " .. guiText(holder)
+            if text:find("เลเวล", 1, true) and not seen[cd] then
+                seen[cd] = true
+                table.insert(list, { kind = "click", target = cd, part = cd.Parent, cost = costOf(text) })
+            end
+        end
+    end
+
+    -- ปุ่มบน SurfaceGui (อยู่ในฐาน หรืออยู่ใน PlayerGui แล้วแปะบนชิ้นส่วนในฐาน)
+    local function scanGui(root)
+        for _, sg in ipairs(root:GetDescendants()) do
+            if sg:IsA("SurfaceGui") then
+                local part = sg.Adornee or sg:FindFirstAncestorWhichIsA("BasePart")
+                if part and part:IsDescendantOf(plot) then
+                    local text = guiText(sg)
+                    if text:find("เลเวล", 1, true) then
+                        local button = sg:FindFirstChildWhichIsA("GuiButton", true)
+                        if button and not seen[button] then
+                            seen[button] = true
+                            table.insert(list, { kind = "button", target = button, part = part, cost = costOf(text) })
+                        end
+                    end
+                end
+            end
+        end
+    end
+    scanGui(plot)
+    scanGui(LocalPlayer.PlayerGui)
+
+    table.sort(list, function(a, b) return a.cost < b.cost end) -- ถูกสุดก่อน
+    return list
+end
+
+local function clickPart(part)
+    -- คลิกเมาส์ที่ตำแหน่งชิ้นส่วนบนจอ (ใช้เมื่อไม่มีคำสั่งของ executor)
+    local cam = workspace.CurrentCamera
+    local pos, onScreen = cam:WorldToViewportPoint(part.Position)
+    if not onScreen then return false end
+    local inset = game:GetService("GuiService"):GetGuiInset()
+    VirtualInputManager:SendMouseButtonEvent(pos.X, pos.Y + inset.Y, 0, true, game, 1)
+    task.wait(0.05)
+    VirtualInputManager:SendMouseButtonEvent(pos.X, pos.Y + inset.Y, 0, false, game, 1)
+    return true
+end
+
+local function pressUpgrade(item)
+    if item.kind == "click" then
+        if typeof(fireclickdetector) == "function" then
+            return pcall(fireclickdetector, item.target)
+        end
+        return clickPart(item.part)
+    end
+    -- ปุ่มบน SurfaceGui
+    local button = item.target
+    if typeof(firesignal) == "function" then
+        if pcall(firesignal, button.MouseButton1Click) then return true end
+    end
+    if typeof(getconnections) == "function" then
+        local ok = pcall(function()
+            for _, c in ipairs(getconnections(button.MouseButton1Click)) do
+                c:Fire()
+            end
+        end)
+        if ok then return true end
+    end
+    return clickPart(item.part)
+end
+
+local upgradeCount = 0
+local upgradeInfo = "-"
+local function upgradeAll()
+    local list, err = findUpgradeTargets()
+    if not list then
+        upgradeInfo = err
+        return 0
+    end
+    if #list == 0 then
+        upgradeInfo = "ไม่เจอป้ายอัพเกรดในฐาน"
+        return 0
+    end
+    local pressed = 0
+    for _, item in ipairs(list) do
+        if not alive() then break end
+        if pressUpgrade(item) then pressed += 1 end
+        task.wait(0.15)
+    end
+    upgradeCount += pressed
+    upgradeInfo = ("เจอป้าย %d ป้าย (%s)  กดไป %d ครั้ง"):format(#list, list[1].kind, pressed)
+    return pressed
+end
+
+task.spawn(function()
+    while alive() do
+        if settings.autoUpgrade then
+            upgradeAll()
+        end
+        task.wait(math.max(1, settings.upgradeEvery))
+    end
+end)
+
 ---------------------------------------------------------------- ลูปหลัก
 local lastPlace = 0
 task.spawn(function()
@@ -545,6 +677,23 @@ charSection:AddButton({
 })
 local charsPara = charSection:AddParagraph({ Title = "ในกระเป๋า (เรียงจากแรงสุด)", Content = "-" })
 
+local upgradeSection = Tabs.chars:AddSection("อัพเกรดตัวละคร")
+upgradeSection:AddToggle("DFUpgrade", {
+    Title = "อัพเกรดอัตโนมัติ",
+    Description = "กดป้ายเหลืองหน้าแท่นทุกตัว เรียงจากถูกสุด (เงินไม่พอ เกมไม่ให้อัพเอง)",
+    Default = false,
+}):OnChanged(function(v) settings.autoUpgrade = v end)
+upgradeSection:AddButton({
+    Title = "อัพเกรดตอนนี้",
+    Callback = function()
+        task.spawn(function()
+            upgradeAll()
+            Fluent:Notify({ Title = "อัพเกรด", Content = upgradeInfo, Duration = 5 })
+        end)
+    end,
+})
+local upgradePara = upgradeSection:AddParagraph({ Title = "ผลการอัพเกรด", Content = "-" })
+
 -- ความปลอดภัย
 local afkSection = Tabs.safe:AddSection("กันโดนเตะ")
 afkSection:AddToggle("DFAfk", { Title = "กันโดนเตะ AFK", Default = false })
@@ -566,6 +715,9 @@ task.spawn(function()
         end
         pcall(function()
             charsPara:SetDesc(#lines > 0 and table.concat(lines, "\n") or "ไม่เจอตัวละครในกระเป๋า")
+        end)
+        pcall(function()
+            upgradePara:SetDesc(("%s\nกดอัพเกรดไปแล้ว %d ครั้ง"):format(upgradeInfo, upgradeCount))
         end)
         task.wait(1)
     end
