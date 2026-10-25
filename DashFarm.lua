@@ -226,8 +226,9 @@ local function getEmptyStands()
     local empty = {}
     for _, d in ipairs(plot:GetDescendants()) do
         if d:IsA("Model") and d.Name:match("^ModelStand") and not used[d:GetFullName()] then
+            -- ปุ่ม "สถานที่" (E) จะเปิดเฉพาะตอนถือตัวละครอยู่ เลยไม่เช็ค Enabled ตรงนี้
             local prompt = d:FindFirstChildWhichIsA("ProximityPrompt", true)
-            if prompt and prompt.Enabled then
+            if prompt then
                 table.insert(empty, { stand = d, prompt = prompt })
             end
         end
@@ -270,10 +271,15 @@ local function placeStrongest()
         hrp = getRoot()
         if not hrp then break end
         hrp.CFrame = slot.stand:GetPivot() + Vector3.new(0, 3, 0)
-        task.wait(0.4)
-        triggerPrompt(slot.prompt)
-        task.wait(0.6)
-        placed += 1
+        -- รอปุ่ม "สถานที่" ขึ้น (ขึ้นเมื่อถือตัวละครและยืนใกล้แท่น)
+        if waitFor(2, function() return slot.prompt.Parent ~= nil and slot.prompt.Enabled end) then
+            triggerPrompt(slot.prompt)
+            task.wait(0.6)
+            placed += 1
+        else
+            setStatus("ปุ่มวางไม่ขึ้นที่ " .. slot.stand.Name)
+            task.wait(0.3)
+        end
     end
     hum:UnequipTools()
     hrp = getRoot()
