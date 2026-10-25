@@ -30,14 +30,14 @@ local MIN_BITE_WAIT = 1.5 -- โยนแล้วอย่างน้อยก
 local BITE_TEXT = "กดเลย"   -- ข้อความบนปุ่มตอนปลากินเหยื่อ
 local HOOK_REACTION = 0.3 -- (โหมด remote) ปลากินแล้วรอกี่วินาทีก่อนส่ง "Hook" (ให้ดูเหมือนคนกด)
 local HOOK_COOLDOWN = 1   -- ยิง "Hook" ซ้ำได้ทุกกี่วินาที ตอนป้าย Bang ยังขึ้นอยู่
-local READY_TIMEOUT = 10  -- หลังได้ปลา รอปุ่มกลับเป็น "เหวี่ยง" นานสุดกี่วินาที
+local READY_TIMEOUT = 5   -- หลังได้ปลา รอปุ่มกลับเป็น "เหวี่ยง" นานสุดกี่วินาที ก่อนลองเหวี่ยงต่อเลย
 local CAST_DELAY = 0.5    -- ก่อนเหวี่ยงแต่ละครั้งรออีกกี่วินาที
 local RECAST_RIGHT_AWAY = true -- ได้ปลาแล้วโยนต่อเลยโดยไม่รอปุ่มกลับเป็น "เหวี่ยง" (false = รอปุ่มก่อน)
 local BITE_TIMEOUT = 30   -- โยนแล้วรอปลากินนานสุดกี่วินาที ก่อนโยนใหม่
 -- วิธีสั่งงาน: "play"   = กดปุ่ม เหวี่ยง ของเกมเหมือนคนเล่น (ชาร์จ, ตวัด, เล่นมินิเกม) <- แนะนำ
 --             "remote" = ยิง Remotes.Fishing.Action ตรงๆ ข้ามการชาร์จและมินิเกม (เซิร์ฟเวอร์อาจไม่ให้ปลา)
 local INPUT_MODE = "play"
-local REEL_TIMEOUT = 40   -- (โหมด play) เล่นมินิเกมนานสุดกี่วินาที
+local REEL_TIMEOUT = 25   -- (โหมด play) เล่นมินิเกมนานสุดกี่วินาที
 local CAST_DISTANCE = 20  -- (โหมด remote) ให้เบ็ดตกห่างจากตัวกี่ studs ข้างหน้า
 local CAST_PERFECT = true -- (โหมด remote) ค่าตัวที่ 3 ของ "Cast" ที่เกมส่งตอนเหวี่ยงเข้า PerfectZone
 local REEL_FINISH_DELAY = 0 -- (โหมด remote) หลัง Hook รอกี่วินาทีแล้วส่ง "Reel", true (ข้ามมินิเกม ได้ปลาเลย)
@@ -237,18 +237,32 @@ end
 
 -- ปุ่มแอคชันของเกม: ปกติเขียน "เหวี่ยง" พอปลากินจะเปลี่ยนเป็นสีแดง เขียน "กดเลย!"
 local actionLabel
+local lastLabelScan = 0
 local function getActionLabel()
-    if actionLabel and actionLabel.Parent then
+    -- ใช้ตัวเดิมถ้ายังอยู่และยังแสดงบนจอ (เกมอาจสร้างปุ่มใหม่หลังได้ปลา)
+    if actionLabel and actionLabel.Parent and isShown(actionLabel) then
         return actionLabel
     end
-    actionLabel = nil
+    -- สแกนใหม่ไม่เกินวินาทีละ 2 ครั้ง
+    if os.clock() - lastLabelScan < 0.5 then
+        return actionLabel
+    end
+    lastLabelScan = os.clock()
+
+    local fallback
     for _, d in ipairs(LocalPlayer.PlayerGui:GetDescendants()) do
         if (d:IsA("TextLabel") or d:IsA("TextButton"))
             and (d.Text:match("^%s*เหวี่ยง%s*$") or d.Text:find(BITE_TEXT, 1, true)) then
             -- ต้องตรงคำว่า "เหวี่ยง" เป๊ะ ไม่งั้นจะไปเจอป้าย "แรงเหวี่ยง" บนหลอดชาร์จ
-            actionLabel = d
-            break
+            if isShown(d) then
+                actionLabel = d
+                return d
+            end
+            fallback = fallback or d
         end
+    end
+    if fallback or not (actionLabel and actionLabel.Parent) then
+        actionLabel = fallback
     end
     return actionLabel
 end
@@ -465,9 +479,16 @@ local function playRound(myId)
     setStatus("รอปุ่ม เหวี่ยง พร้อม")
     if not waitFor(myId, READY_TIMEOUT, actionReady) then
         if not isActive(myId) then return end
-        setStatus(getActionLabel() and ("ปุ่มขึ้นว่า: " .. getActionLabel().Text) or "หาปุ่ม เหวี่ยง ไม่เจอ")
+        -- ปุ่มไม่กลับเป็น "เหวี่ยง" (อาจมีหน้าต่างโชว์ปลาบังอยู่) ลองกดปุ่ม 1 ครั้งแล้วเหวี่ยงต่อเลย
+        local label = getActionLabel()
+        setStatus(label and ("ปุ่มขึ้นว่า: " .. label.Text .. " ลองเหวี่ยงต่อ") or "หาปุ่ม เหวี่ยง ไม่เจอ")
+        if not label then
+            task.wait(1)
+            return
+        end
+        clickMouse()
         task.wait(1)
-        return
+        if not isActive(myId) then return end
     end
     task.wait(CAST_DELAY)
     if not isActive(myId) then return end
