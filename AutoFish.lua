@@ -14,14 +14,17 @@ local function getCastUI()
 end
 
 local function getCatchUI()
-    -- ตัวอย่าง: return LocalPlayer.PlayerGui:FindFirstChild("FishingUI") and LocalPlayer.PlayerGui.FishingUI:FindFirstChild("CatchBar")
-    return nil
+    -- PlayerGui.FishingHud.Reel (ข้างในมี Water > Fish, Zone และ Progress > Fill)
+    local hud = LocalPlayer.PlayerGui:FindFirstChild("FishingHud")
+    return hud and hud:FindFirstChild("Reel")
 end
 
 -- โครงสร้าง: Power > Track > Fill (แถบที่ยืดตามแรงชาร์จ), PerfectZone (โซนแรงพอดี)
 local CAST_TARGET = 0.9   -- ใช้เมื่อหา PerfectZone ไม่เจอ: ชาร์จหลอดถึง 90%
 local PERFECT_AIM = 0.5   -- ปล่อยเมื่อปลายแถบถึงตำแหน่งไหนของ PerfectZone (0 = ขอบซ้าย, 0.5 = กลาง)
 local CAST_TIMEOUT = 5    -- กดค้างนานสุดกี่วินาที กันลูปค้าง
+local REEL_HOLD = false   -- false = คลิกทีละครั้ง, true = กดค้างตอน Zone ต้องเลื่อนหาปลา (ลองสลับถ้าแบบแรกไม่ได้ผล)
+local REEL_INVERT = false -- true ถ้าคลิกแล้ว Zone เลื่อนไปทางตรงข้ามกับที่ควร
 
 -- ลบ UI เก่าถ้ารันสคริปต์ซ้ำ
 local old = CoreGui:FindFirstChild("AutoFishUI")
@@ -116,8 +119,8 @@ local function isActive(myId)
 end
 
 -- ใช้ AbsolutePosition/AbsoluteSize จะแม่นกว่า Position.Scale (ไม่สน AnchorPoint/Offset)
-local function centerX(gui)
-    return gui.AbsolutePosition.X + gui.AbsoluteSize.X / 2
+local function center(gui)
+    return gui.AbsolutePosition + gui.AbsoluteSize / 2
 end
 
 -- ปลายแถบ Fill ถึงจุดที่ต้องการปล่อยหรือยัง
@@ -140,9 +143,12 @@ local function autoFishLoop(myId)
         local catchUI = getCatchUI()
 
         local track = castUI and castUI:FindFirstChild("Track")
+        local water = catchUI and catchUI:FindFirstChild("Water")
+        local reeling = catchUI ~= nil and catchUI.Visible
 
         -- เงื่อนไขที่ 1: ชาร์จหลอดแล้วปล่อยตอนปลายแถบเข้า PerfectZone
-        if track and castUI.Visible and track:FindFirstChild("Fill") then
+        -- (ไม่ชาร์จถ้ากำลังดึงปลาอยู่)
+        if not reeling and track and castUI.Visible and track:FindFirstChild("Fill") then
             setMouse(true) -- กดค้าง
             local elapsed = 0
             repeat
@@ -156,17 +162,35 @@ local function autoFishLoop(myId)
                 task.wait(2) -- รอเหยื่อตกน้ำ
             end
 
-        -- เงื่อนไขที่ 2: ประคองปลาให้อยู่ในแถบสีเขียว
-        elseif catchUI and catchUI.Visible
-            and catchUI:FindFirstChild("FishIcon") and catchUI:FindFirstChild("GreenBar") then
-            local fishX = centerX(catchUI.FishIcon)
-            local barX = centerX(catchUI.GreenBar)
+        -- เงื่อนไขที่ 2: ประคอง Zone ให้อยู่ตรงปลา
+        elseif reeling and water
+            and water:FindFirstChild("Fish") and water:FindFirstChild("Zone") then
+            local fishPos = center(water.Fish)
+            local zonePos = center(water.Zone)
 
-            -- ถ้าแถบเขียวอยู่ซ้ายของปลา ให้คลิกเพื่อดันแถบไปทางขวา
-            -- (ถ้าเกมนี้คลิกแล้วแถบไปทางซ้าย ให้กลับเครื่องหมายเป็น >)
-            if barX < fishX then
+            -- ดูว่า Water เป็นแนวตั้งหรือแนวนอน
+            -- แนวตั้ง: คลิกแล้ว Zone ขึ้น -> คลิกเมื่อ Zone อยู่ต่ำกว่าปลา (Y มากกว่า)
+            -- แนวนอน: คลิกแล้ว Zone ไปขวา -> คลิกเมื่อ Zone อยู่ซ้ายของปลา
+            local needPush
+            if water.AbsoluteSize.Y > water.AbsoluteSize.X then
+                needPush = zonePos.Y > fishPos.Y
+            else
+                needPush = zonePos.X < fishPos.X
+            end
+            if REEL_INVERT then
+                needPush = not needPush
+            end
+
+            if REEL_HOLD then
+                if needPush ~= mouseHeld then
+                    setMouse(needPush)
+                end
+            elseif needPush then
                 clickMouse()
             end
+
+        elseif mouseHeld then
+            setMouse(false) -- จบช่วงดึงปลาแล้ว ปล่อยเมาส์
         end
 
         task.wait(0.05)
