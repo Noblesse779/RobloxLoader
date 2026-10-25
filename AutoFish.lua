@@ -684,33 +684,156 @@ do
     local RARITIES = { "ทั่วไป", "พิเศษ", "หายาก", "ยอดเยี่ยม", "มหากาพย์", "ตำนาน", "ในตำนาน", "เทพ", "เทพเจ้า", "ลึกลับ" }
 
     ---------------------------------------------------------------- UI
-    local FULL_HEIGHT = 470
+    -- หน้าต่างแนวนอน: ซ้าย = ปุ่มเปิด/ปิด + สถานะ + แถบหมวด, ขวา = หน้าของหมวดที่เลือก
+    -- ลากมุมขวาล่างเพื่อปรับขนาด, ปุ่ม – ย่อเหลือแถบเดียว
+    local SIDEBAR_WIDTH = 140
+    local MIN_SIZE = Vector2.new(380, 230)
+    local windowSize = Vector2.new(470, 300)
 
-    MainFrame.Size = UDim2.new(0, 220, 0, FULL_HEIGHT)
-    ToggleButton.Size = UDim2.new(1, -10, 0, 45)
-    ToggleButton.Position = UDim2.new(0, 5, 0, 25)
-    StatusLabel.Position = UDim2.new(0, 5, 0, 72)
+    MainFrame.Size = UDim2.fromOffset(windowSize.X, windowSize.Y)
+    MainFrame.Position = UDim2.new(0.5, -windowSize.X / 2, 0.1, 0)
+    TitleBar.Size = UDim2.new(1, 0, 0, 22)
+    ToggleButton.Size = UDim2.fromOffset(SIDEBAR_WIDTH, 40)
+    ToggleButton.Position = UDim2.fromOffset(5, 27)
+    StatusLabel.Size = UDim2.fromOffset(SIDEBAR_WIDTH, 34)
+    StatusLabel.Position = UDim2.fromOffset(5, 70)
 
-    -- เลื่อนขึ้นลงได้ (ตั้งค่าเยอะ หน้าต่างจะได้ไม่ยาวเกินจอ)
-    local Extras = Instance.new("ScrollingFrame")
-    Extras.Size = UDim2.new(1, -6, 1, -98)
-    Extras.Position = UDim2.new(0, 5, 0, 95)
-    Extras.BackgroundTransparency = 1
-    Extras.BorderSizePixel = 0
-    Extras.ScrollBarThickness = 4
-    Extras.CanvasSize = UDim2.new()
-    Extras.AutomaticCanvasSize = Enum.AutomaticSize.Y
-    Extras.Parent = MainFrame
+    -- แถบหมวด (ซ้าย)
+    local Sidebar = Instance.new("Frame")
+    Sidebar.Size = UDim2.new(0, SIDEBAR_WIDTH, 1, -112)
+    Sidebar.Position = UDim2.fromOffset(5, 108)
+    Sidebar.BackgroundTransparency = 1
+    Sidebar.Parent = MainFrame
+    local sidebarLayout = Instance.new("UIListLayout")
+    sidebarLayout.Padding = UDim.new(0, 3)
+    sidebarLayout.SortOrder = Enum.SortOrder.LayoutOrder
+    sidebarLayout.Parent = Sidebar
 
-    local layout = Instance.new("UIListLayout")
-    layout.Padding = UDim.new(0, 4)
-    layout.SortOrder = Enum.SortOrder.LayoutOrder
-    layout.Parent = Extras
+    -- พื้นที่หน้า (ขวา)
+    local PageArea = Instance.new("Frame")
+    PageArea.Size = UDim2.new(1, -(SIDEBAR_WIDTH + 15), 1, -32)
+    PageArea.Position = UDim2.fromOffset(SIDEBAR_WIDTH + 10, 27)
+    PageArea.BackgroundColor3 = Color3.fromRGB(28, 28, 28)
+    PageArea.BorderSizePixel = 0
+    PageArea.Parent = MainFrame
+
+    local pages, tabButtons = {}, {}
+    local currentPage -- หน้าที่กำลังใส่ของ (ตอนสร้าง UI)
+
+    local function showPage(name)
+        for n, page in pairs(pages) do
+            page.Visible = n == name
+            tabButtons[n].BackgroundColor3 = n == name and Color3.fromRGB(40, 110, 150) or Color3.fromRGB(50, 50, 50)
+        end
+    end
+
+    local tabCount = 0
+    local function addPage(name)
+        tabCount += 1
+        local page = Instance.new("ScrollingFrame")
+        page.Size = UDim2.new(1, -8, 1, -8)
+        page.Position = UDim2.fromOffset(6, 4)
+        page.BackgroundTransparency = 1
+        page.BorderSizePixel = 0
+        page.ScrollBarThickness = 4
+        page.CanvasSize = UDim2.new()
+        page.AutomaticCanvasSize = Enum.AutomaticSize.Y
+        page.Visible = false
+        page.Parent = PageArea
+        local l = Instance.new("UIListLayout")
+        l.Padding = UDim.new(0, 4)
+        l.SortOrder = Enum.SortOrder.LayoutOrder
+        l.Parent = page
+        pages[name] = page
+
+        local tab = Instance.new("TextButton")
+        tab.Size = UDim2.new(1, 0, 0, 24)
+        tab.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+        tab.TextColor3 = Color3.fromRGB(255, 255, 255)
+        tab.Font = Enum.Font.SourceSansBold
+        tab.TextSize = 14
+        tab.Text = name
+        tab.LayoutOrder = tabCount
+        tab.Parent = Sidebar
+        tab.MouseButton1Click:Connect(function()
+            showPage(name)
+        end)
+        tabButtons[name] = tab
+        return page
+    end
+
+    local PAGE_MAIN = "📊 หลัก"
+    local PAGE_SELL = "💰 ขายปลา"
+    local PAGE_WALK = "🚶 เดิน/เส้นทาง"
+    local PAGE_SAFE = "🛡️ ความปลอดภัย"
+    local PAGE_CHAR = "🏃 ตัวละคร"
+    local PAGE_ALERT = "🔔 แจ้งเตือน"
+    for _, n in ipairs({ PAGE_MAIN, PAGE_SELL, PAGE_WALK, PAGE_SAFE, PAGE_CHAR, PAGE_ALERT }) do
+        addPage(n)
+    end
+    local function setPage(name)
+        currentPage = pages[name]
+    end
+    setPage(PAGE_MAIN)
+
+    ---- ปรับขนาดหน้าต่าง: ลากมุมขวาล่าง
+    local ResizeHandle = Instance.new("TextButton")
+    ResizeHandle.Size = UDim2.fromOffset(16, 16)
+    ResizeHandle.Position = UDim2.new(1, -16, 1, -16)
+    ResizeHandle.BackgroundTransparency = 1
+    ResizeHandle.Text = "◢"
+    ResizeHandle.TextColor3 = Color3.fromRGB(150, 150, 150)
+    ResizeHandle.TextSize = 14
+    ResizeHandle.ZIndex = 5
+    ResizeHandle.Parent = MainFrame
+    do
+        local resizing, startMouse, startSize
+        ResizeHandle.InputBegan:Connect(function(input)
+            if input.UserInputType == Enum.UserInputType.MouseButton1
+                or input.UserInputType == Enum.UserInputType.Touch then
+                resizing = true
+                startMouse = Vector2.new(input.Position.X, input.Position.Y)
+                startSize = windowSize
+                input.Changed:Connect(function()
+                    if input.UserInputState == Enum.UserInputState.End then
+                        resizing = false
+                    end
+                end)
+            end
+        end)
+        UserInputService.InputChanged:Connect(function(input)
+            if resizing and (input.UserInputType == Enum.UserInputType.MouseMovement
+                or input.UserInputType == Enum.UserInputType.Touch) then
+                local delta = Vector2.new(input.Position.X, input.Position.Y) - startMouse
+                local view = workspace.CurrentCamera.ViewportSize
+                windowSize = Vector2.new(
+                    math.clamp(startSize.X + delta.X, MIN_SIZE.X, view.X),
+                    math.clamp(startSize.Y + delta.Y, MIN_SIZE.Y, view.Y)
+                )
+                MainFrame.Size = UDim2.fromOffset(windowSize.X, windowSize.Y)
+            end
+        end)
+    end
 
     local order = 0
     local function nextOrder()
         order += 1
         return order
+    end
+
+    -- หัวข้อย่อยในหน้า
+    local function makeHeader(text)
+        local h = Instance.new("TextLabel")
+        h.Size = UDim2.new(1, -6, 0, 18)
+        h.BackgroundTransparency = 1
+        h.Text = text
+        h.TextColor3 = Color3.fromRGB(255, 200, 90)
+        h.Font = Enum.Font.SourceSansBold
+        h.TextSize = 15
+        h.TextXAlignment = Enum.TextXAlignment.Left
+        h.LayoutOrder = nextOrder()
+        h.Parent = currentPage
+        return h
     end
 
     local function makeLabel(text, height, color)
@@ -724,7 +847,7 @@ do
         l.TextXAlignment = Enum.TextXAlignment.Left
         l.TextYAlignment = Enum.TextYAlignment.Top
         l.LayoutOrder = nextOrder()
-        l.Parent = Extras
+        l.Parent = currentPage
         return l
     end
 
@@ -733,7 +856,7 @@ do
         row.Size = UDim2.new(1, -6, 0, 24)
         row.BackgroundTransparency = 1
         row.LayoutOrder = nextOrder()
-        row.Parent = Extras
+        row.Parent = currentPage
         return row
     end
 
@@ -793,6 +916,8 @@ do
         return l
     end
 
+    -- ===== หน้า หลัก =====
+    makeHeader("สถิติ")
     -- 2) สถิติ
     local statsLabel = makeLabel("", 72, Color3.fromRGB(150, 220, 255))
 
@@ -806,11 +931,17 @@ do
     resetButton.Text = "รีเซ็ตสถิติ"
     resetButton.Parent = resetRow
 
+    -- ===== หน้า ความปลอดภัย =====
+    setPage(PAGE_SAFE)
+    makeHeader("กันโดนเตะ")
     -- 1) กัน AFK
     makeToggle(makeRow(), "กันโดนเตะ AFK",
         function() return settings.antiAfk end,
         function(v) settings.antiAfk = v end)
 
+    -- ===== หน้า ตัวละคร =====
+    setPage(PAGE_CHAR)
+    makeHeader("ความเร็ว / กระโดด (ใส่ตัวเลขช่องขวา)")
     -- 6) วิ่งเร็ว / กระโดดสูง
     local speedRow = makeRow()
     makeToggle(speedRow, "วิ่งเร็ว",
@@ -828,6 +959,9 @@ do
     makeNumberBox(jumpRow, settings.jump, function(n) settings.jump = n end,
         UDim2.new(0.35, 0, 1, 0), UDim2.new(0.65, 2, 0, 0))
 
+    -- ===== หน้า หลัก: ตั้งเวลาหยุด =====
+    setPage(PAGE_MAIN)
+    makeHeader("หยุดเอง (0 = ไม่จำกัด)")
     -- 4) ตั้งเวลาหยุด (0 = ไม่จำกัด)
     local stopFishRow = makeRow()
     labelInRow(stopFishRow, "หยุดเมื่อได้ปลา (ตัว)", UDim2.new(0.65, -2, 1, 0))
@@ -839,6 +973,9 @@ do
     makeNumberBox(stopTimeRow, settings.stopMinutes, function(n) settings.stopMinutes = n end,
         UDim2.new(0.35, 0, 1, 0), UDim2.new(0.65, 2, 0, 0))
 
+    -- ===== หน้า ขายปลา =====
+    setPage(PAGE_SELL)
+    makeHeader("ขายอัตโนมัติ")
     -- 7) ขายปลาอัตโนมัติ
     local sellRow = makeRow()
     makeToggle(sellRow, "ขายเมื่อครบ",
@@ -867,6 +1004,9 @@ do
     shopButton.TextSize = 14
     shopButton.Parent = shopRow
 
+    -- ===== หน้า เดิน/เส้นทาง =====
+    setPage(PAGE_WALK)
+    makeHeader("ไปขาย / กลับ")
     -- วิธีไปร้าน: กดสลับ เดิน <-> วาร์ป
     local travelRow = makeRow()
     local travelButton = Instance.new("TextButton")
@@ -886,6 +1026,7 @@ do
     end)
     refreshTravel()
 
+    makeHeader("เส้นทาง (บันทึกจากจุดตกปลา -> ร้าน)")
     -- บันทึกเส้นทางเดิน: กดเริ่มที่จุดตกปลา เดินไปร้านเอง แล้วกดหยุดที่ร้าน
     local routeRow = makeRow()
     local routeButton = Instance.new("TextButton")
@@ -950,8 +1091,11 @@ do
         function() return settings.walkFallbackWarp end,
         function(v) settings.walkFallbackWarp = v end)
 
+    setPage(PAGE_SELL)
     local bagLabel = makeLabel("", 18, Color3.fromRGB(255, 220, 120))
 
+    setPage(PAGE_SAFE)
+    makeHeader("พักเป็นระยะ (สุ่มให้ไม่เท่ากัน)")
     -- 8) พักเป็นระยะ
     local breakRow = makeRow()
     makeToggle(breakRow, "พักทุก (ตัว)",
@@ -966,6 +1110,7 @@ do
     makeNumberBox(breakTimeRow, settings.breakSeconds, function(n) settings.breakSeconds = n end,
         UDim2.new(0.35, 0, 1, 0), UDim2.new(0.65, 2, 0, 0))
 
+    makeHeader("มีผู้เล่นอื่นเข้าใกล้ (ระยะ studs)")
     -- 9) หยุดเมื่อมีคนใกล้
     local nearbyRow = makeRow()
     makeToggle(nearbyRow, "พักเมื่อมีคนใกล้",
@@ -975,6 +1120,9 @@ do
     makeNumberBox(nearbyRow, settings.nearbyRange, function(n) settings.nearbyRange = n end,
         UDim2.new(0.35, 0, 1, 0), UDim2.new(0.65, 2, 0, 0))
 
+    -- ===== หน้า แจ้งเตือน =====
+    setPage(PAGE_ALERT)
+    makeHeader("ปลาหายาก / ปลาชนิดใหม่")
     -- 10) ปลาหายาก
     makeToggle(makeRow(), "เตือนเมื่อได้ปลาหายาก",
         function() return settings.rareAlert end,
@@ -983,7 +1131,9 @@ do
         function() return settings.rareStop end,
         function(v) settings.rareStop = v end)
 
-    -- 3) บอกปุ่มลัด
+    -- 3) บอกปุ่มลัด (หน้าหลัก)
+    setPage(PAGE_MAIN)
+    makeHeader("ปุ่มลัด")
     makeLabel(("%s = เปิด/ปิดตกปลา   %s = ซ่อนหน้าต่าง"):format(TOGGLE_KEY.Name, HIDE_KEY.Name),
         16, Color3.fromRGB(160, 160, 160))
 
@@ -1007,15 +1157,20 @@ do
         end
     end
 
+    MinButton.Size = UDim2.fromOffset(22, 22)
+    MinButton.Position = UDim2.new(1, -22, 0, 0)
     MinButton.MouseButton1Click:Connect(function()
         minimized = not minimized
-        ToggleButton.Visible = not minimized
-        StatusLabel.Visible = not minimized
-        Extras.Visible = not minimized
-        MainFrame.Size = UDim2.new(0, 220, 0, minimized and 20 or FULL_HEIGHT)
+        for _, gui in ipairs({ ToggleButton, StatusLabel, Sidebar, PageArea, ResizeHandle }) do
+            gui.Visible = not minimized
+        end
+        -- ย่อเหลือแถบหัว (กว้าง 220) / ขยายกลับขนาดเดิมที่ปรับไว้
+        MainFrame.Size = minimized and UDim2.fromOffset(220, 22) or UDim2.fromOffset(windowSize.X, windowSize.Y)
         MinButton.Text = minimized and "+" or "–"
         refreshTitle()
     end)
+
+    showPage(PAGE_MAIN)
 
     -- เก็บ connection ไว้ตัดทิ้งตอนรันสคริปต์ซ้ำ (ไม่งั้นปุ่มลัดของตัวเก่าจะยังทำงาน)
     local connections = {}
