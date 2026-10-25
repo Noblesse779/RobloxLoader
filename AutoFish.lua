@@ -24,6 +24,7 @@ local CAST_TARGET = 0.9   -- ใช้เมื่อหา PerfectZone ไม�
 local PERFECT_AIM = 0.5   -- ปล่อยเมื่อปลายแถบถึงตำแหน่งไหนของ PerfectZone (0 = ขอบซ้าย, 0.5 = กลาง)
 local CAST_TIMEOUT = 5    -- กดค้างนานสุดกี่วินาที กันลูปค้าง
 local POWER_APPEAR_TIMEOUT = 1.5 -- กดแล้วรอหลอด Power ขึ้นกี่วินาที
+local BITE_TEXT = "กดเลย"   -- ข้อความบนปุ่มตอนปลากินเหยื่อ
 local HOOK_REACTION = 0.3 -- (โหมด remote) ปลากินแล้วรอกี่วินาทีก่อนส่ง "Hook" (ให้ดูเหมือนคนกด)
 local HOOK_COOLDOWN = 1   -- ยิง "Hook" ซ้ำได้ทุกกี่วินาที ตอนป้าย Bang ยังขึ้นอยู่
 local BITE_TIMEOUT = 30   -- โยนแล้วรอปลากินนานสุดกี่วินาที ก่อนโยนใหม่
@@ -220,9 +221,31 @@ local function bangOverHead()
     return false
 end
 
--- ปลากินเหยื่อหรือยัง: มี ! บนหัว หรือหน้าจอ Reel ขึ้นแล้ว
+-- ปุ่มแอคชันของเกม: ปกติเขียน "เหวี่ยง" พอปลากินจะเปลี่ยนเป็นสีแดง เขียน "กดเลย!"
+local actionLabel
+local function getActionLabel()
+    if actionLabel and actionLabel.Parent then
+        return actionLabel
+    end
+    actionLabel = nil
+    for _, d in ipairs(LocalPlayer.PlayerGui:GetDescendants()) do
+        if (d:IsA("TextLabel") or d:IsA("TextButton"))
+            and (d.Text:find("เหวี่ยง", 1, true) or d.Text:find(BITE_TEXT, 1, true)) then
+            actionLabel = d
+            break
+        end
+    end
+    return actionLabel
+end
+
+local function actionSaysBite()
+    local label = getActionLabel()
+    return label ~= nil and label.Text:find(BITE_TEXT, 1, true) ~= nil and isShown(label)
+end
+
+-- ปลากินเหยื่อหรือยัง: ปุ่มขึ้น "กดเลย!", มี ! บนหัว หรือหน้าจอ Reel ขึ้นแล้ว
 local function isBite()
-    return bangOverHead() or isReeling()
+    return actionSaysBite() or bangOverHead() or isReeling()
 end
 
 -- รอจนกว่าเงื่อนไขจะเป็นจริง หรือหมดเวลา / ถูกปิด
