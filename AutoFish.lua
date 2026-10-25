@@ -673,6 +673,7 @@ do
         sellAt = 100,    -- ปลาในกระเป๋าครบกี่ตัวแล้วขายทั้งหมด
         sellTravel = "walk", -- ไปร้านยังไง: "walk" = เดินไป (เนียนกว่า), "warp" = วาร์ป (เร็วกว่า)
         walkFallbackWarp = true, -- เดินแล้วติด/ตกน้ำ ให้วาร์ปแทน (ไม่งั้นจะติดค้างอยู่ตรงนั้น)
+        returnMode = "walk", -- ขายเสร็จแล้วกลับจุดตกปลายังไง: "walk" = เดิน, "warp" = วาร์ป, "stay" = ไม่กลับ (หยุดตกปลา)
         breakOn = false, breakEvery = 25, breakSeconds = 30, -- พักทุกประมาณกี่ตัว / พักประมาณกี่วิ (สุ่ม ±30-40%)
         nearbyOn = false, nearbyRange = 30, -- มีผู้เล่นอื่นเข้ามาใกล้กี่ studs ให้พัก
         rareAlert = true, rareStop = false, -- เตือน / หยุด เมื่อได้ปลาที่ไม่ใช่ระดับ "ทั่วไป"
@@ -893,6 +894,31 @@ do
     routeButton.Font = Enum.Font.SourceSansBold
     routeButton.TextSize = 14
     routeButton.Parent = routeRow
+
+    -- ขายเสร็จแล้วกลับยังไง: กดสลับ เดิน -> วาร์ป -> ไม่กลับ
+    local RETURN_LABELS = { walk = "เดินกลับ", warp = "วาร์ปกลับ", stay = "ไม่กลับ (หยุดตกที่ร้าน)" }
+    local RETURN_NEXT = { walk = "warp", warp = "stay", stay = "walk" }
+    local RETURN_COLORS = {
+        walk = Color3.fromRGB(40, 110, 150),
+        warp = Color3.fromRGB(150, 70, 40),
+        stay = Color3.fromRGB(70, 70, 70),
+    }
+    local returnRow = makeRow()
+    local returnButton = Instance.new("TextButton")
+    returnButton.Size = UDim2.new(1, 0, 1, 0)
+    returnButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+    returnButton.Font = Enum.Font.SourceSansBold
+    returnButton.TextSize = 14
+    returnButton.Parent = returnRow
+    local function refreshReturn()
+        returnButton.Text = "ขายเสร็จแล้ว: " .. RETURN_LABELS[settings.returnMode]
+        returnButton.BackgroundColor3 = RETURN_COLORS[settings.returnMode]
+    end
+    returnButton.MouseButton1Click:Connect(function()
+        settings.returnMode = RETURN_NEXT[settings.returnMode]
+        refreshReturn()
+    end)
+    refreshReturn()
 
     makeToggle(makeRow(), "เดินติดให้วาร์ปแทน",
         function() return settings.walkFallbackWarp end,
@@ -1540,8 +1566,18 @@ do
                         task.wait(0.8)
                         sellRequest(ids)
                         hrp = getRoot()
-                        if hrp then
-                            hrp.CFrame = back -- กลับจุดเดิม หันหน้าเข้าน้ำเหมือนเดิม
+                        if hrp and settings.returnMode ~= "stay" then
+                            if settings.returnMode == "walk" then
+                                walkTrip(back.Position, false)
+                                hrp = getRoot()
+                            end
+                            if hrp then
+                                if flatDist(hrp.Position, back.Position) <= 3 then
+                                    hrp.CFrame = CFrame.new(hrp.Position) * back.Rotation
+                                else
+                                    hrp.CFrame = back -- กลับจุดเดิม หันหน้าเข้าน้ำเหมือนเดิม
+                                end
+                            end
                         end
                         task.wait(0.8)
                     else
@@ -1567,11 +1603,13 @@ do
 
                         -- กลับจุดตกปลา: เดินกลับ ถ้าไม่ถึง (หรือขาไปวาร์ปมา) วาร์ปกลับจุดเดิมเป๊ะ
                         local returned = false
-                        if not warped then
+                        if not warped and settings.returnMode == "walk" then
                             returned = walkTrip(back.Position, false)
                         end
                         hrp = getRoot()
-                        if hrp then
+                        if settings.returnMode == "warp" and hrp then
+                            hrp.CFrame = back
+                        elseif settings.returnMode == "walk" and hrp then
                             if returned and flatDist(hrp.Position, back.Position) <= 3 then
                                 -- หันหน้ากลับทางเดิม (หมุนตัวอยู่กับที่ ไม่ได้วาร์ป)
                                 hrp.CFrame = CFrame.new(hrp.Position) * back.Rotation
@@ -1582,7 +1620,13 @@ do
                         task.wait(0.5)
                     end
                 end
-                resumeFishing("sell")
+                if settings.returnMode == "stay" then
+                    -- ไม่กลับจุดตกปลา = ไม่ตกต่อ (ยืนที่ร้านเหวี่ยงเบ็ดไม่ลงน้ำ)
+                    clearPauses()
+                    setStatus("ขายเสร็จ อยู่ที่ร้าน (หยุดตกปลา)")
+                else
+                    resumeFishing("sell")
+                end
             elseif not sellRequest(ids) and not shop then
                 bagLabel.Text = "ต้องอยู่ใกล้ร้าน: ไปยืนที่ร้านแล้วกด บันทึกจุดร้าน"
             end
