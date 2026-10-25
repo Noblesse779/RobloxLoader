@@ -20,7 +20,6 @@ local settings = {
     autoDash = false,
     autoTrain = false,   -- ถือของช่อง 1 ไว้ตลอด (ถือแล้วชาร์จพลังเอง ไม่ต้องคลิก)
     autoPlace = false,
-    autoSwap = true,  -- (ใช้กับวางอัตโนมัติ) เอาตัวกากบนแท่นออก ใส่ตัวที่โหดกว่าแทน
     antiAfk = false,
     autoRebirth = false,
     autoUpgrade = false,
@@ -314,35 +313,6 @@ local function placeToolOnStand(tool, stand)
     return ok
 end
 
-local function placeStrongest()
-    local tools = getCharacterTools()
-    if #tools == 0 then
-        return 0, "ไม่มีตัวละครในกระเป๋า"
-    end
-    local empty, err = getEmptyStands()
-    if err then return 0, err end
-    if #empty == 0 then
-        return 0, "แท่นเต็มแล้ว"
-    end
-
-    local hrp, hum = getRoot(), getHumanoid()
-    if not (hrp and hum) then return 0, "ไม่มีตัวละคร" end
-    local back = hrp.CFrame
-    local placed = 0
-    for i, slot in ipairs(empty) do
-        local tool = tools[i]
-        if not tool or not alive() then break end
-        if placeToolOnStand(tool, slot.stand) then
-            placed += 1
-        end
-    end
-    hum:UnequipTools()
-    hrp = getRoot()
-    if hrp then hrp.CFrame = back end
-    placedCount += placed
-    return placed
-end
-
 -- ===== เปลี่ยนตัวกากเป็นตัวโหด =====
 -- ตัวบนแท่นของเรา: { stand, brainrot, power }
 local function myPlacedCharacters()
@@ -398,31 +368,77 @@ local function pickUpFromStand(entry)
     return triggerPrompt(shownPrompt, function() return not standOccupied(entry.place) end)
 end
 
-local swappedCount = 0
-local SWAP_MARGIN = 1.1 -- ตัวในกระเป๋าต้องแรงกว่าตัวบนแท่นอย่างน้อย 10% ถึงจะเปลี่ยน (กันสลับไปมา)
-local function swapWeakest()
+-- ค่าที่ใช้เทียบ = เงินต่อวินาทีตอนเลเวล 1 (BaseRevenue) ไม่เอาเลเวลที่อัพแล้วมาคิด
+local function baseOf(obj)
+    for _, key in ipairs({ "BaseRevenue", "Revenue", "Income", "Value" }) do
+        local v = obj:GetAttribute(key)
+        if typeof(v) == "number" then return v end
+    end
+    return obj:IsA("Tool") and toolPower(obj) or nil
+end
+
+-- วางแผนก่อน แล้วค่อยทำทีเดียว:
+-- แท่น (ว่างก่อน แล้วเรียงตัวอ่อนสุด -> โหดสุด) จับคู่กับตัวในกระเป๋า (โหดสุด -> อ่อนสุด)
+-- เปลี่ยนเฉพาะคู่ที่ตัวในกระเป๋าโหดกว่าตอนเลเวล 1
+local function planStands()
+    local tools = getCharacterTools()
+    table.sort(tools, function(x, y) return (baseOf(x) or 0) > (baseOf(y) or 0) end)
+
+    local slots = {}
+    local empty = getEmptyStands()
+    for _, e in ipairs(empty or {}) do
+        table.insert(slots, { stand = e.stand, base = -math.huge })
+    end
+    local placed = myPlacedCharacters()
+    for _, p in ipairs(placed) do
+        p.base = baseOf(p.brainrot) or p.power
+    end
+    table.sort(placed, function(x, y) return x.base < y.base end)
+    for _, p in ipairs(placed) do
+        table.insert(slots, p)
+    end
+
+    local plan = {}
+    for i, slot in ipairs(slots) do
+        local tool = tools[i]
+        if not tool then break end
+        local toolBase = baseOf(tool) or 0
+        if toolBase <= slot.base then break end -- ตัวที่เหลือในกระเป๋าไม่โหดกว่าแล้ว
+        table.insert(plan, { tool = tool, slot = slot, toolBase = toolBase })
+    end
+    return plan
+end
+
+local placeInfo = "-"
+local function optimizeStands()
+    local plan = planStands()
+    if #plan == 0 then
+        placeInfo = "ตัวบนแท่นโหดสุดแล้ว (เทียบเลเวล 1)"
+        return 0
+    end
     local hrp = getRoot()
     if not hrp then return 0 end
     local back = hrp.CFrame
-    local swapped = 0
-    for _ = 1, 20 do -- กันวนไม่จบ
+    local done = 0
+    for i, step in ipairs(plan) do
         if not alive() then break end
-        local tools = getCharacterTools()
-        local placedList = myPlacedCharacters()
-        local best, weakest = tools[1], placedList[1]
-        if not (best and weakest) then break end
-        if (toolPower(best) or 0) <= weakest.power * SWAP_MARGIN then break end
-        if not pickUpFromStand(weakest) then break end
-        task.wait(0.5)
-        if not placeToolOnStand(best, weakest.stand) then break end
-        swapped += 1
+        placeInfo = ("กำลังจัด %d/%d: %s"):format(i, #plan, step.tool.Name)
+        local ok = true
+        if step.slot.brainrot then
+            ok = pickUpFromStand(step.slot)
+            task.wait(0.3)
+        end
+        if ok and placeToolOnStand(step.tool, step.slot.stand) then
+            done += 1
+        end
     end
     local hum = getHumanoid()
     if hum then hum:UnequipTools() end
     hrp = getRoot()
     if hrp then hrp.CFrame = back end
-    swappedCount += swapped
-    return swapped
+    placedCount += done
+    placeInfo = ("จัดเสร็จ %d/%d ตัว"):format(done, #plan)
+    return done, #plan
 end
 
 ---------------------------------------------------------------- รีเบิร์ธ
@@ -870,20 +886,12 @@ task.spawn(function()
         local didSomething = false
         if settings.autoPlace and os.clock() - lastPlace > settings.placeEvery then
             lastPlace = os.clock()
-            busy += 1
-            local n, why = placeStrongest()
-            local swapped = 0
-            if settings.autoSwap then
-                swapped = swapWeakest()
-            end
-            busy -= 1
-            if swapped > 0 then
-                setStatus(("เปลี่ยนตัวกากเป็นตัวโหดแล้ว %d ตัว"):format(swapped))
-            end
-            if n > 0 then
-                setStatus(("วางตัวละครแล้ว %d ตัว"):format(n))
-            elseif why then
-                setStatus("วางตัวละคร: " .. why)
+            -- เช็คก่อนว่ามีอะไรต้องจัดไหม มีค่อยทำทีเดียวทั้งหมด
+            if #planStands() > 0 then
+                busy += 1
+                optimizeStands()
+                busy -= 1
+                setStatus(placeInfo)
             end
             didSomething = true
         end
@@ -1019,44 +1027,22 @@ rebirthSection:AddButton({
 -- ตัวละคร
 local charSection = Tabs.chars:AddSection("วางตัวที่แข็งแกร่งสุด")
 charSection:AddToggle("DFPlace", {
-    Title = "วางตัวละครอัตโนมัติ",
-    Description = "เจอแท่นว่างในฐาน เอาตัวที่เงินต่อวินาทีสูงสุดไปวาง",
+    Title = "จัดตัวละครบนแท่นอัตโนมัติ",
+    Description = "เช็คทุก 30 วิ: เติมแท่นว่าง + เปลี่ยนตัวกากเป็นตัวที่โหดสุดในกระเป๋า (เทียบเงินต่อวิตอนเลเวล 1) วางแผนก่อนแล้วทำทีเดียว",
     Default = false,
 }):OnChanged(function(v) settings.autoPlace = v end)
 charSection:AddButton({
-    Title = "วางตอนนี้เลย",
-    Callback = function()
-        task.spawn(function()
-            local n, why = placeStrongest()
-            Fluent:Notify({
-                Title = "วางตัวละคร",
-                Content = n > 0 and ("วางแล้ว %d ตัว"):format(n) or (why or "ไม่ได้วาง"),
-                Duration = 5,
-            })
-        end)
-    end,
-})
-charSection:AddToggle("DFSwap", {
-    Title = "เปลี่ยนตัวกากเป็นตัวโหด",
-    Description = "แท่นเต็มแล้ว: เก็บตัวที่อ่อนสุดออก เอาตัวในกระเป๋าที่โหดกว่าใส่แทน (ทำงานกับวางอัตโนมัติ)",
-    Default = settings.autoSwap,
-}):OnChanged(function(v) settings.autoSwap = v end)
-charSection:AddButton({
-    Title = "เปลี่ยนตัวกากตอนนี้เลย",
+    Title = "จัดตัวละครตอนนี้เลย",
     Callback = function()
         task.spawn(function()
             busy += 1
-            placeStrongest()
-            local n = swapWeakest()
+            local n, total = optimizeStands()
             busy -= 1
-            Fluent:Notify({
-                Title = "เปลี่ยนตัวละคร",
-                Content = n > 0 and ("เปลี่ยนแล้ว %d ตัว"):format(n) or "ไม่มีตัวในกระเป๋าที่โหดกว่าตัวบนแท่น",
-                Duration = 5,
-            })
+            Fluent:Notify({ Title = "จัดตัวละคร", Content = placeInfo, Duration = 5 })
         end)
     end,
 })
+local placePara = charSection:AddParagraph({ Title = "ผลการจัด", Content = "-" })
 local charsPara = charSection:AddParagraph({ Title = "ในกระเป๋า (เรียงจากแรงสุด)", Content = "-" })
 
 local upgradeSection = Tabs.chars:AddSection("อัพเกรดตัวละคร")
@@ -1146,10 +1132,11 @@ task.spawn(function()
             statusPara:SetDesc(("%s\nบินแล้ว %d รอบ  •  วางตัวละครแล้ว %d ตัว  •  รีเบิร์ธ %d ครั้ง\nกด x2 ไป %d ครั้ง  •  กดของเด้งไป %d ครั้ง\nรีเบิร์ธ: %s")
                 :format(status, dashCount, placedCount, rebirthCount, x2Count, popupCount, rebirthInfo))
         end)
+        pcall(function() placePara:SetDesc(placeInfo) end)
         local lines = {}
         for i, t in ipairs(getCharacterTools()) do
             if i > 8 then break end
-            table.insert(lines, ("%d. %s  (%s)"):format(i, t.Name, tostring(toolPower(t) or "?")))
+            table.insert(lines, ("%d. %s  ($%s/s ตอนเลเวล 1)"):format(i, t.Name, shortNumber(baseOf(t))))
         end
         pcall(function()
             charsPara:SetDesc(#lines > 0 and table.concat(lines, "\n") or "ไม่เจอตัวละครในกระเป๋า")
