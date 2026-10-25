@@ -1022,13 +1022,29 @@ local function auraCheck()
         return option ~= nil or findAuraShop() ~= nil
     end)
     if option and not findAuraShop() then
-        pressButton(option)
+        -- ลอง 1) กดที่ตัวเลือก  2) กดปุ่มเลข 1 บนคีย์บอร์ด (ตัวเลือกขึ้นต้นด้วย "1.")
+        if option:IsA("GuiButton") then
+            pressButton(option)
+        end
+        if not waitFor(1.5, function() return findAuraShop() ~= nil end) then
+            local hadTool = getTrainTool()
+            hadTool = hadTool and hadTool.Parent == LocalPlayer.Character
+            pressKey(Enum.KeyCode.One, 0.1)
+            task.wait(0.3)
+            -- ปุ่ม 1 อาจไปหยิบของช่อง 1 ขึ้นมาด้วย ถ้าเดิมไม่ได้ถือ เก็บคืน
+            local tool = getTrainTool()
+            local hum = getHumanoid()
+            if not hadTool and tool and hum and tool.Parent == LocalPlayer.Character then
+                hum:UnequipTools()
+            end
+        end
     end
     if waitFor(4, function() return findAuraShop() ~= nil end) then
         task.wait(0.5)
         pcall(auraCheckInner)
     else
-        auraInfo = option and "กดเลือก \"แสดงออร่า\" แล้วแต่ร้านไม่เปิด"
+        auraInfo = option and ("เลือก \"แสดงออร่า\" แล้วแต่ร้านไม่เปิด (ตัวเลือกเป็น %s ใน %s)")
+                :format(option.ClassName, (option:FindFirstAncestorWhichIsA("LayerCollector") or option).ClassName)
             or "เหยียบพื้นหน้าร้านแล้วแต่คนขายไม่ถาม"
     end
     hrp = getRoot()
