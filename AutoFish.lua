@@ -36,8 +36,8 @@ local BITE_TIMEOUT = 30   -- โยนแล้วรอปลากินนา
 local INPUT_MODE = "remote"
 local CAST_DISTANCE = 20  -- (โหมด remote) ให้เบ็ดตกห่างจากตัวกี่ studs ข้างหน้า
 local CAST_PERFECT = true -- (โหมด remote) ค่าตัวที่ 3 ของ "Cast" ที่เกมส่งตอนเหวี่ยงเข้า PerfectZone
-local REEL_FINISH_DELAY = 3 -- (โหมด remote) หลัง Hook รอกี่วินาทีแล้วส่ง "Reel", true (ดึงสำเร็จ)
-                            -- ส่งเร็วเกินไปเซิร์ฟเวอร์อาจจับได้ว่าผิดปกติ
+local REEL_FINISH_DELAY = 0 -- (โหมด remote) หลัง Hook รอกี่วินาทีแล้วส่ง "Reel", true (ข้ามมินิเกม ได้ปลาเลย)
+                            -- ถ้าเซิร์ฟเวอร์ไม่ให้ปลา ให้เพิ่มเป็น 0.5 / 1 / 2
 local USE_EXECUTOR_MOUSE = true -- (โหมด mouse) false = บังคับใช้ VirtualInputManager แทน mouse1press
 local REEL_HOLD = false   -- false = คลิกทีละครั้ง, true = กดค้างตอน Zone ต้องเลื่อนหาปลา (ลองสลับถ้าแบบแรกไม่ได้ผล)
 local REEL_INVERT = false -- true ถ้าคลิกแล้ว Zone เลื่อนไปทางตรงข้ามกับที่ควร
@@ -409,9 +409,11 @@ local function remoteRound(myId)
     if not isActive(myId) then return end
     remote:FireServer("Hook")
 
-    setStatus(("ดึงปลา รอ %.1f วิ"):format(REEL_FINISH_DELAY))
-    waitFor(myId, REEL_FINISH_DELAY, function() return false end)
-    if not isActive(myId) then return end
+    if REEL_FINISH_DELAY > 0 then
+        setStatus(("ดึงปลา รอ %.1f วิ"):format(REEL_FINISH_DELAY))
+        waitFor(myId, REEL_FINISH_DELAY, function() return false end)
+        if not isActive(myId) then return end
+    end
     remote:FireServer("Reel", true) -- ปลาเด้งเข้าตัว
     justCaught = true
     setStatus("ได้ปลาแล้ว โยนต่อ")
