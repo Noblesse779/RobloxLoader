@@ -18,8 +18,9 @@ local function getCatchUI()
     return nil
 end
 
-local CAST_BAR_NAME = "ProgressBar" -- ชื่อแถบที่ยืดตามแรงชาร์จ ซึ่งอยู่ข้างใน Power
-local CAST_TARGET = 0.9   -- ชาร์จหลอดถึง 90%
+-- โครงสร้าง: Power > Track > Fill (แถบที่ยืดตามแรงชาร์จ), PerfectZone (โซนแรงพอดี)
+local CAST_TARGET = 0.9   -- ใช้เมื่อหา PerfectZone ไม่เจอ: ชาร์จหลอดถึง 90%
+local PERFECT_AIM = 0.5   -- ปล่อยเมื่อปลายแถบถึงตำแหน่งไหนของ PerfectZone (0 = ขอบซ้าย, 0.5 = กลาง)
 local CAST_TIMEOUT = 5    -- กดค้างนานสุดกี่วินาที กันลูปค้าง
 
 -- ลบ UI เก่าถ้ารันสคริปต์ซ้ำ
@@ -119,22 +120,36 @@ local function centerX(gui)
     return gui.AbsolutePosition.X + gui.AbsoluteSize.X / 2
 end
 
+-- ปลายแถบ Fill ถึงจุดที่ต้องการปล่อยหรือยัง
+local function castReady(track)
+    local fill = track:FindFirstChild("Fill")
+    if not fill then return true end
+    local zone = track:FindFirstChild("PerfectZone")
+    if zone and zone.Visible then
+        local fillEnd = fill.AbsolutePosition.X + fill.AbsoluteSize.X
+        local aim = zone.AbsolutePosition.X + zone.AbsoluteSize.X * PERFECT_AIM
+        return fillEnd >= aim
+    end
+    return fill.Size.X.Scale >= CAST_TARGET
+end
+
 -- ลูปการทำงานหลัก
 local function autoFishLoop(myId)
     while isActive(myId) do
         local castUI = getCastUI()
         local catchUI = getCatchUI()
 
-        -- เงื่อนไขที่ 1: ชาร์จหลอดให้ถึงจุดสีเหลืองหลังสุด
-        if castUI and castUI.Visible and castUI:FindFirstChild(CAST_BAR_NAME) then
+        local track = castUI and castUI:FindFirstChild("Track")
+
+        -- เงื่อนไขที่ 1: ชาร์จหลอดแล้วปล่อยตอนปลายแถบเข้า PerfectZone
+        if track and castUI.Visible and track:FindFirstChild("Fill") then
             setMouse(true) -- กดค้าง
             local elapsed = 0
             repeat
-                elapsed += task.wait(0.05)
+                elapsed += task.wait() -- เช็คทุกเฟรม ปล่อยได้แม่นกว่า
             until not isActive(myId)
                 or not castUI.Visible
-                or not castUI:FindFirstChild(CAST_BAR_NAME)
-                or castUI[CAST_BAR_NAME].Size.X.Scale >= CAST_TARGET
+                or castReady(track)
                 or elapsed > CAST_TIMEOUT
             setMouse(false) -- ปล่อยเสมอ ไม่ให้เมาส์ค้าง
             if isActive(myId) then
