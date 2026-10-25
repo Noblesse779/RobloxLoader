@@ -21,7 +21,7 @@ local settings = {
     autoPlace = false,
     antiAfk = false,
     autoRebirth = false,
-    rebirthEvery = 30,  -- กดรีเบิร์ธทุกกี่วิ (เงินไม่พอ เซิร์ฟเวอร์จะไม่ให้รีเบิร์ธเอง)
+    rebirthCheckEvery = 2, -- เช็คหลอดรีเบิร์ธทุกกี่วิ
     chargeTimeout = 20, -- ชาร์จนานสุดกี่วิ (ถ้าอ่าน % ไม่ได้ จะปล่อยตอนครบเวลานี้)
     placeEvery = 30,    -- เช็คแท่นว่าง/ตัวใหม่ทุกกี่วิ
 }
@@ -297,12 +297,59 @@ local function rebirth()
     return true
 end
 
+-- อ่านหลอดในหน้าต่างการเกิดใหม่ "ระดับพลัง 53 / 1K" -> พลังตอนนี้, พลังที่ต้องการ
+local SUFFIX = {
+    K = 1e3, M = 1e6, B = 1e9, T = 1e12, QA = 1e15, QI = 1e18,
+    SX = 1e21, SP = 1e24, OC = 1e27, NO = 1e30, DC = 1e33,
+}
+local function parseNumber(text)
+    if not text then return nil end
+    local num, suffix = text:gsub(",", ""):match("([%d%.]+)%s*(%a*)")
+    num = tonumber(num)
+    if not num then return nil end
+    if suffix and suffix ~= "" then
+        local mult = SUFFIX[suffix:upper()]
+        if not mult then return nil end
+        num *= mult
+    end
+    return num
+end
+
+local rebirthLabel
+local function readRebirthBar()
+    if not (rebirthLabel and rebirthLabel.Parent) then
+        rebirthLabel = nil
+        for _, d in ipairs(LocalPlayer.PlayerGui:GetDescendants()) do
+            if d:IsA("TextLabel") and d.Text:find("ระดับพลัง", 1, true) and d.Text:find("/", 1, true) then
+                rebirthLabel = d
+                break
+            end
+        end
+    end
+    if not rebirthLabel then return nil end
+    -- RichText อาจมีแท็ก <b> ปน ลบออกก่อน
+    local text = rebirthLabel.Text:gsub("<[^>]->", "")
+    local have, need = text:match("ระดับพลัง%s*([%d%.,]+%s*%a*)%s*/%s*([%d%.,]+%s*%a*)")
+    return parseNumber(have), parseNumber(need)
+end
+
+local rebirthInfo = "-"
 task.spawn(function()
     while alive() do
         if settings.autoRebirth then
-            rebirth()
+            local have, need = readRebirthBar()
+            if not need then
+                rebirthInfo = "อ่านหลอดไม่ได้: เปิดหน้าต่างการเกิดใหม่สักครั้ง"
+            else
+                rebirthInfo = ("พลัง %s / %s"):format(tostring(have), tostring(need))
+                if have and have >= need then
+                    rebirth()
+                    rebirthInfo = "หลอดเต็ม รีเบิร์ธแล้ว!"
+                    task.wait(5) -- รอเกมรีเซ็ตพลังและอัปเดตหลอดใหม่
+                end
+            end
         end
-        task.wait(math.max(5, settings.rebirthEvery))
+        task.wait(math.max(1, settings.rebirthCheckEvery))
     end
 end)
 
@@ -421,17 +468,10 @@ dashSection:AddButton({
 
 local rebirthSection = Tabs.main:AddSection("รีเบิร์ธ")
 rebirthSection:AddToggle("DFRebirth", {
-    Title = "รีเบิร์ธอัตโนมัติ",
-    Description = "กดรีเบิร์ธให้เป็นระยะ (เงินไม่ถึง เกมจะไม่ให้รีเบิร์ธเอง)",
+    Title = "รีเบิร์ธอัตโนมัติเมื่อหลอดเต็ม",
+    Description = "ดูหลอด \"ระดับพลัง X / Y\" ในหน้าต่างการเกิดใหม่ เต็มเมื่อไหร่รีเบิร์ธให้",
     Default = false,
 }):OnChanged(function(v) settings.autoRebirth = v end)
-rebirthSection:AddInput("DFRebirthEvery", {
-    Title = "กดทุก (วินาที)",
-    Default = tostring(settings.rebirthEvery),
-    Numeric = true,
-    Finished = true,
-    Callback = function(v) settings.rebirthEvery = tonumber(v) or settings.rebirthEvery end,
-})
 rebirthSection:AddButton({
     Title = "รีเบิร์ธตอนนี้",
     Callback = function()
@@ -474,8 +514,8 @@ Window:SelectTab(1)
 task.spawn(function()
     while alive() and not Fluent.Unloaded do
         pcall(function()
-            statusPara:SetDesc(("%s\nบินแล้ว %d รอบ  •  วางตัวละครแล้ว %d ตัว  •  กดรีเบิร์ธ %d ครั้ง")
-                :format(status, dashCount, placedCount, rebirthCount))
+            statusPara:SetDesc(("%s\nบินแล้ว %d รอบ  •  วางตัวละครแล้ว %d ตัว  •  รีเบิร์ธ %d ครั้ง\nรีเบิร์ธ: %s")
+                :format(status, dashCount, placedCount, rebirthCount, rebirthInfo))
         end)
         local lines = {}
         for i, t in ipairs(getCharacterTools()) do
