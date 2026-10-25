@@ -20,6 +20,7 @@ local settings = {
     autoDash = false,
     autoTrain = false,   -- ถือของช่อง 1 ไว้ตลอด (ถือแล้วชาร์จพลังเอง ไม่ต้องคลิก)
     autoPlace = false,
+    autoSwap = true,  -- (ใช้กับวางอัตโนมัติ) เอาตัวกากบนแท่นออก ใส่ตัวที่โหดกว่าแทน
     antiAfk = false,
     autoRebirth = false,
     autoUpgrade = false,
@@ -231,7 +232,7 @@ local function getEmptyStands()
     local used = occupiedStands()
     local empty = {}
     for _, d in ipairs(plot:GetDescendants()) do
-        if d:IsA("Model") and d.Name:match("^ModelStand") and not used[d:GetFullName()] then
+        if d:IsA("Model") and d.Name:match("^ModelStand%d") and not used[d:GetFullName()] then
             -- ปุ่ม "สถานที่" (E) เกมสร้าง/เปิดตอนถือตัวละครอยู่ เลยไม่หาปุ่มตรงนี้
             table.insert(empty, { stand = d })
         end
@@ -246,10 +247,15 @@ local function pressKey(key, hold)
     VirtualInputManager:SendKeyEvent(false, key, false, game)
 end
 
-local function triggerPrompt(prompt, tool)
-    local function placed()
-        return tool.Parent == nil
-            or not (tool:IsDescendantOf(LocalPlayer.Character or game) or tool:IsDescendantOf(LocalPlayer))
+-- done = Tool (สำเร็จเมื่อตัวละครหายจากมือ) หรือฟังก์ชันที่คืน true เมื่อสำเร็จ
+local function triggerPrompt(prompt, done)
+    local placed = done
+    if typeof(done) == "Instance" then
+        local tool = done
+        placed = function()
+            return tool.Parent == nil
+                or not (tool:IsDescendantOf(LocalPlayer.Character or game) or tool:IsDescendantOf(LocalPlayer))
+        end
     end
     local hold = (prompt.HoldDuration or 0) + 0.15
 
@@ -283,6 +289,31 @@ ProximityPromptService.PromptHidden:Connect(function(prompt)
 end)
 
 local placedCount = 0
+-- ถือตัวละคร -> วาร์ปไปที่แท่น -> กดปุ่ม "สถานที่" ที่ขึ้นบนจอ
+local function placeToolOnStand(tool, stand)
+    local hum = getHumanoid()
+    if not hum then return false end
+    setStatus(("วาง %s (%s)"):format(tool.Name, tostring(toolPower(tool) or "?")))
+    hum:EquipTool(tool)
+    task.wait(0.3)
+    local hrp = getRoot()
+    if not hrp then return false end
+    shownPrompt = nil
+    hrp.CFrame = stand:GetPivot() + Vector3.new(0, 3, 0)
+    setStatus("รอปุ่มสถานที่ขึ้น: " .. stand.Name)
+    if not waitFor(2, function() return shownPrompt ~= nil end) then
+        setStatus("ปุ่มวางไม่ขึ้นที่ " .. stand.Name)
+        return false
+    end
+    setStatus(("กดปุ่ม \"%s\""):format(shownPrompt.ActionText))
+    local ok = triggerPrompt(shownPrompt, tool)
+    if not ok then
+        setStatus("ปุ่มขึ้นแต่วางไม่ได้ที่ " .. stand.Name)
+    end
+    task.wait(0.4)
+    return ok
+end
+
 local function placeStrongest()
     local tools = getCharacterTools()
     if #tools == 0 then
@@ -301,26 +332,8 @@ local function placeStrongest()
     for i, slot in ipairs(empty) do
         local tool = tools[i]
         if not tool or not alive() then break end
-        setStatus(("วาง %s (%s)"):format(tool.Name, tostring(toolPower(tool) or "?")))
-        hum:EquipTool(tool)
-        task.wait(0.3)
-        hrp = getRoot()
-        if not hrp then break end
-        shownPrompt = nil
-        hrp.CFrame = slot.stand:GetPivot() + Vector3.new(0, 3, 0)
-        -- รอปุ่ม "สถานที่" ขึ้นบนจอ แล้วกดปุ่มตัวนั้นเลย
-        setStatus("รอปุ่มสถานที่ขึ้น: " .. slot.stand.Name)
-        if waitFor(2, function() return shownPrompt ~= nil end) then
-            setStatus(("กดปุ่ม \"%s\""):format(shownPrompt.ActionText))
-            if triggerPrompt(shownPrompt, tool) then
-                placed += 1
-            else
-                setStatus("ปุ่มขึ้นแต่วางไม่ได้ที่ " .. slot.stand.Name)
-            end
-            task.wait(0.4)
-        else
-            setStatus("ปุ่มวางไม่ขึ้นที่ " .. slot.stand.Name)
-            task.wait(0.3)
+        if placeToolOnStand(tool, slot.stand) then
+            placed += 1
         end
     end
     hum:UnequipTools()
@@ -328,6 +341,88 @@ local function placeStrongest()
     if hrp then hrp.CFrame = back end
     placedCount += placed
     return placed
+end
+
+-- ===== เปลี่ยนตัวกากเป็นตัวโหด =====
+-- ตัวบนแท่นของเรา: { stand, brainrot, power }
+local function myPlacedCharacters()
+    local plot = getMyPlot()
+    local folder = workspace:FindFirstChild("WorkingBrainrots")
+    if not (plot and folder) then return {} end
+    -- ชื่อเต็มของแท่น -> แท่น (attribute Place เก็บเป็นชื่อเต็ม)
+    local stands = {}
+    for _, d in ipairs(plot:GetDescendants()) do
+        if d:IsA("Model") and d.Name:match("^ModelStand%d") then
+            stands[d:GetFullName()] = d
+        end
+    end
+    local list = {}
+    for _, b in ipairs(folder:GetChildren()) do
+        local place = b:GetAttribute("Place")
+        local stand = typeof(place) == "string" and stands[place]
+        if stand then
+            local power = b:GetAttribute("Revenue") or b:GetAttribute("BaseRevenue")
+            if stand and typeof(power) == "number" then
+                table.insert(list, { stand = stand, brainrot = b, power = power, place = place })
+            end
+        end
+    end
+    table.sort(list, function(x, y) return x.power < y.power end) -- อ่อนสุดก่อน
+    return list
+end
+
+local function standOccupied(place)
+    local folder = workspace:FindFirstChild("WorkingBrainrots")
+    if not folder then return false end
+    for _, b in ipairs(folder:GetChildren()) do
+        if b:GetAttribute("Place") == place then return true end
+    end
+    return false
+end
+
+-- เก็บตัวละครออกจากแท่น (มือว่าง -> ยืนที่แท่น -> กดปุ่มที่ขึ้น)
+local function pickUpFromStand(entry)
+    local hum = getHumanoid()
+    if hum then hum:UnequipTools() end
+    task.wait(0.2)
+    local hrp = getRoot()
+    if not hrp then return false end
+    shownPrompt = nil
+    hrp.CFrame = entry.stand:GetPivot() + Vector3.new(0, 3, 0)
+    setStatus("รอปุ่มเก็บตัวละคร: " .. entry.stand.Name)
+    if not waitFor(2, function() return shownPrompt ~= nil end) then
+        setStatus("ปุ่มเก็บไม่ขึ้นที่ " .. entry.stand.Name)
+        return false
+    end
+    setStatus(("เก็บ %s (กด \"%s\")"):format(entry.brainrot.Name, shownPrompt.ActionText))
+    return triggerPrompt(shownPrompt, function() return not standOccupied(entry.place) end)
+end
+
+local swappedCount = 0
+local SWAP_MARGIN = 1.1 -- ตัวในกระเป๋าต้องแรงกว่าตัวบนแท่นอย่างน้อย 10% ถึงจะเปลี่ยน (กันสลับไปมา)
+local function swapWeakest()
+    local hrp = getRoot()
+    if not hrp then return 0 end
+    local back = hrp.CFrame
+    local swapped = 0
+    for _ = 1, 20 do -- กันวนไม่จบ
+        if not alive() then break end
+        local tools = getCharacterTools()
+        local placedList = myPlacedCharacters()
+        local best, weakest = tools[1], placedList[1]
+        if not (best and weakest) then break end
+        if (toolPower(best) or 0) <= weakest.power * SWAP_MARGIN then break end
+        if not pickUpFromStand(weakest) then break end
+        task.wait(0.5)
+        if not placeToolOnStand(best, weakest.stand) then break end
+        swapped += 1
+    end
+    local hum = getHumanoid()
+    if hum then hum:UnequipTools() end
+    hrp = getRoot()
+    if hrp then hrp.CFrame = back end
+    swappedCount += swapped
+    return swapped
 end
 
 ---------------------------------------------------------------- รีเบิร์ธ
@@ -777,7 +872,14 @@ task.spawn(function()
             lastPlace = os.clock()
             busy += 1
             local n, why = placeStrongest()
+            local swapped = 0
+            if settings.autoSwap then
+                swapped = swapWeakest()
+            end
             busy -= 1
+            if swapped > 0 then
+                setStatus(("เปลี่ยนตัวกากเป็นตัวโหดแล้ว %d ตัว"):format(swapped))
+            end
             if n > 0 then
                 setStatus(("วางตัวละครแล้ว %d ตัว"):format(n))
             elseif why then
@@ -929,6 +1031,27 @@ charSection:AddButton({
             Fluent:Notify({
                 Title = "วางตัวละคร",
                 Content = n > 0 and ("วางแล้ว %d ตัว"):format(n) or (why or "ไม่ได้วาง"),
+                Duration = 5,
+            })
+        end)
+    end,
+})
+charSection:AddToggle("DFSwap", {
+    Title = "เปลี่ยนตัวกากเป็นตัวโหด",
+    Description = "แท่นเต็มแล้ว: เก็บตัวที่อ่อนสุดออก เอาตัวในกระเป๋าที่โหดกว่าใส่แทน (ทำงานกับวางอัตโนมัติ)",
+    Default = settings.autoSwap,
+}):OnChanged(function(v) settings.autoSwap = v end)
+charSection:AddButton({
+    Title = "เปลี่ยนตัวกากตอนนี้เลย",
+    Callback = function()
+        task.spawn(function()
+            busy += 1
+            placeStrongest()
+            local n = swapWeakest()
+            busy -= 1
+            Fluent:Notify({
+                Title = "เปลี่ยนตัวละคร",
+                Content = n > 0 and ("เปลี่ยนแล้ว %d ตัว"):format(n) or "ไม่มีตัวในกระเป๋าที่โหดกว่าตัวบนแท่น",
                 Duration = 5,
             })
         end)
