@@ -30,6 +30,8 @@ local MIN_BITE_WAIT = 1.5 -- โยนแล้วอย่างน้อยก
 local BITE_TEXT = "กดเลย"   -- ข้อความบนปุ่มตอนปลากินเหยื่อ
 local HOOK_REACTION = 0.3 -- (โหมด remote) ปลากินแล้วรอกี่วินาทีก่อนส่ง "Hook" (ให้ดูเหมือนคนกด)
 local HOOK_COOLDOWN = 1   -- ยิง "Hook" ซ้ำได้ทุกกี่วินาที ตอนป้าย Bang ยังขึ้นอยู่
+local SKIP_MINIGAME = false     -- true = ลองข้ามมินิเกมดึงปลา (ยิง "Reel", true เอง) ถ้าเซิร์ฟเวอร์ไม่ให้ปลาจะเล่นมินิเกมต่อให้
+local SKIP_MINIGAME_DELAY = 1.5 -- ตวัดแล้วรอกี่วินาทีก่อนยิง (เร็วไปเซิร์ฟเวอร์อาจไม่ให้ปลา ลองปรับดู)
 local AFTER_CATCH_DELAY = 2 -- ได้ปลาแล้วรอกี่วินาทีก่อนโยนใหม่ (ถ้าโยนไม่ออกเพราะหน้าต่างโชว์ปลาบัง ให้เพิ่ม)
 local READY_TIMEOUT = 5   -- หลังได้ปลา รอปุ่มกลับเป็น "เหวี่ยง" นานสุดกี่วินาที ก่อนลองเหวี่ยงต่อเลย
 local CAST_DELAY = 0.5    -- ก่อนเหวี่ยงแต่ละครั้งรออีกกี่วินาที
@@ -556,8 +558,26 @@ local function playRound(myId)
     if not isActive(myId) then return end
     clickMouse()
 
+    -- 4ก) ลองข้ามมินิเกม: ยิง "Reel", true เอง แล้วดูว่าหน้าต่างโชว์ปลาขึ้นไหม
+    if SKIP_MINIGAME and getActionRemote() then
+        setStatus(("ข้ามมินิเกม รอ %.1f วิ"):format(SKIP_MINIGAME_DELAY))
+        waitFor(myId, SKIP_MINIGAME_DELAY, function() return false end)
+        if not isActive(myId) then return end
+        getActionRemote():FireServer("Reel", true)
+        if waitFor(myId, 2, catchPopupShown) then
+            setStatus(("ข้ามได้! โยนใหม่ใน %.1f วิ"):format(AFTER_CATCH_DELAY))
+            waitFor(myId, AFTER_CATCH_DELAY, function() return false end)
+            skipReadyWait = true
+            return
+        end
+        if not isActive(myId) then return end
+        setStatus("ข้ามไม่ได้ เล่นมินิเกมแทน")
+    end
+
     -- 4) มินิเกม: ประคอง Zone ให้อยู่ตรงปลา จนปุ่มกลับเป็น "เหวี่ยง"
-    setStatus("เล่นมินิเกม")
+    if not (SKIP_MINIGAME and getActionRemote()) then
+        setStatus("เล่นมินิเกม")
+    end
     waitFor(myId, 1, function() return not actionSaysBite() end)
     local caught = false
     waitFor(myId, REEL_TIMEOUT, function()
