@@ -651,3 +651,391 @@ end
 ToggleButton.MouseButton1Click:Connect(function()
     setEnabled(not isAutoFishing)
 end)
+
+-- =====================================================================
+-- ฟังก์ชันเสริม (แยกจากระบบตกปลา ไม่ได้แก้อะไรในส่วนตกปลา)
+-- 1) กันโดนเตะ AFK  2) นับสถิติ  3) ปุ่มลัด  4) ตั้งเวลาหยุด  5) ย่อหน้าต่าง  6) วิ่งเร็ว/กระโดดสูง
+-- =====================================================================
+do
+    local RunService = game:GetService("RunService")
+
+    local TOGGLE_KEY = Enum.KeyCode.F -- ปุ่มเปิด/ปิดตกปลา
+    local HIDE_KEY = Enum.KeyCode.H   -- ปุ่มซ่อน/แสดงหน้าต่าง
+
+    local settings = {
+        antiAfk = true,
+        speedOn = false, speed = 32,
+        jumpOn = false, jump = 100,
+        stopFish = 0,    -- 0 = ไม่จำกัด
+        stopMinutes = 0, -- 0 = ไม่จำกัด
+    }
+
+    ---------------------------------------------------------------- UI
+    local FULL_HEIGHT = 345
+
+    MainFrame.Size = UDim2.new(0, 220, 0, FULL_HEIGHT)
+    ToggleButton.Size = UDim2.new(1, -10, 0, 45)
+    ToggleButton.Position = UDim2.new(0, 5, 0, 25)
+    StatusLabel.Position = UDim2.new(0, 5, 0, 72)
+
+    local Extras = Instance.new("Frame")
+    Extras.Size = UDim2.new(1, -10, 1, -98)
+    Extras.Position = UDim2.new(0, 5, 0, 95)
+    Extras.BackgroundTransparency = 1
+    Extras.Parent = MainFrame
+
+    local layout = Instance.new("UIListLayout")
+    layout.Padding = UDim.new(0, 4)
+    layout.SortOrder = Enum.SortOrder.LayoutOrder
+    layout.Parent = Extras
+
+    local order = 0
+    local function nextOrder()
+        order += 1
+        return order
+    end
+
+    local function makeLabel(text, height, color)
+        local l = Instance.new("TextLabel")
+        l.Size = UDim2.new(1, 0, 0, height or 18)
+        l.BackgroundTransparency = 1
+        l.Text = text
+        l.TextColor3 = color or Color3.fromRGB(220, 220, 220)
+        l.Font = Enum.Font.SourceSans
+        l.TextSize = 14
+        l.TextXAlignment = Enum.TextXAlignment.Left
+        l.TextYAlignment = Enum.TextYAlignment.Top
+        l.LayoutOrder = nextOrder()
+        l.Parent = Extras
+        return l
+    end
+
+    local function makeRow()
+        local row = Instance.new("Frame")
+        row.Size = UDim2.new(1, 0, 0, 24)
+        row.BackgroundTransparency = 1
+        row.LayoutOrder = nextOrder()
+        row.Parent = Extras
+        return row
+    end
+
+    -- ปุ่มเปิด/ปิด: เขียว = เปิด, เทา = ปิด
+    local function makeToggle(parent, text, get, set, width)
+        local b = Instance.new("TextButton")
+        b.Size = width or UDim2.new(1, 0, 1, 0)
+        b.Font = Enum.Font.SourceSansBold
+        b.TextSize = 14
+        b.TextColor3 = Color3.fromRGB(255, 255, 255)
+        b.Parent = parent
+        local function refresh()
+            b.Text = text .. ": " .. (get() and "เปิด" or "ปิด")
+            b.BackgroundColor3 = get() and Color3.fromRGB(40, 150, 60) or Color3.fromRGB(70, 70, 70)
+        end
+        b.MouseButton1Click:Connect(function()
+            set(not get())
+            refresh()
+        end)
+        refresh()
+        return b
+    end
+
+    -- ช่องพิมพ์ตัวเลข
+    local function makeNumberBox(parent, value, onChange, size, position)
+        local box = Instance.new("TextBox")
+        box.Size = size
+        box.Position = position or UDim2.new()
+        box.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+        box.TextColor3 = Color3.fromRGB(255, 255, 255)
+        box.Font = Enum.Font.SourceSans
+        box.TextSize = 14
+        box.Text = tostring(value)
+        box.ClearTextOnFocus = false
+        box.Parent = parent
+        box.FocusLost:Connect(function()
+            local n = tonumber(box.Text)
+            if n and n >= 0 then
+                onChange(n)
+            end
+            box.Text = tostring(n and n >= 0 and n or value)
+            value = tonumber(box.Text)
+        end)
+        return box
+    end
+
+    local function labelInRow(row, text, width)
+        local l = Instance.new("TextLabel")
+        l.Size = width
+        l.BackgroundTransparency = 1
+        l.Text = text
+        l.TextColor3 = Color3.fromRGB(220, 220, 220)
+        l.Font = Enum.Font.SourceSans
+        l.TextSize = 14
+        l.TextXAlignment = Enum.TextXAlignment.Left
+        l.Parent = row
+        return l
+    end
+
+    -- 2) สถิติ
+    local statsLabel = makeLabel("", 54, Color3.fromRGB(150, 220, 255))
+
+    local resetRow = makeRow()
+    local resetButton = Instance.new("TextButton")
+    resetButton.Size = UDim2.new(1, 0, 1, 0)
+    resetButton.BackgroundColor3 = Color3.fromRGB(60, 60, 90)
+    resetButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+    resetButton.Font = Enum.Font.SourceSansBold
+    resetButton.TextSize = 14
+    resetButton.Text = "รีเซ็ตสถิติ"
+    resetButton.Parent = resetRow
+
+    -- 1) กัน AFK
+    makeToggle(makeRow(), "กันโดนเตะ AFK",
+        function() return settings.antiAfk end,
+        function(v) settings.antiAfk = v end)
+
+    -- 6) วิ่งเร็ว / กระโดดสูง
+    local speedRow = makeRow()
+    makeToggle(speedRow, "วิ่งเร็ว",
+        function() return settings.speedOn end,
+        function(v) settings.speedOn = v end,
+        UDim2.new(0.65, -2, 1, 0))
+    makeNumberBox(speedRow, settings.speed, function(n) settings.speed = n end,
+        UDim2.new(0.35, 0, 1, 0), UDim2.new(0.65, 2, 0, 0))
+
+    local jumpRow = makeRow()
+    makeToggle(jumpRow, "กระโดดสูง",
+        function() return settings.jumpOn end,
+        function(v) settings.jumpOn = v end,
+        UDim2.new(0.65, -2, 1, 0))
+    makeNumberBox(jumpRow, settings.jump, function(n) settings.jump = n end,
+        UDim2.new(0.35, 0, 1, 0), UDim2.new(0.65, 2, 0, 0))
+
+    -- 4) ตั้งเวลาหยุด (0 = ไม่จำกัด)
+    local stopFishRow = makeRow()
+    labelInRow(stopFishRow, "หยุดเมื่อได้ปลา (ตัว)", UDim2.new(0.65, -2, 1, 0))
+    makeNumberBox(stopFishRow, settings.stopFish, function(n) settings.stopFish = math.floor(n) end,
+        UDim2.new(0.35, 0, 1, 0), UDim2.new(0.65, 2, 0, 0))
+
+    local stopTimeRow = makeRow()
+    labelInRow(stopTimeRow, "หยุดเมื่อครบ (นาที)", UDim2.new(0.65, -2, 1, 0))
+    makeNumberBox(stopTimeRow, settings.stopMinutes, function(n) settings.stopMinutes = n end,
+        UDim2.new(0.35, 0, 1, 0), UDim2.new(0.65, 2, 0, 0))
+
+    -- 3) บอกปุ่มลัด
+    makeLabel(("%s = เปิด/ปิดตกปลา   %s = ซ่อนหน้าต่าง"):format(TOGGLE_KEY.Name, HIDE_KEY.Name),
+        16, Color3.fromRGB(160, 160, 160))
+
+    ---------------------------------------------------------------- 5) ย่อหน้าต่าง
+    local minimized = false
+    local MinButton = Instance.new("TextButton")
+    MinButton.Size = UDim2.new(0, 20, 0, 20)
+    MinButton.Position = UDim2.new(1, -20, 0, 0)
+    MinButton.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
+    MinButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+    MinButton.Font = Enum.Font.SourceSansBold
+    MinButton.TextSize = 16
+    MinButton.Text = "–"
+    MinButton.Parent = TitleBar
+
+    local function refreshTitle()
+        if minimized then
+            TitleBar.Text = "Auto Fish " .. (isAutoFishing and "(ON)" or "(OFF)")
+        else
+            TitleBar.Text = "Auto Fish"
+        end
+    end
+
+    MinButton.MouseButton1Click:Connect(function()
+        minimized = not minimized
+        ToggleButton.Visible = not minimized
+        StatusLabel.Visible = not minimized
+        Extras.Visible = not minimized
+        MainFrame.Size = UDim2.new(0, 220, 0, minimized and 20 or FULL_HEIGHT)
+        MinButton.Text = minimized and "+" or "–"
+        refreshTitle()
+    end)
+
+    -- เก็บ connection ไว้ตัดทิ้งตอนรันสคริปต์ซ้ำ (ไม่งั้นปุ่มลัดของตัวเก่าจะยังทำงาน)
+    local connections = {}
+    ScreenGui.AncestryChanged:Connect(function()
+        if not ScreenGui.Parent then
+            for _, c in ipairs(connections) do
+                c:Disconnect()
+            end
+        end
+    end)
+
+    ---------------------------------------------------------------- 3) ปุ่มลัด
+    connections[#connections + 1] = UserInputService.InputBegan:Connect(function(input, gameProcessed)
+        if gameProcessed then return end -- กำลังพิมพ์แชท/ช่องตัวเลขอยู่
+        if input.KeyCode == TOGGLE_KEY then
+            setEnabled(not isAutoFishing)
+        elseif input.KeyCode == HIDE_KEY then
+            ScreenGui.Enabled = not ScreenGui.Enabled
+        end
+    end)
+
+    ---------------------------------------------------------------- 1) กัน AFK
+    local VirtualUser = game:GetService("VirtualUser")
+    connections[#connections + 1] = LocalPlayer.Idled:Connect(function()
+        if settings.antiAfk then
+            VirtualUser:CaptureController()
+            VirtualUser:ClickButton2(Vector2.new())
+        end
+    end)
+
+    ---------------------------------------------------------------- 6) วิ่งเร็ว / กระโดดสูง
+    local defaults = {} -- ค่าเดิมของเกม เอาไว้คืนตอนปิด
+    task.spawn(function()
+        while ScreenGui.Parent do
+            local char = LocalPlayer.Character
+            local hum = char and char:FindFirstChildOfClass("Humanoid")
+            if hum then
+                if defaults.hum ~= hum then
+                    defaults = {
+                        hum = hum,
+                        speed = hum.WalkSpeed,
+                        jumpPower = hum.JumpPower,
+                        jumpHeight = hum.JumpHeight,
+                    }
+                end
+                if settings.speedOn then
+                    hum.WalkSpeed = settings.speed
+                elseif defaults.speedApplied then
+                    hum.WalkSpeed = defaults.speed
+                end
+                defaults.speedApplied = settings.speedOn
+
+                if settings.jumpOn then
+                    if hum.UseJumpPower then
+                        hum.JumpPower = settings.jump
+                    else
+                        hum.JumpHeight = settings.jump ^ 2 / (2 * workspace.Gravity)
+                    end
+                elseif defaults.jumpApplied then
+                    hum.JumpPower = defaults.jumpPower
+                    hum.JumpHeight = defaults.jumpHeight
+                end
+                defaults.jumpApplied = settings.jumpOn
+            end
+            task.wait(0.25)
+        end
+    end)
+
+    ---------------------------------------------------------------- 2) นับสถิติ + 4) ตั้งเวลาหยุด
+    local stats = { fish = 0, coins = 0, newSpecies = 0, runTime = 0 }
+    local session = { fish = 0, time = 0 }
+    local wasOn = false
+    local lastSeenCatch = env.AutoFishLastCatch or 0
+    local lastPopupText
+
+    local function findPopupLabels()
+        local sell, isNew
+        for _, d in ipairs(LocalPlayer.PlayerGui:GetDescendants()) do
+            if d:IsA("TextLabel") and isShown(d) then
+                if d.Text:find("ขายได้", 1, true) and d.Text:find("เหรียญ", 1, true) then
+                    sell = d
+                elseif d.Text:find("ชนิดใหม่", 1, true) then
+                    isNew = true
+                end
+            end
+        end
+        return sell, isNew
+    end
+
+    -- นับปลาจากหน้าต่างโชว์ปลา (ได้ปลาจริงเท่านั้น)
+    local function countCatch(sell, isNew)
+        stats.fish += 1
+        session.fish += 1
+        local coins = sell.Text:match("ขายได้%s*([%d,]+)")
+        if coins then
+            stats.coins += tonumber((coins:gsub(",", ""))) or 0
+        end
+        if isNew then
+            stats.newSpecies += 1
+        end
+    end
+
+    local function formatTime(sec)
+        sec = math.floor(sec)
+        return ("%02d:%02d:%02d"):format(sec // 3600, sec % 3600 // 60, sec % 60)
+    end
+
+    local function refreshStats()
+        local perHour = stats.runTime > 60 and math.floor(stats.coins / stats.runTime * 3600) or 0
+        statsLabel.Text = ("ปลา: %d ตัว   ชนิดใหม่: %d\nเหรียญ: %d   (%d / ชม.)\nเวลาที่เปิด: %s")
+            :format(stats.fish, stats.newSpecies, stats.coins, perHour, formatTime(stats.runTime))
+    end
+
+    resetButton.MouseButton1Click:Connect(function()
+        stats = { fish = 0, coins = 0, newSpecies = 0, runTime = 0 }
+        refreshStats()
+    end)
+
+    local hooked = env.AutoFishCatchHooked
+    local checkingCatch = false
+    local lastTick = os.clock()
+
+    task.spawn(function()
+        while ScreenGui.Parent do
+            local now = os.clock()
+            local dt = now - lastTick
+            lastTick = now
+
+            -- เริ่มรอบใหม่ทุกครั้งที่กด ON
+            if isAutoFishing and not wasOn then
+                session = { fish = 0, time = 0 }
+            end
+            wasOn = isAutoFishing
+
+            if isAutoFishing then
+                stats.runTime += dt
+                session.time += dt
+            end
+
+            -- ตรวจว่าได้ปลา
+            if hooked then
+                -- มีสัญญาณ "Reel", true -> รอดูหน้าต่างโชว์ปลาภายใน 3 วิ แล้วค่อยนับ
+                if env.AutoFishLastCatch > lastSeenCatch and not checkingCatch then
+                    lastSeenCatch = env.AutoFishLastCatch
+                    checkingCatch = true
+                    task.spawn(function()
+                        local started = os.clock()
+                        while os.clock() - started < 3 do
+                            local sell, isNew = findPopupLabels()
+                            if sell then
+                                countCatch(sell, isNew)
+                                break
+                            end
+                            task.wait(0.2)
+                        end
+                        checkingCatch = false
+                    end)
+                end
+            elseif isAutoFishing then
+                -- executor ไม่มี hook: ดูหน้าต่างโชว์ปลาที่เพิ่งเด้งขึ้น
+                local sell, isNew = findPopupLabels()
+                local text = sell and sell.Text
+                if sell and text ~= lastPopupText then
+                    countCatch(sell, isNew)
+                end
+                lastPopupText = text
+            end
+
+            -- 4) ครบเงื่อนไขแล้วหยุดเอง
+            if isAutoFishing then
+                if settings.stopFish > 0 and session.fish >= settings.stopFish then
+                    setEnabled(false)
+                    setStatus(("หยุดแล้ว: ได้ปลาครบ %d ตัว"):format(settings.stopFish))
+                elseif settings.stopMinutes > 0 and session.time >= settings.stopMinutes * 60 then
+                    setEnabled(false)
+                    setStatus(("หยุดแล้ว: ครบ %g นาที"):format(settings.stopMinutes))
+                end
+            end
+
+            refreshStats()
+            refreshTitle()
+            task.wait(0.5)
+        end
+    end)
+end
