@@ -1027,7 +1027,7 @@ do
     end)
     refreshTravel()
 
-    makeHeader("เส้นทาง (บันทึกจากจุดตกปลา -> ร้าน)")
+    local routeHeader = makeHeader("เส้นทาง (บันทึกจากจุดตกปลา -> ร้าน)")
     -- บันทึกเส้นทางเดิน: กดเริ่มที่จุดตกปลา เดินไปร้านเอง แล้วกดหยุดที่ร้าน
     local routeRow = makeRow()
     local routeButton = Instance.new("TextButton")
@@ -1062,6 +1062,27 @@ do
         refreshReturn()
     end)
     refreshReturn()
+
+    -- จัดลำดับ: หัวข้อเส้นทาง + ปุ่มบันทึก ให้อยู่ใต้ปุ่ม "ขายเสร็จแล้ว"
+    routeHeader.LayoutOrder = nextOrder()
+    routeRow.LayoutOrder = nextOrder()
+
+    -- ล้างเส้นทาง (ย้ายไปตกจุดใหม่)
+    local resetRouteRow = makeRow()
+    local function halfButtonIn(row, text, x, color)
+        local b = Instance.new("TextButton")
+        b.Size = UDim2.new(0.5, -2, 1, 0)
+        b.Position = UDim2.new(x, x > 0 and 2 or 0, 0, 0)
+        b.BackgroundColor3 = color
+        b.TextColor3 = Color3.fromRGB(255, 255, 255)
+        b.Font = Enum.Font.SourceSansBold
+        b.TextSize = 14
+        b.Text = text
+        b.Parent = row
+        return b
+    end
+    local clearRouteButton = halfButtonIn(resetRouteRow, "ล้างเส้นทาง+จุดตกปลา", 0, Color3.fromRGB(150, 60, 60))
+    local clearAllButton = halfButtonIn(resetRouteRow, "ล้างทั้งหมด (รวมร้าน)", 0.5, Color3.fromRGB(110, 40, 40))
 
     -- ปุ่มเดินเอง: กลับจุดตกปลา / ไปร้าน
     local goRow = makeRow()
@@ -1791,6 +1812,28 @@ do
     end)
     goShopButton.MouseButton1Click:Connect(function()
         task.spawn(manualWalk, true)
+    end)
+
+    -- ล้างเส้นทาง: ย้ายไปตกจุดใหม่ แล้วบันทึกเส้นทางใหม่จากจุดนั้น
+    local function clearRoute(includeShop)
+        recording = false
+        env.AutoFishRecording = nil
+        env.AutoFishRoute = nil
+        env.AutoFishFishSpot = nil
+        if includeShop then
+            env.AutoFishShopCFrame = nil
+        end
+        refreshRouteButton()
+        refreshShopButton()
+        drawRoute()
+        bagLabel.Text = includeShop and "ล้างเส้นทาง จุดตกปลา และจุดร้านแล้ว"
+            or "ล้างเส้นทางและจุดตกปลาแล้ว (จุดร้านยังอยู่)"
+    end
+    clearRouteButton.MouseButton1Click:Connect(function()
+        clearRoute(false)
+    end)
+    clearAllButton.MouseButton1Click:Connect(function()
+        clearRoute(true)
     end)
 
     local function sellRequest(ids)
