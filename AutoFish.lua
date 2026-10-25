@@ -24,6 +24,8 @@ local CAST_TARGET = 0.9   -- ใช้เมื่อหา PerfectZone ไม�
 local PERFECT_AIM = 0.5   -- ปล่อยเมื่อปลายแถบถึงตำแหน่งไหนของ PerfectZone (0 = ขอบซ้าย, 0.5 = กลาง)
 local CAST_TIMEOUT = 5    -- กดค้างนานสุดกี่วินาที กันลูปค้าง
 local POWER_APPEAR_TIMEOUT = 1.5 -- กดแล้วรอหลอด Power ขึ้นกี่วินาที
+local CHARGE_TIME = 1.0   -- (โหมด remote) กดค้างชาร์จกี่วินาทีก่อนส่ง Cast
+local MIN_BITE_WAIT = 1.5 -- โยนแล้วอย่างน้อยกี่วินาทีถึงเริ่มเช็คว่าปลากิน
 local BITE_TEXT = "กดเลย"   -- ข้อความบนปุ่มตอนปลากินเหยื่อ
 local HOOK_REACTION = 0.3 -- (โหมด remote) ปลากินแล้วรอกี่วินาทีก่อนส่ง "Hook" (ให้ดูเหมือนคนกด)
 local HOOK_COOLDOWN = 1   -- ยิง "Hook" ซ้ำได้ทุกกี่วินาที ตอนป้าย Bang ยังขึ้นอยู่
@@ -246,9 +248,13 @@ local function actionSaysBite()
     return label ~= nil and label.Text:find(BITE_TEXT, 1, true) ~= nil and isShown(label)
 end
 
--- ปลากินเหยื่อหรือยัง: ปุ่มขึ้น "กดเลย!", มี ! บนหัว หรือหน้าจอ Reel ขึ้นแล้ว
+-- ปลากินเหยื่อหรือยัง: ใช้ปุ่ม "กดเลย!" เป็นหลัก (แม่นสุด)
+-- หน้าจอ Reel ไม่ใช้แล้ว เพราะบางทีมัน Visible ค้างอยู่ ทำให้ Hook ทั้งที่ปลายังไม่กิน
 local function isBite()
-    return actionSaysBite() or bangOverHead() or isReeling()
+    if getActionLabel() then
+        return actionSaysBite()
+    end
+    return bangOverHead()
 end
 
 -- รอจนกว่าเงื่อนไขจะเป็นจริง หรือหมดเวลา / ถูกปิด
@@ -391,6 +397,11 @@ local function remoteRound(myId)
     task.wait(CAST_DELAY)
     if not isActive(myId) then return end
 
+    -- ชาร์จหลอดให้เหมือนคนกดค้าง (หลอดบนจอไม่ขยับเพราะไม่ได้กดจริง แต่ส่ง Cast แบบเพอร์เฟกต์)
+    setStatus(("ชาร์จ %.1f วิ"):format(CHARGE_TIME))
+    waitFor(myId, CHARGE_TIME, function() return false end)
+    if not isActive(myId) then return end
+
     if not castRemote() then
         setStatus("หา HumanoidRootPart ไม่เจอ")
         task.wait(1)
@@ -400,6 +411,8 @@ local function remoteRound(myId)
     setStatus("เหวี่ยงแล้ว รอปลากิน")
     -- ข้ามสถานะค้างจากรอบก่อน: รอให้สัญญาณปลากินหายก่อน แล้วค่อยรอปลากินรอบใหม่
     waitFor(myId, 2, function() return not isBite() end)
+    -- ปลาไม่กินเร็วขนาดนี้ กันสัญญาณหลอก
+    waitFor(myId, MIN_BITE_WAIT, function() return false end)
     if not waitFor(myId, BITE_TIMEOUT, isBite) then
         return -- ไม่มีปลากิน โยนใหม่
     end
