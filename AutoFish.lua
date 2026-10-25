@@ -27,6 +27,8 @@ local POWER_APPEAR_TIMEOUT = 1.5 -- กดแล้วรอหลอด Power �
 local BITE_TEXT = "กดเลย"   -- ข้อความบนปุ่มตอนปลากินเหยื่อ
 local HOOK_REACTION = 0.3 -- (โหมด remote) ปลากินแล้วรอกี่วินาทีก่อนส่ง "Hook" (ให้ดูเหมือนคนกด)
 local HOOK_COOLDOWN = 1   -- ยิง "Hook" ซ้ำได้ทุกกี่วินาที ตอนป้าย Bang ยังขึ้นอยู่
+local READY_TIMEOUT = 10  -- หลังได้ปลา รอปุ่มกลับเป็น "เหวี่ยง" นานสุดกี่วินาที
+local CAST_DELAY = 0.5    -- ปุ่มพร้อมแล้วรออีกกี่วินาทีค่อยเหวี่ยง
 local BITE_TIMEOUT = 30   -- โยนแล้วรอปลากินนานสุดกี่วินาที ก่อนโยนใหม่
 -- วิธีสั่งงาน: "remote" = ยิง Remotes.Fishing.Action ตรงๆ ("Cast" / "Hook" / "Reel") ไม่ต้องพึ่งเมาส์
 --             "mouse"  = จำลองคลิกเมาส์ (mouse1press หรือ VirtualInputManager)
@@ -364,8 +366,23 @@ local function reelStep()
 end
 
 -- โหมด remote: Cast -> รอปลากิน -> Hook -> รอ -> Reel true (ตามลำดับที่ดักได้จาก Remote Spy)
+local function actionReady()
+    local label = getActionLabel()
+    return label ~= nil and label.Text:find("เหวี่ยง", 1, true) ~= nil and isShown(label)
+end
+
 local function remoteRound(myId)
     local remote = getActionRemote()
+
+    -- รอให้ปุ่มกลับมาเป็น "เหวี่ยง" ก่อน (หลังได้ปลาเกมยังเล่นอนิเมชัน/โชว์ปลาอยู่)
+    setStatus("รอปุ่ม เหวี่ยง พร้อม")
+    if not waitFor(myId, READY_TIMEOUT, actionReady) and getActionLabel() then
+        setStatus("ปุ่มไม่กลับเป็น เหวี่ยง: " .. getActionLabel().Text)
+    end
+    if not isActive(myId) then return end
+    task.wait(CAST_DELAY)
+    if not isActive(myId) then return end
+
     if not castRemote() then
         setStatus("หา HumanoidRootPart ไม่เจอ")
         task.wait(1)
@@ -373,6 +390,8 @@ local function remoteRound(myId)
     end
 
     setStatus("เหวี่ยงแล้ว รอปลากิน")
+    -- ข้ามสถานะค้างจากรอบก่อน: รอให้สัญญาณปลากินหายก่อน แล้วค่อยรอปลากินรอบใหม่
+    waitFor(myId, 2, function() return not isBite() end)
     if not waitFor(myId, BITE_TIMEOUT, isBite) then
         return -- ไม่มีปลากิน โยนใหม่
     end
@@ -389,7 +408,6 @@ local function remoteRound(myId)
 
     setStatus("ได้ปลาแล้ว")
     waitFor(myId, 5, function() return not isReeling() end)
-    task.wait(1)
 end
 
 -- ลูปการทำงานหลัก
