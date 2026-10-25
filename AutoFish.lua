@@ -673,7 +673,7 @@ do
     }
 
     ---------------------------------------------------------------- UI
-    local FULL_HEIGHT = 430
+    local FULL_HEIGHT = 495
 
     MainFrame.Size = UDim2.new(0, 220, 0, FULL_HEIGHT)
     ToggleButton.Size = UDim2.new(1, -10, 0, 45)
@@ -778,7 +778,7 @@ do
     end
 
     -- 2) สถิติ
-    local statsLabel = makeLabel("", 54, Color3.fromRGB(150, 220, 255))
+    local statsLabel = makeLabel("", 72, Color3.fromRGB(150, 220, 255))
 
     local resetRow = makeRow()
     local resetButton = Instance.new("TextButton")
@@ -842,7 +842,16 @@ do
     sellNowButton.Text = "ขายปลาทั้งหมดตอนนี้"
     sellNowButton.Parent = sellNowRow
 
-    local bagLabel = makeLabel("ปลาในกระเป๋า: -", 18, Color3.fromRGB(255, 220, 120))
+    local shopRow = makeRow()
+    local shopButton = Instance.new("TextButton")
+    shopButton.Size = UDim2.new(1, 0, 1, 0)
+    shopButton.BackgroundColor3 = Color3.fromRGB(60, 60, 90)
+    shopButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+    shopButton.Font = Enum.Font.SourceSansBold
+    shopButton.TextSize = 14
+    shopButton.Parent = shopRow
+
+    local bagLabel = makeLabel("", 18, Color3.fromRGB(255, 220, 120))
 
     -- 3) บอกปุ่มลัด
     makeLabel(("%s = เปิด/ปิดตกปลา   %s = ซ่อนหน้าต่าง"):format(TOGGLE_KEY.Name, HIDE_KEY.Name),
@@ -946,7 +955,10 @@ do
     end)
 
     ---------------------------------------------------------------- 2) นับสถิติ + 4) ตั้งเวลาหยุด
-    local stats = { fish = 0, coins = 0, newSpecies = 0, runTime = 0 }
+    -- เก็บสถิติไว้ใน getgenv รันสคริปต์ใหม่แล้วตัวเลขไม่หาย (หายเมื่อออกเกม หรือกดรีเซ็ต)
+    local stats = env.AutoFishStats or { fish = 0, coins = 0, newSpecies = 0, runTime = 0 }
+    env.AutoFishStats = stats
+    local bag = { count = nil, max = nil } -- จำนวนปลาในกระเป๋า (อัปเดตจากส่วนขายปลา)
     local session = { fish = 0, time = 0 }
     local wasOn = false
     local lastSeenCatch = env.AutoFishLastCatch or 0
@@ -986,12 +998,14 @@ do
 
     local function refreshStats()
         local perHour = stats.runTime > 60 and math.floor(stats.coins / stats.runTime * 3600) or 0
-        statsLabel.Text = ("ปลา: %d ตัว   ชนิดใหม่: %d\nเหรียญ: %d   (%d / ชม.)\nเวลาที่เปิด: %s")
-            :format(stats.fish, stats.newSpecies, stats.coins, perHour, formatTime(stats.runTime))
+        statsLabel.Text = ("ปลา: %d ตัว   ชนิดใหม่: %d\nเหรียญ: %d   (%d / ชม.)\nเวลาที่เปิด: %s\nในกระเป๋า: %s / %s ตัว")
+            :format(stats.fish, stats.newSpecies, stats.coins, perHour, formatTime(stats.runTime),
+                tostring(bag.count or "-"), tostring(bag.max or "-"))
     end
 
     resetButton.MouseButton1Click:Connect(function()
         stats = { fish = 0, coins = 0, newSpecies = 0, runTime = 0 }
+        env.AutoFishStats = stats
         refreshStats()
     end)
 
@@ -1082,7 +1096,50 @@ do
                 table.insert(ids, item.Id)
             end
         end
+        bag.count, bag.max = #ids, inv.MaxFish
         return ids, inv.MaxFish
+    end
+
+    -- เซิร์ฟเวอร์ให้ขายได้เฉพาะตอนยืนใกล้ร้าน ("ต้องอยู่ใกล้ร้านก่อนนะ")
+    -- ไปยืนที่ร้านแล้วกด "บันทึกจุดร้าน" ครั้งเดียว ตอนขายสคริปต์จะพักตกปลา วาร์ปไปขาย แล้ววาร์ปกลับจุดเดิม
+    local SHOP_RANGE = 12 -- อยู่ห่างจุดร้านไม่เกินกี่ studs ถือว่าอยู่ที่ร้านแล้ว ไม่ต้องวาร์ป
+
+    local function refreshShopButton()
+        shopButton.Text = env.AutoFishShopCFrame and "บันทึกจุดร้านแล้ว (กดเพื่อบันทึกใหม่)"
+            or "บันทึกจุดร้าน (ยืนที่ร้านแล้วกด)"
+    end
+    refreshShopButton()
+
+    shopButton.MouseButton1Click:Connect(function()
+        local char = LocalPlayer.Character
+        local hrp = char and char:FindFirstChild("HumanoidRootPart")
+        if hrp then
+            env.AutoFishShopCFrame = hrp.CFrame
+            bagLabel.Text = "บันทึกจุดร้านแล้ว"
+            refreshShopButton()
+        end
+    end)
+
+    local function getRoot()
+        local char = LocalPlayer.Character
+        return char and char:FindFirstChild("HumanoidRootPart")
+    end
+
+    local function sellRequest(ids)
+        local before = LocalPlayer:GetAttribute("Coins")
+        local ok, res = pcall(function()
+            return remotesFolder.FishShop.Request:InvokeServer("SellIds", ids)
+        end)
+        task.wait(0.5)
+        local after = LocalPlayer:GetAttribute("Coins")
+        if ok and not (typeof(res) == "table" and res.Ok == false) then
+            local gained = (typeof(before) == "number" and typeof(after) == "number") and (after - before) or nil
+            bagLabel.Text = gained and ("ขายแล้ว %d ตัว ได้ %d เหรียญ"):format(#ids, gained)
+                or ("ขายแล้ว %d ตัว"):format(#ids)
+            return true
+        end
+        bagLabel.Text = "ขายไม่สำเร็จ: " .. tostring(typeof(res) == "table" and (res.Error or res.Message) or res)
+        return false
     end
 
     local function sellAll()
@@ -1094,18 +1151,33 @@ do
         elseif #ids == 0 then
             bagLabel.Text = "ไม่มีปลาให้ขาย"
         else
-            local before = LocalPlayer:GetAttribute("Coins")
-            local ok, res = pcall(function()
-                return remotesFolder.FishShop.Request:InvokeServer("SellIds", ids)
-            end)
-            task.wait(0.5)
-            local after = LocalPlayer:GetAttribute("Coins")
-            if ok and not (typeof(res) == "table" and res.Ok == false) then
-                local gained = (typeof(before) == "number" and typeof(after) == "number") and (after - before) or nil
-                bagLabel.Text = gained and ("ขายแล้ว %d ตัว ได้ %d เหรียญ"):format(#ids, gained)
-                    or ("ขายแล้ว %d ตัว"):format(#ids)
-            else
-                bagLabel.Text = "ขายไม่สำเร็จ: " .. tostring(typeof(res) == "table" and (res.Error or res.Message) or res)
+            local shop = env.AutoFishShopCFrame
+            local hrp = getRoot()
+            if shop and hrp and (hrp.Position - shop.Position).Magnitude > SHOP_RANGE then
+                -- พักตกปลา -> วาร์ปไปร้าน -> ขาย -> วาร์ปกลับ -> ตกปลาต่อ
+                local wasFishing = isAutoFishing
+                if wasFishing then
+                    setEnabled(false)
+                    task.wait(1)
+                end
+                hrp = getRoot()
+                if hrp then
+                    local back = hrp.CFrame
+                    bagLabel.Text = "วาร์ปไปขายที่ร้าน..."
+                    hrp.CFrame = shop
+                    task.wait(0.8)
+                    sellRequest(ids)
+                    hrp = getRoot()
+                    if hrp then
+                        hrp.CFrame = back -- กลับจุดเดิม หันหน้าเข้าน้ำเหมือนเดิม
+                    end
+                    task.wait(0.8)
+                end
+                if wasFishing and not isAutoFishing then
+                    setEnabled(true)
+                end
+            elseif not sellRequest(ids) and not shop then
+                bagLabel.Text = "ต้องอยู่ใกล้ร้าน: ไปยืนที่ร้านแล้วกด บันทึกจุดร้าน"
             end
         end
         selling = false
@@ -1121,11 +1193,11 @@ do
             if not selling then
                 local ids, maxFish = getFishIds()
                 if ids then
-                    if settings.autoSell and #ids >= settings.sellAt then
+                    -- ยังไม่บันทึกจุดร้าน = ขายไม่ได้ (เซิร์ฟเวอร์ให้ขายเฉพาะใกล้ร้าน) ไม่ต้องลองให้เสียเวลา
+                    if settings.autoSell and #ids >= settings.sellAt and env.AutoFishShopCFrame then
                         sellAll()
-                    else
-                        bagLabel.Text = ("ปลาในกระเป๋า: %d / %s   (ขายที่ %d)")
-                            :format(#ids, tostring(maxFish or "?"), settings.sellAt)
+                    elseif settings.autoSell and #ids >= settings.sellAt then
+                        bagLabel.Text = "ครบแล้วแต่ยังไม่บันทึกจุดร้าน"
                     end
                 end
             end
