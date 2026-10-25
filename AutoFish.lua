@@ -7,8 +7,10 @@ local LocalPlayer = Players.LocalPlayer
 -- [ส่วนที่ต้องแก้] ใส่ path UI จริงของเกม (ดูด้วย Dex Explorer)
 -- คืนค่า nil ถ้ายังหาไม่เจอ เพื่อไม่ให้สคริปต์ error
 local function getCastUI()
-    -- ตัวอย่าง: return LocalPlayer.PlayerGui:FindFirstChild("FishingUI") and LocalPlayer.PlayerGui.FishingUI:FindFirstChild("CastBar")
-    return nil
+    -- PlayerGui.FishingHud.Root.Power
+    local hud = LocalPlayer.PlayerGui:FindFirstChild("FishingHud")
+    local root = hud and hud:FindFirstChild("Root")
+    return root and root:FindFirstChild("Power")
 end
 
 local function getCatchUI()
@@ -16,6 +18,7 @@ local function getCatchUI()
     return nil
 end
 
+local CAST_BAR_NAME = "ProgressBar" -- ชื่อแถบที่ยืดตามแรงชาร์จ ซึ่งอยู่ข้างใน Power
 local CAST_TARGET = 0.9   -- ชาร์จหลอดถึง 90%
 local CAST_TIMEOUT = 5    -- กดค้างนานสุดกี่วินาที กันลูปค้าง
 
@@ -123,15 +126,15 @@ local function autoFishLoop(myId)
         local catchUI = getCatchUI()
 
         -- เงื่อนไขที่ 1: ชาร์จหลอดให้ถึงจุดสีเหลืองหลังสุด
-        if castUI and castUI.Visible and castUI:FindFirstChild("ProgressBar") then
+        if castUI and castUI.Visible and castUI:FindFirstChild(CAST_BAR_NAME) then
             setMouse(true) -- กดค้าง
             local elapsed = 0
             repeat
                 elapsed += task.wait(0.05)
             until not isActive(myId)
                 or not castUI.Visible
-                or not castUI:FindFirstChild("ProgressBar")
-                or castUI.ProgressBar.Size.X.Scale >= CAST_TARGET
+                or not castUI:FindFirstChild(CAST_BAR_NAME)
+                or castUI[CAST_BAR_NAME].Size.X.Scale >= CAST_TARGET
                 or elapsed > CAST_TIMEOUT
             setMouse(false) -- ปล่อยเสมอ ไม่ให้เมาส์ค้าง
             if isActive(myId) then
