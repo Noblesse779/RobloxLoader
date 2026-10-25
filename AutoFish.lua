@@ -352,6 +352,19 @@ local function castMouse(myId)
         waitFor(myId, math.max(0, CHARGE_TIME - POWER_APPEAR_TIMEOUT), function() return false end)
     end
     setMouse(false) -- ปล่อยเสมอ ไม่ให้เมาส์ค้าง
+
+    -- ถ้าเกมยังไม่รับการปล่อย (หลอด Power ยังค้าง / คันเบ็ดยกค้าง) ส่งปล่อยซ้ำ
+    for i = 1, 3 do
+        local castUI = getCastUI()
+        if not (castUI and isShown(castUI)) then break end
+        task.wait(0.3)
+        castUI = getCastUI()
+        if not (castUI and isShown(castUI)) then break end
+        setStatus(("ปล่อยซ้ำ %d"):format(i))
+        if hasMouse1 then pcall(mouse1release) end
+        local x, y = getPressPoint()
+        VirtualInputManager:SendMouseButtonEvent(x, y, 0, false, game, 1)
+    end
     return true
 end
 
