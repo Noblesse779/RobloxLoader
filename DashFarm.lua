@@ -19,7 +19,10 @@ end
 local settings = {
     autoDash = false,
     autoTrain = false,   -- ถือของช่อง 1 ไว้ตลอด (ถือแล้วชาร์จพลังเอง ไม่ต้องคลิก)
-    autoAura = false,    -- ซื้อ + ใส่ออร่าที่ดีที่สุดที่ซื้อได้ (เช็คตอนรีเบิร์ธเปลี่ยน และทุก 10 วิ)
+    autoAura = false,
+    autoSellChars = false, -- ขายตัวกากตามระดับที่เลือก
+    sellRarities = {},     -- [Rarity] = true
+    sellKeepStronger = true, -- ไม่ขายตัวที่โหดกว่าตัวอ่อนสุดบนแท่น (เก็บไว้แทนตัวกาก)    -- ซื้อ + ใส่ออร่าที่ดีที่สุดที่ซื้อได้ (เช็คตอนรีเบิร์ธเปลี่ยน และทุก 10 วิ)
     autoPlace = false,
     antiAfk = false,
     autoRebirth = false,
@@ -475,22 +478,40 @@ local function parseNumber(text)
     return num
 end
 
+-- อ่านตัวเลข + ตัวย่อ (K/M/B...) ไม่เอาคำอื่นที่ตามมา เช่น "10 Power" -> 10
+local function parseLoose(text)
+    if not text then return nil end
+    local num, suffix = text:gsub(",", ""):match("([%d%.]+)%s*(%a*)")
+    if not num then return nil end
+    if suffix ~= "" and SUFFIX[suffix:upper()] then
+        return parseNumber(num .. suffix)
+    end
+    return tonumber(num)
+end
+
+-- หลอดรีเบิร์ธ (ข้อความในเกมเป็นอังกฤษ Roblox แปลไทยตอนแสดง): "... X / Y" ใน FullGameGUI.Rebirth
 local rebirthLabel
 local function readRebirthBar()
     if not (rebirthLabel and rebirthLabel.Parent) then
         rebirthLabel = nil
-        for _, d in ipairs(LocalPlayer.PlayerGui:GetDescendants()) do
-            if d:IsA("TextLabel") and d.Text:find("ระดับพลัง", 1, true) and d.Text:find("/", 1, true) then
-                rebirthLabel = d
-                break
+        local full = LocalPlayer.PlayerGui:FindFirstChild("FullGameGUI")
+        local root = (full and full:FindFirstChild("Rebirth")) or LocalPlayer.PlayerGui
+        for _, d in ipairs(root:GetDescendants()) do
+            if d:IsA("TextLabel") then
+                local t = d.Text:gsub("<[^>]->", "")
+                local lower = t:lower()
+                if t:match("[%d%.,]+%a*%s*/%s*[%d%.,]+%a*")
+                    and (root ~= LocalPlayer.PlayerGui or lower:find("power", 1, true) or t:find("พลัง", 1, true)) then
+                    rebirthLabel = d
+                    break
+                end
             end
         end
     end
     if not rebirthLabel then return nil end
-    -- RichText อาจมีแท็ก <b> ปน ลบออกก่อน
     local text = rebirthLabel.Text:gsub("<[^>]->", "")
-    local have, need = text:match("ระดับพลัง%s*([%d%.,]+%s*%a*)%s*/%s*([%d%.,]+%s*%a*)")
-    return parseNumber(have), parseNumber(need)
+    local have, need = text:match("([%d%.,]+%s*%a*)%s*/%s*([%d%.,]+%s*%a*)")
+    return parseLoose(have), parseLoose(need)
 end
 
 local rebirthInfo = "-"
@@ -920,108 +941,163 @@ local function pressButton(button)
     return false
 end
 
--- หน้าต่างร้าน: มีหัวข้อ "ร้านออร่า" หรือมีการ์ด "พลัง/วินาที" หลายใบ
+-- ข้อความในเกมเป็นภาษาอังกฤษ (Roblox แปลเป็นไทยตอนแสดง) เลยหาด้วยชื่อ/คำอังกฤษ
+-- ร้านออร่า: PlayerGui.AuraShop.Main.ShopFrame.Contents.Scroll.<ออร่า>.Content.Buttons.Btn_Buy.Txt_Price
+--   Txt_Price = "Equipped" / "Equip" / "$50K" / อย่างอื่น (ติดรีเบิร์ธ / Robux)
+-- ตัวเลือกคนขาย: PlayerGui.Option.Option1..4 (TextButton)
+-- ยืนยันการขาย: PlayerGui.FullGameGUI.ConfirmFrame
+
+local function auraScroll()
+    local ok, scroll = pcall(function()
+        return LocalPlayer.PlayerGui.AuraShop.Main.ShopFrame.Contents.Scroll
+    end)
+    return ok and scroll or nil
+end
+
+-- หน้าต่างร้านออร่าเปิดอยู่บนจอไหม
 local function findAuraShop()
-    local count = {}
-    for _, d in ipairs(LocalPlayer.PlayerGui:GetDescendants()) do
-        if d:IsA("TextLabel") then
-            local sg = d:FindFirstAncestorWhichIsA("ScreenGui")
-            if sg and d.Text:find("ร้านออร่า", 1, true) then
-                return sg
-            elseif sg and d.Text:find("พลัง/วินาที", 1, true) then
-                count[sg] = (count[sg] or 0) + 1
-                if count[sg] >= 2 then return sg end
+    local scroll = auraScroll()
+    return scroll and isShown(scroll) and scroll or nil
+end
+
+-- ตัวเลือกของคนขายที่ขึ้นบนจอ (หาด้วยคำอังกฤษ)
+local function findOption(words)
+    local root = LocalPlayer.PlayerGui:FindFirstChild("Option")
+    if not root then return nil end
+    for _, b in ipairs(root:GetDescendants()) do
+        if b:IsA("TextButton") and isShown(b) then
+            local t = b.Text:lower()
+            for _, w in ipairs(words) do
+                if t:find(w, 1, true) then return b end
             end
         end
     end
 end
 
--- เหยียบพื้นแดงหน้าร้าน -> คนขายถาม "1. แสดงออร่าให้ฉันดูหน่อย!  2. อาจจะในภายหลัง"
--- ต้องเลือกข้อ 1 ร้านถึงจะเปิด (หน้าต่างร้านถูกสร้างตอนเปิด ปิดแล้วหายไป)
-local OPTION_WORDS = { "แสดงออร่า", "ให้ฉันดู", "แสดงออ" } -- หลายแบบ กันตัวสระ/วรรณยุกต์เรียงไม่ตรง
-local function isShowOption(text)
-    for _, w in ipairs(OPTION_WORDS) do
-        if text:find(w, 1, true) then return true end
-    end
-    return false
-end
-
-local function findShowAuraOption()
-    local roots = { LocalPlayer.PlayerGui, workspace }
-    pcall(function() table.insert(roots, game:GetService("CoreGui")) end)
-    for _, root in ipairs(roots) do
-        for _, d in ipairs(root:GetDescendants()) do
-            if (d:IsA("TextButton") or d:IsA("TextLabel")) and isShowOption(d.Text) then
-                local gui = d:FindFirstAncestorWhichIsA("LayerCollector")
-                if gui and (not gui:IsA("ScreenGui") or isShown(d)) then
-                    return d:IsA("GuiButton") and d or d:FindFirstAncestorWhichIsA("GuiButton") or d
-                end
-            end
-        end
-    end
-end
-
--- จำจุดที่ยืนตอนคนขายถาม/ร้านเปิดครั้งแรก ครั้งต่อไปวาร์ปไปเหยียบเองได้
+-- จำจุดหน้าร้านเองตอนคนขายถาม (ร้านออร่า / ร้านขายตัวละคร)
 task.spawn(function()
     while alive() do
-        if settings.autoAura and not env.DashAuraPad then
-            local hrp = getRoot()
-            if hrp and (findShowAuraOption() or findAuraShop()) then
+        local hrp = getRoot()
+        if hrp then
+            if not env.DashAuraPad and findOption({ "aura" }) then
                 env.DashAuraPad = hrp.CFrame
+            end
+            if not env.DashSellPad and findOption({ "sell equipped" }) then
+                env.DashSellPad = hrp.CFrame
             end
         end
         task.wait(1)
     end
 end)
 
--- การ์ดออร่า: { power, buy = ปุ่ม, price, equip = ปุ่ม, equipped = bool }
+-- การ์ดออร่า เรียงดีสุดก่อน: { name, button, price, buy, equip, equipped, power }
 local function readAuraCards()
-    local shop = findAuraShop()
-    if not shop then return nil end
-    local cards, seen = {}, {}
-    for _, label in ipairs(shop:GetDescendants()) do
-        if label:IsA("TextLabel") and label.Text:find("พลัง/วินาที", 1, true) and not seen[label.Parent] then
-            seen[label.Parent] = true
-            -- ไล่ขึ้นไปหากรอบการ์ดที่มีปุ่มอยู่ข้างใน
-            local card = label.Parent
-            while card and card ~= shop and not card:FindFirstChildWhichIsA("GuiButton", true) do
-                card = card.Parent
-            end
-            if card and card ~= shop then
-                local info = { power = parseNumber(label.Text:gsub("<[^>]->", ""):match("([%d%.,]+%s*%a*)")) or 0 }
-                for _, d in ipairs(card:GetDescendants()) do
-                    if d:IsA("TextLabel") or d:IsA("TextButton") then
-                        local t = d.Text:gsub("<[^>]->", "")
-                        local button = d:IsA("GuiButton") and d or d:FindFirstAncestorWhichIsA("GuiButton")
-                        if t:find("สวมใส่แล้ว", 1, true) then
-                            info.equipped = true
-                        elseif t:find("สวมใส่", 1, true) and button then
-                            info.equip = button
-                        elseif t:match("^%s*%$") and button then
-                            info.buy = button
-                            info.price = parseNumber(t:match("%$%s*([%d%.,]+%s*%a*)"))
-                        end
+    local scroll = auraScroll()
+    if not scroll then return nil end
+    local cards = {}
+    for _, card in ipairs(scroll:GetChildren()) do
+        local btn = card:FindFirstChild("Btn_Buy", true)
+        local priceLabel = btn and btn:FindFirstChild("Txt_Price", true)
+        if btn and priceLabel then
+            local t = priceLabel.Text:gsub("<[^>]->", "")
+            local key = t:lower():gsub("%s", "")
+            local info = { name = card.Name, button = btn, rank = card:IsA("GuiObject") and card.LayoutOrder or 0 }
+            for _, d in ipairs(card:GetDescendants()) do
+                if d:IsA("TextLabel") and d ~= priceLabel then
+                    local dt = d.Text:gsub("<[^>]->", "")
+                    if dt:lower():find("power", 1, true) then
+                        info.power = parseLoose(dt)
+                        if info.power then break end
                     end
                 end
-                table.insert(cards, info)
             end
+            if key == "equipped" then
+                info.equipped = true
+            elseif key == "equip" then
+                info.equip = btn
+            elseif t:match("^%s*%$") then
+                info.buy = btn
+                info.price = parseLoose(t:match("%$%s*(.+)"))
+            end
+            table.insert(cards, info)
         end
     end
-    table.sort(cards, function(a, b) return a.power > b.power end)
+    -- ดีสุดก่อน: พลังต่อวิ ถ้าอ่านไม่ได้ใช้ลำดับในร้าน (อยู่ล่างกว่า = ดีกว่า)
+    table.sort(cards, function(a, b)
+        if a.power and b.power and a.power ~= b.power then return a.power > b.power end
+        if a.rank ~= b.rank then return a.rank > b.rank end
+        return a.button.AbsolutePosition.Y > b.button.AbsolutePosition.Y
+    end)
     return cards
 end
 
 local auraInfo = "-"
-local auraCheckInner
-local function auraCheck()
-    if findAuraShop() then
-        return auraCheckInner()
-    end
-    if not env.DashAuraPad then
-        auraInfo = "ยังไม่รู้ว่าร้านอยู่ไหน: ยืนบนพื้นแดงหน้าร้าน แล้วกด บันทึกจุดร้านออร่า"
+-- ผลการเช็ค: changed = ซื้อ/ใส่ไปแล้ว, failed = กดแล้วไม่ติด, nextPrice = ราคาตัวถัดไป (เงินยังไม่พอ)
+local auraResult = {}
+
+local function priceTextOf(card)
+    local label = card.button and card.button:FindFirstChild("Txt_Price", true)
+    return label and label.Text or ""
+end
+
+local function auraCheckInner()
+    auraResult = {}
+    local cards = readAuraCards()
+    if not cards or #cards == 0 then
+        auraInfo = "อ่านร้านออร่าไม่ได้ (ไม่เจอ PlayerGui.AuraShop)"
         return
     end
-    -- วาร์ปไปเหยียบพื้นหน้าร้าน -> เลือก "แสดงออร่าให้ฉันดูหน่อย!" -> รอหน้าต่างเปิด -> ซื้อ/ใส่ -> กลับที่เดิม
+    local money = leaderValue("Money") or 0
+    local nextPrice
+    for _, c in ipairs(cards) do
+        if c.equipped then break end -- ตัวที่ดีกว่าที่ใส่อยู่ หมดแล้ว
+        local before = priceTextOf(c)
+        if c.equip then
+            pressButton(c.equip)
+            task.wait(1)
+            auraResult.changed = priceTextOf(c) ~= before
+            auraResult.failed = not auraResult.changed
+            auraInfo = ("ใส่ออร่า %s"):format(c.name)
+            return
+        end
+        if c.buy and c.price then
+            if money >= c.price then
+                pressButton(c.buy)
+                task.wait(1)
+                if priceTextOf(c) == before then
+                    auraResult.failed = true
+                    auraInfo = ("กดซื้อ %s แล้วไม่ติด"):format(c.name)
+                    return
+                end
+                -- ซื้อแล้วกดใส่ให้ด้วย
+                if priceTextOf(c):lower():gsub("%s", "") == "equip" then
+                    pressButton(c.button)
+                end
+                auraInfo = ("ซื้อออร่า %s ($%s)"):format(c.name, shortNumber(c.price))
+                auraResult.changed = true
+                return
+            end
+            nextPrice = math.min(nextPrice or math.huge, c.price)
+        end
+        -- ติดรีเบิร์ธ / Robux ข้ามไป
+    end
+    auraResult.nextPrice = nextPrice
+    if nextPrice then
+        auraInfo = ("รอเงินถึง $%s แล้วค่อยซื้อ  •  รีเบิร์ธ %s"):format(shortNumber(nextPrice),
+            tostring(rebirthNow() or "?"))
+    else
+        auraInfo = ("ใส่ออร่าดีสุดที่ซื้อได้แล้ว รอรีเบิร์ธครั้งหน้า  •  รีเบิร์ธ %s"):format(tostring(rebirthNow() or "?"))
+    end
+end
+
+-- ลองกดในร้านโดยไม่วาร์ปก่อน (ร้านอยู่ใน PlayerGui ตลอด) ถ้ากดไม่ติดค่อยวาร์ปไปเปิดร้านจริง
+local function auraCheck()
+    auraCheckInner()
+    if not auraResult.failed then return end
+    if not env.DashAuraPad then
+        auraInfo ..= " (ยืนบนพื้นแดงหน้าร้าน แล้วกด บันทึกจุดร้านออร่า)"
+        return
+    end
     local hrp = getRoot()
     if not hrp then return end
     busy += 1
@@ -1029,89 +1105,154 @@ local function auraCheck()
     hrp.CFrame = env.DashAuraPad
     local option
     waitFor(3, function()
-        option = findShowAuraOption()
+        option = findOption({ "aura", "show" })
         return option ~= nil or findAuraShop() ~= nil
     end)
-    if not findAuraShop() then
-        -- ลอง 1) กดที่ตัวเลือก (ถ้าหาเจอและกดได้)  2) กดปุ่มเลข 1 บนคีย์บอร์ด (ตัวเลือกขึ้นต้นด้วย "1.")
-        if option and option:IsA("GuiButton") then
-            pressButton(option)
-        end
-        if not waitFor(1.5, function() return findAuraShop() ~= nil end) then
-            local hadTool = getTrainTool()
-            hadTool = hadTool and hadTool.Parent == LocalPlayer.Character
-            pressKey(Enum.KeyCode.One, 0.1)
-            task.wait(0.3)
-            -- ปุ่ม 1 อาจไปหยิบของช่อง 1 ขึ้นมาด้วย ถ้าเดิมไม่ได้ถือ เก็บคืน
-            local tool = getTrainTool()
-            local hum = getHumanoid()
-            if not hadTool and tool and hum and tool.Parent == LocalPlayer.Character then
-                hum:UnequipTools()
-            end
-        end
+    if option and not findAuraShop() then
+        pressButton(option)
     end
     if waitFor(4, function() return findAuraShop() ~= nil end) then
         task.wait(0.5)
         pcall(auraCheckInner)
     else
-        auraInfo = option and ("เลือก \"แสดงออร่า\" แล้วแต่ร้านไม่เปิด (ตัวเลือกเป็น %s ใน %s)")
-                :format(option.ClassName, (option:FindFirstAncestorWhichIsA("LayerCollector") or option).ClassName)
-            or "เหยียบพื้นหน้าร้านแล้วแต่คนขายไม่ถาม"
+        auraInfo = option and "เลือกดูออร่าแล้วแต่ร้านไม่เปิด" or "วาร์ปไปหน้าร้านแล้วแต่คนขายไม่ถาม"
     end
     hrp = getRoot()
     if hrp then hrp.CFrame = back end
     busy -= 1
 end
 
--- ผลการเช็ค: changed = ซื้อ/ใส่ไปแล้ว, nextPrice = ราคาออร่าที่ดีกว่าตัวถัดไปที่ซื้อด้วยเงินได้ (แต่เงินยังไม่พอ)
-local auraResult = {}
-auraCheckInner = function()
-    auraResult = {}
-    local cards = readAuraCards()
-    if not cards or #cards == 0 then
-        auraInfo = "เปิดร้านแล้วแต่อ่านการ์ดออร่าไม่ได้"
-        return
-    end
-    local equippedPower = 0
-    for _, c in ipairs(cards) do
-        if c.equipped then equippedPower = math.max(equippedPower, c.power) end
-    end
-    local money = leaderValue("Money") or 0
-    local nextPrice
-    for _, c in ipairs(cards) do
-        if c.power <= equippedPower then break end
-        if c.equip then
-            pressButton(c.equip)
-            auraInfo = ("ใส่ออร่า +%s พลัง/วิ"):format(shortNumber(c.power))
-            auraResult.changed = true
-            return
-        end
-        if c.buy and c.price then
-            if money >= c.price then
-                pressButton(c.buy)
-                task.wait(1)
-                -- ซื้อแล้วกดใส่ให้ด้วย
-                for _, a in ipairs(readAuraCards() or {}) do
-                    if a.power == c.power and a.equip then
-                        pressButton(a.equip)
-                    end
-                end
-                auraInfo = ("ซื้อออร่า +%s พลัง/วิ ($%s)"):format(shortNumber(c.power), shortNumber(c.price))
-                auraResult.changed = true
-                return
+---------------------------------------------------------------- ขายตัวกาก
+-- ถือตัวที่จะขาย -> ไปร้านขาย -> เลือก "2. Sell equipped character" -> กดยืนยัน (ConfirmFrame)
+-- ไม่ใช้ "1. Sell all characters" เด็ดขาด
+local function confirmButton()
+    local full = LocalPlayer.PlayerGui:FindFirstChild("FullGameGUI")
+    local frame = full and full:FindFirstChild("ConfirmFrame")
+    if not (frame and isShown(frame)) then return nil end
+    for _, b in ipairs(frame:GetDescendants()) do
+        if b:IsA("GuiButton") and isShown(b) then
+            local text = (b:IsA("TextButton") and b.Text or "") .. " " .. b.Name
+            for _, d in ipairs(b:GetDescendants()) do
+                if d:IsA("TextLabel") then text ..= " " .. d.Text end
             end
-            nextPrice = math.min(nextPrice or math.huge, c.price)
+            text = text:lower()
+            if text:find("no", 1, true) and not text:find("now", 1, true) or text:find("cancel", 1, true) then
+                -- ปุ่มยกเลิก ข้าม
+            elseif text:find("yes", 1, true) or text:find("confirm", 1, true) or text:find("sell", 1, true)
+                or text:find("accept", 1, true) or text:find("ok", 1, true) then
+                return b
+            end
         end
-        -- ตัวที่ติด "การเกิดใหม่ X" / Robux ข้ามไป
     end
-    auraResult.nextPrice = nextPrice
-    if nextPrice then
-        auraInfo = ("รอเงินถึง $%s แล้วค่อยไปซื้อ  •  รีเบิร์ธ %s"):format(shortNumber(nextPrice),
-            tostring(rebirthNow() or "?"))
-    else
-        auraInfo = ("ใส่ออร่าดีสุดที่ซื้อได้แล้ว รอรีเบิร์ธครั้งหน้า  •  รีเบิร์ธ %s"):format(tostring(rebirthNow() or "?"))
-    end
+    return nil -- ไม่แน่ใจว่าปุ่มไหนคือยืนยัน ไม่กดมั่ว
 end
+
+local function rarityOf(tool)
+    return tool:GetAttribute("Rarity")
+end
+
+-- ตัวที่จะขาย: ระดับตรงที่เลือก + (ถ้าเปิดไว้) อ่อนกว่าตัวอ่อนสุดบนแท่น
+local function sellCandidates()
+    local weakestPlaced
+    if settings.sellKeepStronger then
+        for _, p in ipairs(myPlacedCharacters()) do
+            local b = baseOf(p.brainrot) or p.power
+            weakestPlaced = math.min(weakestPlaced or math.huge, b)
+        end
+    end
+    local list = {}
+    for _, t in ipairs(getCharacterTools()) do
+        local r = rarityOf(t)
+        if r and settings.sellRarities[r] then
+            local base = baseOf(t) or 0
+            if not weakestPlaced or base < weakestPlaced then
+                table.insert(list, t)
+            end
+        end
+    end
+    return list
+end
+
+local sellInfo, soldCount = "-", 0
+local function sellOne(tool)
+    local hum = getHumanoid()
+    if not hum then return false end
+    hum:EquipTool(tool)
+    task.wait(0.3)
+    -- ก้าวออกแล้วกลับมาเหยียบ ให้คนขายถามใหม่
+    local hrp = getRoot()
+    if not hrp then return false end
+    hrp.CFrame = env.DashSellPad + Vector3.new(0, 0, 12)
+    task.wait(0.4)
+    hrp.CFrame = env.DashSellPad
+    local option
+    if not waitFor(3, function()
+        option = findOption({ "sell equipped" })
+        return option ~= nil
+    end) then
+        sellInfo = "คนขายไม่ถาม (ไม่เจอตัวเลือก Sell equipped)"
+        return false
+    end
+    pressButton(option)
+    local yes
+    if not waitFor(3, function()
+        yes = confirmButton()
+        return yes ~= nil
+    end) then
+        sellInfo = "ไม่เจอหน้าต่างยืนยันการขาย"
+        return false
+    end
+    pressButton(yes)
+    return waitFor(3, function()
+        return not tool.Parent or not (tool:IsDescendantOf(LocalPlayer.Character or game) or tool:IsDescendantOf(LocalPlayer))
+    end)
+end
+
+local function sellRound()
+    local list = sellCandidates()
+    if #list == 0 then
+        sellInfo = "ไม่มีตัวที่ต้องขาย"
+        return 0
+    end
+    if not env.DashSellPad then
+        sellInfo = "ยังไม่รู้ว่าร้านขายอยู่ไหน: ยืนบนพื้นเหลืองหน้าร้านขาย แล้วกด บันทึกจุดร้านขาย"
+        return 0
+    end
+    local hrp = getRoot()
+    if not hrp then return 0 end
+    busy += 1
+    local back = hrp.CFrame
+    local sold = 0
+    for i, tool in ipairs(list) do
+        if not alive() then break end
+        sellInfo = ("กำลังขาย %d/%d: %s (%s)"):format(i, #list, tool.Name, tostring(rarityOf(tool)))
+        if sellOne(tool) then
+            sold += 1
+        else
+            break -- ขายไม่ติด หยุดก่อน ไม่ฝืนขายต่อ
+        end
+        task.wait(0.3)
+    end
+    local hum = getHumanoid()
+    if hum then hum:UnequipTools() end
+    hrp = getRoot()
+    if hrp then hrp.CFrame = back end
+    busy -= 1
+    soldCount += sold
+    if sold == #list then
+        sellInfo = ("ขายแล้ว %d ตัว"):format(sold)
+    end
+    return sold
+end
+
+task.spawn(function()
+    while alive() do
+        if settings.autoSellChars and #sellCandidates() > 0 then
+            pcall(sellRound)
+        end
+        task.wait(30)
+    end
+end)
 
 -- ไม่วาร์ปวนทุกนาที:
 -- รีเบิร์ธ (หรือเพิ่งเปิดสวิตช์) -> ไปดูร้าน 1 ครั้ง -> ซื้อได้ซื้อ / จำราคาตัวถัดไปไว้
@@ -1245,6 +1386,7 @@ local Window = Fluent:CreateWindow({
 local Tabs = {
     main = Window:AddTab({ Title = "หลัก", Icon = "zap" }),
     chars = Window:AddTab({ Title = "ตัวละคร", Icon = "users" }),
+    sell = Window:AddTab({ Title = "ขายตัวละคร", Icon = "coins" }),
     safe = Window:AddTab({ Title = "ความปลอดภัย", Icon = "shield" }),
 }
 
@@ -1423,6 +1565,57 @@ upgradeSection:AddButton({
 })
 task.delay(2, function() pcall(refreshPickList) end)
 
+-- ขายตัวละคร
+local sellSection = Tabs.sell:AddSection("ขายตัวกาก (ทีละตัว ไม่ใช้ขายทั้งหมด)")
+sellSection:AddToggle("DFSellChars", {
+    Title = "ขายตัวกากอัตโนมัติ",
+    Description = "เช็คทุก 30 วิ ขายเฉพาะระดับที่เลือก ทีละตัว (ถือ -> Sell equipped -> ยืนยัน)",
+    Default = false,
+}):OnChanged(function(v) settings.autoSellChars = v end)
+local rarityNames = {}
+for name, order in pairs(RARITY_ORDER) do
+    rarityNames[order] = name
+end
+sellSection:AddDropdown("DFSellRarities", {
+    Title = "ระดับที่จะขาย",
+    Values = rarityNames,
+    Multi = true,
+    Default = {},
+}):OnChanged(function(value)
+    local pick = {}
+    for name, on in pairs(value or {}) do
+        if on then pick[name] = true end
+    end
+    settings.sellRarities = pick
+end)
+sellSection:AddToggle("DFSellKeep", {
+    Title = "ไม่ขายตัวที่โหดกว่าตัวบนแท่น",
+    Description = "ตัวที่ยังเอาไปแทนตัวกากบนแท่นได้ จะไม่ถูกขาย (เทียบเลเวล 1)",
+    Default = settings.sellKeepStronger,
+}):OnChanged(function(v) settings.sellKeepStronger = v end)
+sellSection:AddButton({
+    Title = "บันทึกจุดร้านขาย",
+    Description = "ยืนบนพื้นเหลืองหน้าร้านขาย (ตอนคนขายถาม) แล้วกด",
+    Callback = function()
+        local hrp = getRoot()
+        if hrp then
+            env.DashSellPad = hrp.CFrame
+            Fluent:Notify({ Title = "ร้านขาย", Content = "บันทึกจุดร้านขายแล้ว", Duration = 4 })
+        end
+    end,
+})
+sellSection:AddButton({
+    Title = "ขายตอนนี้เลย",
+    Callback = function()
+        task.spawn(function()
+            local n = sellRound()
+            Fluent:Notify({ Title = "ขายตัวละคร", Content = sellInfo, Duration = 5 })
+        end)
+    end,
+})
+local sellPara = sellSection:AddParagraph({ Title = "สถานะการขาย", Content = "-" })
+local sellListPara = sellSection:AddParagraph({ Title = "ตัวที่จะถูกขาย", Content = "-" })
+
 -- ความปลอดภัย
 local afkSection = Tabs.safe:AddSection("กันโดนเตะ")
 afkSection:AddToggle("DFAfk", { Title = "กันโดนเตะ AFK", Default = false })
@@ -1439,6 +1632,17 @@ task.spawn(function()
         end)
         pcall(function() placePara:SetDesc(placeInfo) end)
         pcall(function() auraPara:SetDesc(auraInfo) end)
+        pcall(function()
+            sellPara:SetDesc(("%s\nขายไปแล้ว %d ตัว"):format(sellInfo, soldCount))
+            local names = {}
+            for i, t in ipairs(sellCandidates()) do
+                if i > 10 then table.insert(names, "...") break end
+                table.insert(names, ("%s (%s)"):format(t.Name, tostring(rarityOf(t))))
+            end
+            local any = getCharacterTools()[1]
+            sellListPara:SetDesc(#names > 0 and table.concat(names, "\n")
+                or ("ไม่มี" .. (any and not rarityOf(any) and " (ตัวละครในกระเป๋าไม่มีค่า Rarity)" or "")))
+        end)
         local lines = {}
         for i, t in ipairs(getCharacterTools()) do
             if i > 8 then break end
