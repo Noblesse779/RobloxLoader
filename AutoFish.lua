@@ -676,6 +676,8 @@ end)
         sellAt = 100,    -- ปลาในกระเป๋าครบกี่ตัวแล้วขายทั้งหมด
         sellTravel = "walk", -- ไปร้านยังไง: "walk" = เดินไป (เนียนกว่า), "warp" = วาร์ป (เร็วกว่า)
         walkFallbackWarp = false, -- เดินแล้วติด/ตกน้ำ ให้วาร์ปแทน (ไม่งั้นจะติดค้างอยู่ตรงนั้น)
+        autoEquip = false, -- ตกปลาอยู่แล้วเบ็ดไม่อยู่ในมือ หยิบให้เอง
+        autoRejoin = false, -- หลุด/โดนเตะ เข้าเกมใหม่เอง แล้วตกต่อ
         showRoute = false, -- แสดงจุดเส้นทาง/จุดตกปลา/จุดร้านในโลก (เห็นแค่เราคนเดียว)
         returnMode = "walk", -- ขายเสร็จแล้วกลับจุดตกปลายังไง: "walk" = เดิน, "warp" = วาร์ป, "stay" = ไม่กลับ (หยุดตกปลา)
         breakOn = false, breakEvery = 25, breakSeconds = 30, -- พักทุกประมาณกี่ตัว / พักประมาณกี่วิ (สุ่ม ±30-40%)
@@ -726,6 +728,7 @@ end)
         safe = Window:AddTab({ Title = "ความปลอดภัย", Icon = "shield" }),
         char = Window:AddTab({ Title = "ตัวละคร", Icon = "user" }),
         alert = Window:AddTab({ Title = "แจ้งเตือน", Icon = "bell" }),
+        profile = Window:AddTab({ Title = "บันทึกตั้งค่า", Icon = "save" }),
     }
 
     -- ตัวกลางให้โค้ดส่วนอื่นใช้ได้เหมือนปุ่ม/ข้อความเดิม (.Text = ..., .MouseButton1Click:Connect)
@@ -770,19 +773,25 @@ end)
         })
     end
 
+    -- controls[ชื่อค่าใน settings] = ตัวควบคุมในหน้าต่าง (ใช้ตอนโหลดโปรไฟล์ให้ปุ่มตรงกับค่า)
+    local controls = {}
     local toggleCount = 0
-    local function addToggle(container, title, desc, get, set)
+    local function addToggle(container, title, desc, get, set, key)
         toggleCount += 1
         local t = container:AddToggle("AFToggle" .. toggleCount, { Title = title, Description = desc, Default = get() })
         t:OnChanged(function(v)
             set(v)
         end)
+        if key then
+            controls[key] = { kind = "toggle", element = t }
+        end
         return t
     end
 
-    local function addNumber(container, title, value, onChange)
+    local function addNumber(container, title, value, onChange, key)
         toggleCount += 1
-        return container:AddInput("AFInput" .. toggleCount, {
+        local input
+        input = container:AddInput("AFInput" .. toggleCount, {
             Title = title,
             Default = tostring(value),
             Numeric = true,
@@ -794,6 +803,10 @@ end)
                 end
             end,
         })
+        if key then
+            controls[key] = { kind = "number", element = input }
+        end
+        return input
     end
 
     -- ส่วนอื่นมาเติมฟังก์ชันให้ (ส่วนพักตกปลาอยู่ข้างล่าง)
@@ -818,6 +831,9 @@ end)
     end)
 
     local statusPara = fishSection:AddParagraph({ Title = "สถานะ", Content = StatusLabel.Text })
+    addToggle(fishSection, "ถือเบ็ดให้เอง", "เบ็ดหลุดมือ (ตาย / วาร์ป / สลับช่อง) จะหยิบกลับมาให้",
+        function() return settings.autoEquip end,
+        function(v) settings.autoEquip = v end, "autoEquip")
     StatusLabel:GetPropertyChangedSignal("Text"):Connect(function()
         pcall(function() statusPara:SetDesc(StatusLabel.Text) end)
     end)
@@ -827,8 +843,8 @@ end)
     local resetButton = proxyButton(statsSection, "รีเซ็ตสถิติ")
 
     local stopSection = Tabs.main:AddSection("หยุดเอง (0 = ไม่จำกัด)")
-    addNumber(stopSection, "หยุดเมื่อได้ปลา (ตัว)", settings.stopFish, function(n) settings.stopFish = math.floor(n) end)
-    addNumber(stopSection, "หยุดเมื่อครบ (นาที)", settings.stopMinutes, function(n) settings.stopMinutes = n end)
+    addNumber(stopSection, "หยุดเมื่อได้ปลา (ตัว)", settings.stopFish, function(n) settings.stopFish = math.floor(n) end, "stopFish")
+    addNumber(stopSection, "หยุดเมื่อครบ (นาที)", settings.stopMinutes, function(n) settings.stopMinutes = n end, "stopMinutes")
 
     -- ให้ปุ่มเปิดตกปลาตรงกับสถานะจริง (เปิด/ปิดจาก F, หยุดเอง, พัก ฯลฯ)
     -- ชื่อ refreshTitle เดิม: ลูปสถิติเรียกทุกครึ่งวิ
@@ -851,9 +867,9 @@ end)
     local sellSection = Tabs.sell:AddSection("ขายอัตโนมัติ")
     addToggle(sellSection, "ขายเมื่อครบจำนวน", "ปลาในกระเป๋าครบแล้วขายทุกตัวทีเดียว",
         function() return settings.autoSell end,
-        function(v) settings.autoSell = v end)
+        function(v) settings.autoSell = v end, "autoSell")
     addNumber(sellSection, "จำนวนที่จะขาย (ตัว)", settings.sellAt,
-        function(n) settings.sellAt = math.max(1, math.floor(n)) end)
+        function(n) settings.sellAt = math.max(1, math.floor(n)) end, "sellAt")
     local sellNowButton = proxyButton(sellSection, "ขายปลาทั้งหมดตอนนี้")
     local shopButton = proxyButton(sellSection, "บันทึกจุดร้าน", "ยืนที่ร้านแล้วกด (เซิร์ฟเวอร์ให้ขายเฉพาะใกล้ร้าน)")
     local bagLabel = proxyLabel(sellSection, "ผลการขาย", "-")
@@ -881,24 +897,26 @@ end)
 
     local tripSection = Tabs.walk:AddSection("ไปขาย / กลับ")
     local TRAVEL = { ["เดินไป (เนียน)"] = "walk", ["วาร์ป (เร็ว)"] = "warp" }
-    tripSection:AddDropdown("AFTravel", {
+    local travelDropdown = tripSection:AddDropdown("AFTravel", {
         Title = "ไปร้านโดย",
         Values = { "เดินไป (เนียน)", "วาร์ป (เร็ว)" },
         Default = settings.sellTravel == "warp" and 2 or 1,
-    }):OnChanged(function(v)
+    })
+    travelDropdown:OnChanged(function(v)
         settings.sellTravel = TRAVEL[v] or settings.sellTravel
     end)
     local RETURN = { ["เดินกลับ"] = "walk", ["วาร์ปกลับ"] = "warp", ["ไม่กลับ (หยุดตกที่ร้าน)"] = "stay" }
-    tripSection:AddDropdown("AFReturn", {
+    local returnDropdown = tripSection:AddDropdown("AFReturn", {
         Title = "ขายเสร็จแล้ว",
         Values = { "เดินกลับ", "วาร์ปกลับ", "ไม่กลับ (หยุดตกที่ร้าน)" },
         Default = settings.returnMode == "warp" and 2 or settings.returnMode == "stay" and 3 or 1,
-    }):OnChanged(function(v)
+    })
+    returnDropdown:OnChanged(function(v)
         settings.returnMode = RETURN[v] or settings.returnMode
     end)
     addToggle(tripSection, "เดินติดให้วาร์ปแทน", "ตกน้ำ / ติด / หาทางไม่เจอ จะวาร์ปไปแทน",
         function() return settings.walkFallbackWarp end,
-        function(v) settings.walkFallbackWarp = v end)
+        function(v) settings.walkFallbackWarp = v end, "walkFallbackWarp")
 
     local routeSection = Tabs.walk:AddSection("เส้นทาง (บันทึกจากจุดตกปลา → ร้าน)")
     local routeButton = proxyButton(routeSection, "บันทึกเส้นทางเดิน",
@@ -911,49 +929,75 @@ end)
         function(v)
             settings.showRoute = v
             drawRoute()
-        end)
+        end, "showRoute")
     local clearRouteButton = proxyButton(routeSection, "ล้างเส้นทาง + จุดตกปลา", "ย้ายไปตกจุดใหม่ (จุดร้านยังอยู่)")
     local clearAllButton = proxyButton(routeSection, "ล้างทั้งหมด (รวมจุดร้าน)")
 
     ---- หน้า ความปลอดภัย
     local afkSection = Tabs.safe:AddSection("กันโดนเตะ")
+    addToggle(afkSection, "เข้าเกมใหม่เมื่อหลุด", "โดนเตะ/เน็ตหลุด จะเข้าเกมใหม่ แล้วโหลดตั้งค่าล่าสุดและตกต่อเอง",
+        function() return settings.autoRejoin end,
+        function(v) settings.autoRejoin = v end, "autoRejoin")
     addToggle(afkSection, "กันโดนเตะ AFK", nil,
         function() return settings.antiAfk end,
-        function(v) settings.antiAfk = v end)
+        function(v) settings.antiAfk = v end, "antiAfk")
 
     local breakSection = Tabs.safe:AddSection("พักเป็นระยะ (สุ่มให้ไม่เท่ากัน)")
     addToggle(breakSection, "พักเป็นระยะ", nil,
         function() return settings.breakOn end,
-        function(v) settings.breakOn = v end)
+        function(v) settings.breakOn = v end, "breakOn")
     addNumber(breakSection, "พักทุก (ตัว)", settings.breakEvery,
-        function(n) settings.breakEvery = math.max(1, math.floor(n)) end)
-    addNumber(breakSection, "พักนาน (วินาที)", settings.breakSeconds, function(n) settings.breakSeconds = n end)
+        function(n) settings.breakEvery = math.max(1, math.floor(n)) end, "breakEvery")
+    addNumber(breakSection, "พักนาน (วินาที)", settings.breakSeconds, function(n) settings.breakSeconds = n end, "breakSeconds")
 
     local nearbySection = Tabs.safe:AddSection("มีผู้เล่นอื่นเข้าใกล้")
     addToggle(nearbySection, "พักเมื่อมีคนใกล้", "ไม่มีใครอยู่ใกล้ครบ 5 วิ จะตกต่อเอง",
         function() return settings.nearbyOn end,
-        function(v) settings.nearbyOn = v end)
-    addNumber(nearbySection, "ระยะ (studs)", settings.nearbyRange, function(n) settings.nearbyRange = n end)
+        function(v) settings.nearbyOn = v end, "nearbyOn")
+    addNumber(nearbySection, "ระยะ (studs)", settings.nearbyRange, function(n) settings.nearbyRange = n end, "nearbyRange")
 
     ---- หน้า ตัวละคร
     local moveSection = Tabs.char:AddSection("ความเร็ว / กระโดด")
     addToggle(moveSection, "วิ่งเร็ว", nil,
         function() return settings.speedOn end,
-        function(v) settings.speedOn = v end)
-    addNumber(moveSection, "ความเร็ววิ่ง", settings.speed, function(n) settings.speed = n end)
+        function(v) settings.speedOn = v end, "speedOn")
+    addNumber(moveSection, "ความเร็ววิ่ง", settings.speed, function(n) settings.speed = n end, "speed")
     addToggle(moveSection, "กระโดดสูง", nil,
         function() return settings.jumpOn end,
-        function(v) settings.jumpOn = v end)
-    addNumber(moveSection, "แรงกระโดด", settings.jump, function(n) settings.jump = n end)
+        function(v) settings.jumpOn = v end, "jumpOn")
+    addNumber(moveSection, "แรงกระโดด", settings.jump, function(n) settings.jump = n end, "jump")
 
     ---- หน้า แจ้งเตือน
     local rareSection = Tabs.alert:AddSection("ปลาหายาก / ปลาชนิดใหม่")
     addToggle(rareSection, "เตือนเมื่อได้ปลาหายาก", "ระดับที่ไม่ใช่ \"ทั่วไป\" หรือปลาชนิดใหม่",
         function() return settings.rareAlert end,
-        function(v) settings.rareAlert = v end)
+        function(v) settings.rareAlert = v end, "rareAlert")
     addToggle(rareSection, "หยุดเมื่อได้ปลาหายาก", nil,
         function() return settings.rareStop end,
-        function(v) settings.rareStop = v end)
+        function(v) settings.rareStop = v end, "rareStop")
+
+    ---- หน้า บันทึกตั้งค่า
+    local profileSection = Tabs.profile:AddSection("ชุดตั้งค่า (เก็บลงไฟล์ ออกเกมแล้วไม่หาย)")
+    local PROFILE_COUNT = 3
+    local profileNames = {}
+    for i = 1, PROFILE_COUNT do
+        profileNames[i] = "ชุดที่ " .. i
+    end
+    local selectedProfile = 1
+    uiHooks.profileSelected = function() end -- กำหนดจริงในส่วนโปรไฟล์
+    profileSection:AddDropdown("AFProfile", {
+        Title = "เลือกชุด",
+        Values = profileNames,
+        Default = 1,
+    }):OnChanged(function(v)
+        selectedProfile = tonumber(tostring(v):match("%d+")) or 1
+        uiHooks.profileSelected(selectedProfile)
+    end)
+    local profileLabel = proxyLabel(profileSection, "ข้อมูลชุดนี้", "-")
+    local profileSaveButton = proxyButton(profileSection, "บันทึกตั้งค่าตอนนี้ลงชุดนี้",
+        "เก็บสวิตช์ ตัวเลข วิธีเดิน และจุด 1-5 ทั้งหมด (ไม่รวมการเปิดตกปลา)")
+    local profileLoadButton = proxyButton(profileSection, "ใช้ชุดนี้", "โหลดค่าที่บันทึกไว้มาใช้ทันที")
+    local profileDeleteButton = proxyButton(profileSection, "ล้างข้อมูลชุดนี้")
 
     Window:SelectTab(1)
 
@@ -1787,4 +1831,258 @@ end)
             task.wait(10)
         end
     end)
+
+    ---------------------------------------------------------------- 12) ถือเบ็ดให้เอง
+    -- ตกปลาอยู่ แต่ในมือไม่มี Tool -> หยิบ Tool ที่ชื่อมีคำว่า Rod / เบ็ด จากกระเป๋า
+    local function isRod(tool)
+        local name = tool.Name:lower()
+        return name:find("rod", 1, true) ~= nil or tool.Name:find("เบ็ด", 1, true) ~= nil
+    end
+
+    task.spawn(function()
+        while ScreenGui.Parent do
+            if settings.autoEquip and isAutoFishing then
+                local char = LocalPlayer.Character
+                local hum = char and char:FindFirstChildOfClass("Humanoid")
+                local backpack = LocalPlayer:FindFirstChildOfClass("Backpack")
+                if hum and backpack and not char:FindFirstChildOfClass("Tool") then
+                    for _, tool in ipairs(backpack:GetChildren()) do
+                        if tool:IsA("Tool") and isRod(tool) then
+                            hum:EquipTool(tool)
+                            setStatus("หยิบเบ็ดให้แล้ว: " .. tool.Name)
+                            break
+                        end
+                    end
+                end
+            end
+            task.wait(1)
+        end
+    end)
+
+    ---------------------------------------------------------------- 13) บันทึกตั้งค่าลงไฟล์ (ชุดที่ 1-3)
+    local HttpService = game:GetService("HttpService")
+    local FOLDER = "AutoFish"
+    local canFile = typeof(writefile) == "function" and typeof(readfile) == "function"
+        and typeof(isfile) == "function"
+
+    -- JSON เก็บ CFrame / Vector3 ตรงๆ ไม่ได้ แปลงเป็นตัวเลขก่อน
+    local function encode(v)
+        if typeof(v) == "CFrame" then
+            return { __cf = { v:GetComponents() } }
+        elseif typeof(v) == "Vector3" then
+            return { __v3 = { v.X, v.Y, v.Z } }
+        elseif typeof(v) == "table" then
+            local out = {}
+            for k, val in pairs(v) do
+                out[tostring(k)] = encode(val)
+            end
+            return out
+        end
+        return v
+    end
+
+    local function decode(v)
+        if typeof(v) ~= "table" then return v end
+        if v.__cf then return CFrame.new(table.unpack(v.__cf)) end
+        if v.__v3 then return Vector3.new(table.unpack(v.__v3)) end
+        local out = {}
+        for k, val in pairs(v) do
+            out[tonumber(k) or k] = decode(val) -- คีย์ตัวเลข (ลำดับจุดในเส้นทาง) กลับเป็นตัวเลข
+        end
+        return out
+    end
+
+    local function profilePath(name)
+        return ("%s/%s.json"):format(FOLDER, name)
+    end
+
+    local function writeProfile(name, data)
+        local json = HttpService:JSONEncode(encode(data))
+        if canFile then
+            if typeof(makefolder) == "function" and not (typeof(isfolder) == "function" and isfolder(FOLDER)) then
+                pcall(makefolder, FOLDER)
+            end
+            writefile(profilePath(name), json)
+        else
+            -- executor ไม่มี writefile: เก็บไว้ชั่วคราว (หายเมื่อออกเกม)
+            env.AutoFishProfiles = env.AutoFishProfiles or {}
+            env.AutoFishProfiles[name] = json
+        end
+    end
+
+    local function readProfile(name)
+        local json
+        if canFile then
+            if isfile(profilePath(name)) then
+                json = readfile(profilePath(name))
+            end
+        elseif env.AutoFishProfiles then
+            json = env.AutoFishProfiles[name]
+        end
+        if not json then return nil end
+        local ok, data = pcall(function() return HttpService:JSONDecode(json) end)
+        return ok and decode(data) or nil
+    end
+
+    local function deleteProfile(name)
+        if canFile then
+            if isfile(profilePath(name)) and typeof(delfile) == "function" then
+                delfile(profilePath(name))
+            end
+        elseif env.AutoFishProfiles then
+            env.AutoFishProfiles[name] = nil
+        end
+    end
+
+    -- ข้อมูลที่เก็บ: settings ทั้งหมด + จุด 1-5 + ช่องที่ใช้อยู่
+    local function snapshot()
+        saveSlot()
+        local copy = {}
+        for k, v in pairs(settings) do
+            copy[k] = v
+        end
+        return {
+            savedAt = os.date("%d/%m/%Y %H:%M"),
+            settings = copy,
+            slots = env.AutoFishSlots,
+            slot = env.AutoFishSlot,
+        }
+    end
+
+    local function labelOf(map, value)
+        for label, v in pairs(map) do
+            if v == value then return label end
+        end
+    end
+
+    local function applyProfile(data)
+        -- 1) ค่าตั้งค่า + ให้ปุ่มในหน้าต่างตรงกับค่า
+        for k, v in pairs(data.settings or {}) do
+            if settings[k] ~= nil and typeof(v) == typeof(settings[k]) then
+                settings[k] = v
+                local c = controls[k]
+                if c then
+                    pcall(function()
+                        c.element:SetValue(c.kind == "number" and tostring(v) or v)
+                    end)
+                end
+            end
+        end
+        pcall(function() travelDropdown:SetValue(labelOf(TRAVEL, settings.sellTravel)) end)
+        pcall(function() returnDropdown:SetValue(labelOf(RETURN, settings.returnMode)) end)
+
+        -- 2) จุด 1-5
+        recording = false
+        env.AutoFishRecording = nil
+        env.AutoFishSlots = data.slots or {}
+        local slot = tonumber(data.slot) or 1
+        loadSlot(slot) -- ตั้ง env.AutoFishSlot ก่อน แล้วค่อยขยับเมนู (เมนูจะไม่ทับข้อมูล)
+        pcall(function() Fluent.Options.AFSlot:SetValue("จุด " .. slot) end)
+        refreshRouteButton()
+        refreshShopButton()
+        drawRoute()
+    end
+
+    local function refreshProfileLabel(i)
+        local data = readProfile("profile" .. i)
+        if not data then
+            profileLabel.Text = ("ชุดที่ %d: ยังไม่ได้บันทึก"):format(i)
+                .. (canFile and "" or "\n(executor นี้เซฟไฟล์ไม่ได้ จะเก็บไว้แค่จนออกเกม)")
+            return
+        end
+        local on = {}
+        for _, key in ipairs({ "autoSell", "antiAfk", "breakOn", "nearbyOn", "speedOn", "jumpOn",
+            "rareAlert", "autoEquip", "autoRejoin" }) do
+            if data.settings and data.settings[key] then
+                table.insert(on, key)
+            end
+        end
+        local slots = 0
+        for _, v in pairs(data.slots or {}) do
+            if v.spot or v.route or v.shop then slots += 1 end
+        end
+        profileLabel.Text = ("ชุดที่ %d  •  บันทึกเมื่อ %s\nจุดที่บันทึกไว้ %d ช่อง  •  เปิดอยู่ %d อย่าง")
+            :format(i, tostring(data.savedAt or "?"), slots, #on)
+    end
+
+    uiHooks.profileSelected = refreshProfileLabel
+    refreshProfileLabel(selectedProfile)
+
+    profileSaveButton.MouseButton1Click:Connect(function()
+        writeProfile("profile" .. selectedProfile, snapshot())
+        refreshProfileLabel(selectedProfile)
+        notify("บันทึกแล้ว", ("ชุดที่ %d"):format(selectedProfile))
+    end)
+
+    profileLoadButton.MouseButton1Click:Connect(function()
+        local data = readProfile("profile" .. selectedProfile)
+        if not data then
+            notify("ยังไม่มีข้อมูล", ("ชุดที่ %d ยังไม่ได้บันทึก"):format(selectedProfile))
+            return
+        end
+        applyProfile(data)
+        notify("ใช้ตั้งค่าแล้ว", ("ชุดที่ %d"):format(selectedProfile))
+    end)
+
+    profileDeleteButton.MouseButton1Click:Connect(function()
+        deleteProfile("profile" .. selectedProfile)
+        refreshProfileLabel(selectedProfile)
+        notify("ล้างแล้ว", ("ชุดที่ %d"):format(selectedProfile))
+    end)
+
+    ---------------------------------------------------------------- 14) เข้าเกมใหม่เมื่อหลุด
+    -- หลุด -> เซฟตั้งค่าตอนนั้นลง rejoin.json -> เข้าเกมใหม่ -> (ถ้า executor มี queue_on_teleport)
+    -- รันสคริปต์ให้เอง แล้วโหลด rejoin.json และเปิดตกปลาต่อ
+    local SCRIPT_URL = "https://raw.githubusercontent.com/Noblesse779/RobloxLoader/main/AutoFish.lua"
+    local TeleportService = game:GetService("TeleportService")
+    local GuiService = game:GetService("GuiService")
+    local queueTeleport = (typeof(queue_on_teleport) == "function" and queue_on_teleport)
+        or (typeof(queueonteleport) == "function" and queueonteleport)
+        or (typeof(syn) == "table" and syn.queue_on_teleport)
+
+    local rejoining = false
+    local function rejoin()
+        if rejoining or not settings.autoRejoin then return end
+        rejoining = true
+        pcall(writeProfile, "rejoin", snapshot())
+        if queueTeleport then
+            pcall(queueTeleport, ("getgenv().AutoFishResume = true; loadstring(game:HttpGet(%q))()"):format(SCRIPT_URL))
+        end
+        task.wait(2)
+        for _ = 1, 5 do
+            local ok = pcall(function()
+                TeleportService:Teleport(game.PlaceId, LocalPlayer)
+            end)
+            if ok then break end
+            task.wait(5)
+        end
+    end
+
+    connections[#connections + 1] = GuiService.ErrorMessageChanged:Connect(function(message)
+        if message and message ~= "" then
+            task.spawn(rejoin)
+        end
+    end)
+
+    -- รันมาจากการเข้าเกมใหม่: โหลดตั้งค่าก่อนหลุด แล้วตกต่อ
+    if env.AutoFishResume then
+        env.AutoFishResume = nil
+        task.spawn(function()
+            local data = readProfile("rejoin")
+            if not data then return end
+            if not LocalPlayer.Character then
+                LocalPlayer.CharacterAdded:Wait()
+            end
+            task.wait(5) -- รอเกมโหลด
+            applyProfile(data)
+            local spot = env.AutoFishFishSpot
+            local hrp = getRoot()
+            if spot and hrp then
+                hrp.CFrame = spot -- กลับจุดตกปลาเดิม
+                task.wait(1)
+            end
+            setEnabled(true)
+            notify("เข้าเกมใหม่แล้ว", "โหลดตั้งค่าก่อนหลุด และตกปลาต่อ")
+        end)
+    end
 end)()
