@@ -935,14 +935,27 @@ local function findAuraShop()
     end
 end
 
--- ร้านเปิดด้วยการเดินไปเหยียบพื้นแดงหน้าร้าน (หน้าต่างถูกสร้างตอนเปิด ปิดแล้วหายไป)
--- จำจุดที่ยืนตอนร้านเปิดครั้งแรกไว้ ครั้งต่อไปวาร์ปไปเหยียบเองได้
+-- เหยียบพื้นแดงหน้าร้าน -> คนขายถาม "1. แสดงออร่าให้ฉันดูหน่อย!  2. อาจจะในภายหลัง"
+-- ต้องเลือกข้อ 1 ร้านถึงจะเปิด (หน้าต่างร้านถูกสร้างตอนเปิด ปิดแล้วหายไป)
+local function findShowAuraOption()
+    for _, root in ipairs({ LocalPlayer.PlayerGui, workspace }) do
+        for _, d in ipairs(root:GetDescendants()) do
+            if (d:IsA("TextButton") or d:IsA("TextLabel")) and d.Text:find("แสดงออร่า", 1, true) then
+                local gui = d:FindFirstAncestorWhichIsA("LayerCollector")
+                if gui and (not gui:IsA("ScreenGui") or isShown(d)) then
+                    return d:IsA("GuiButton") and d or d:FindFirstAncestorWhichIsA("GuiButton") or d
+                end
+            end
+        end
+    end
+end
+
+-- จำจุดที่ยืนตอนคนขายถาม/ร้านเปิดครั้งแรก ครั้งต่อไปวาร์ปไปเหยียบเองได้
 task.spawn(function()
     while alive() do
         if settings.autoAura and not env.DashAuraPad then
-            local shop = findAuraShop()
             local hrp = getRoot()
-            if shop and isShown(shop:FindFirstChildWhichIsA("GuiObject", true) or shop) and hrp then
+            if hrp and (findShowAuraOption() or findAuraShop()) then
                 env.DashAuraPad = hrp.CFrame
             end
         end
@@ -997,17 +1010,26 @@ local function auraCheck()
         auraInfo = "ยังไม่รู้ว่าร้านอยู่ไหน: เดินไปเหยียบพื้นแดงหน้าร้านออร่าเองหนึ่งครั้ง"
         return
     end
-    -- วาร์ปไปเหยียบพื้นหน้าร้าน -> รอหน้าต่างเปิด -> ซื้อ/ใส่ -> กลับที่เดิม
+    -- วาร์ปไปเหยียบพื้นหน้าร้าน -> เลือก "แสดงออร่าให้ฉันดูหน่อย!" -> รอหน้าต่างเปิด -> ซื้อ/ใส่ -> กลับที่เดิม
     local hrp = getRoot()
     if not hrp then return end
     busy += 1
     local back = hrp.CFrame
     hrp.CFrame = env.DashAuraPad
+    local option
+    waitFor(4, function()
+        option = findShowAuraOption()
+        return option ~= nil or findAuraShop() ~= nil
+    end)
+    if option and not findAuraShop() then
+        pressButton(option)
+    end
     if waitFor(4, function() return findAuraShop() ~= nil end) then
         task.wait(0.5)
         pcall(auraCheckInner)
     else
-        auraInfo = "เหยียบพื้นหน้าร้านแล้วแต่ร้านไม่เปิด"
+        auraInfo = option and "กดเลือก \"แสดงออร่า\" แล้วแต่ร้านไม่เปิด"
+            or "เหยียบพื้นหน้าร้านแล้วแต่คนขายไม่ถาม"
     end
     hrp = getRoot()
     if hrp then hrp.CFrame = back end
