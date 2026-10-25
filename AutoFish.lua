@@ -668,10 +668,12 @@ do
         jumpOn = false, jump = 100,
         stopFish = 0,    -- 0 = ไม่จำกัด
         stopMinutes = 0, -- 0 = ไม่จำกัด
+        autoSell = true,
+        sellAt = 100,    -- ปลาในกระเป๋าครบกี่ตัวแล้วขายทั้งหมด
     }
 
     ---------------------------------------------------------------- UI
-    local FULL_HEIGHT = 345
+    local FULL_HEIGHT = 430
 
     MainFrame.Size = UDim2.new(0, 220, 0, FULL_HEIGHT)
     ToggleButton.Size = UDim2.new(1, -10, 0, 45)
@@ -820,6 +822,27 @@ do
     labelInRow(stopTimeRow, "หยุดเมื่อครบ (นาที)", UDim2.new(0.65, -2, 1, 0))
     makeNumberBox(stopTimeRow, settings.stopMinutes, function(n) settings.stopMinutes = n end,
         UDim2.new(0.35, 0, 1, 0), UDim2.new(0.65, 2, 0, 0))
+
+    -- 7) ขายปลาอัตโนมัติ
+    local sellRow = makeRow()
+    makeToggle(sellRow, "ขายเมื่อครบ",
+        function() return settings.autoSell end,
+        function(v) settings.autoSell = v end,
+        UDim2.new(0.65, -2, 1, 0))
+    makeNumberBox(sellRow, settings.sellAt, function(n) settings.sellAt = math.max(1, math.floor(n)) end,
+        UDim2.new(0.35, 0, 1, 0), UDim2.new(0.65, 2, 0, 0))
+
+    local sellNowRow = makeRow()
+    local sellNowButton = Instance.new("TextButton")
+    sellNowButton.Size = UDim2.new(1, 0, 1, 0)
+    sellNowButton.BackgroundColor3 = Color3.fromRGB(150, 110, 30)
+    sellNowButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+    sellNowButton.Font = Enum.Font.SourceSansBold
+    sellNowButton.TextSize = 14
+    sellNowButton.Text = "ขายปลาทั้งหมดตอนนี้"
+    sellNowButton.Parent = sellNowRow
+
+    local bagLabel = makeLabel("ปลาในกระเป๋า: -", 18, Color3.fromRGB(255, 220, 120))
 
     -- 3) บอกปุ่มลัด
     makeLabel(("%s = เปิด/ปิดตกปลา   %s = ซ่อนหน้าต่าง"):format(TOGGLE_KEY.Name, HIDE_KEY.Name),
@@ -1036,6 +1059,77 @@ do
             refreshStats()
             refreshTitle()
             task.wait(0.5)
+        end
+    end)
+
+    ---------------------------------------------------------------- 7) ขายปลาอัตโนมัติ
+    -- Inventory.Request:InvokeServer("Get") -> { Items = { {Id, Key, At, Weight?}, ... }, MaxFish, Coins }
+    -- ของที่มี Weight คือปลา (คันเบ็ด/ป้าย/โหล ไม่มี Weight จะไม่ถูกขาย)
+    -- ขายด้วย FishShop.Request:InvokeServer("SellIds", { id, id, ... }) แบบเดียวกับกดขายในร้าน
+    local remotesFolder = game:GetService("ReplicatedStorage"):WaitForChild("Remotes")
+    local selling = false
+
+    local function getFishIds()
+        local ok, inv = pcall(function()
+            return remotesFolder.Inventory.Request:InvokeServer("Get")
+        end)
+        if not ok or typeof(inv) ~= "table" or typeof(inv.Items) ~= "table" then
+            return nil
+        end
+        local ids = {}
+        for _, item in ipairs(inv.Items) do
+            if typeof(item) == "table" and item.Weight ~= nil and item.Id ~= nil then
+                table.insert(ids, item.Id)
+            end
+        end
+        return ids, inv.MaxFish
+    end
+
+    local function sellAll()
+        if selling then return end
+        selling = true
+        local ids = getFishIds()
+        if not ids then
+            bagLabel.Text = "ขายไม่ได้: อ่านกระเป๋าไม่ได้"
+        elseif #ids == 0 then
+            bagLabel.Text = "ไม่มีปลาให้ขาย"
+        else
+            local before = LocalPlayer:GetAttribute("Coins")
+            local ok, res = pcall(function()
+                return remotesFolder.FishShop.Request:InvokeServer("SellIds", ids)
+            end)
+            task.wait(0.5)
+            local after = LocalPlayer:GetAttribute("Coins")
+            if ok and not (typeof(res) == "table" and res.Ok == false) then
+                local gained = (typeof(before) == "number" and typeof(after) == "number") and (after - before) or nil
+                bagLabel.Text = gained and ("ขายแล้ว %d ตัว ได้ %d เหรียญ"):format(#ids, gained)
+                    or ("ขายแล้ว %d ตัว"):format(#ids)
+            else
+                bagLabel.Text = "ขายไม่สำเร็จ: " .. tostring(typeof(res) == "table" and (res.Error or res.Message) or res)
+            end
+        end
+        selling = false
+    end
+
+    sellNowButton.MouseButton1Click:Connect(function()
+        task.spawn(sellAll)
+    end)
+
+    -- เช็คกระเป๋าทุก 10 วิ ถ้าปลาครบจำนวนที่ตั้งไว้ ขายทั้งหมดทีเดียว
+    task.spawn(function()
+        while ScreenGui.Parent do
+            if not selling then
+                local ids, maxFish = getFishIds()
+                if ids then
+                    if settings.autoSell and #ids >= settings.sellAt then
+                        sellAll()
+                    else
+                        bagLabel.Text = ("ปลาในกระเป๋า: %d / %s   (ขายที่ %d)")
+                            :format(#ids, tostring(maxFish or "?"), settings.sellAt)
+                    end
+                end
+            end
+            task.wait(10)
         end
     end)
 end
