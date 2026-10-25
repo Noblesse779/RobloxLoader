@@ -672,6 +672,7 @@ do
         autoSell = true,
         sellAt = 100,    -- ปลาในกระเป๋าครบกี่ตัวแล้วขายทั้งหมด
         sellTravel = "walk", -- ไปร้านยังไง: "walk" = เดินไป (เนียนกว่า), "warp" = วาร์ป (เร็วกว่า)
+        walkFallbackWarp = true, -- เดินแล้วติด/ตกน้ำ ให้วาร์ปแทน (ไม่งั้นจะติดค้างอยู่ตรงนั้น)
         breakOn = false, breakEvery = 25, breakSeconds = 30, -- พักทุกประมาณกี่ตัว / พักประมาณกี่วิ (สุ่ม ±30-40%)
         nearbyOn = false, nearbyRange = 30, -- มีผู้เล่นอื่นเข้ามาใกล้กี่ studs ให้พัก
         rareAlert = true, rareStop = false, -- เตือน / หยุด เมื่อได้ปลาที่ไม่ใช่ระดับ "ทั่วไป"
@@ -882,6 +883,20 @@ do
         refreshTravel()
     end)
     refreshTravel()
+
+    -- บันทึกเส้นทางเดิน: กดเริ่มที่จุดตกปลา เดินไปร้านเอง แล้วกดหยุดที่ร้าน
+    local routeRow = makeRow()
+    local routeButton = Instance.new("TextButton")
+    routeButton.Size = UDim2.new(1, 0, 1, 0)
+    routeButton.BackgroundColor3 = Color3.fromRGB(60, 60, 90)
+    routeButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+    routeButton.Font = Enum.Font.SourceSansBold
+    routeButton.TextSize = 14
+    routeButton.Parent = routeRow
+
+    makeToggle(makeRow(), "เดินติดให้วาร์ปแทน",
+        function() return settings.walkFallbackWarp end,
+        function(v) settings.walkFallbackWarp = v end)
 
     local bagLabel = makeLabel("", 18, Color3.fromRGB(255, 220, 120))
 
@@ -1332,49 +1347,154 @@ do
         return char and char:FindFirstChild("HumanoidRootPart")
     end
 
-    -- เดินไปจุดหมายด้วยระบบหาทางของ Roblox (ข้ามสิ่งกีดขวาง/กระโดดได้)
+    -- ===== การเดิน =====
+    -- 1) ถ้ามีเส้นทางที่บันทึกไว้ เดินตามเส้นทางนั้น (แม่นสุด ไม่ตกน้ำ)
+    -- 2) ไม่มี: ให้ระบบหาทางของ Roblox หาทางเดินที่ไม่ลงน้ำ
+    -- เดินแล้วลงไปว่ายน้ำ / ไม่ขยับ / หาทางไม่เจอ = ถือว่าเดินไม่สำเร็จ
     local PathfindingService = game:GetService("PathfindingService")
     local WALK_TIMEOUT = 60 -- เดินนานสุดกี่วินาทีต่อเที่ยว
 
-    local function walkTo(target, timeout)
+    local function flatDist(a, b)
+        return ((a - b) * Vector3.new(1, 0, 1)).Magnitude
+    end
+
+    -- เดินผ่านจุดทีละจุด points = { Vector3 หรือ {Position, Action} }
+    local function walkPoints(points, timeout)
         local char = LocalPlayer.Character
         local hum = char and char:FindFirstChildOfClass("Humanoid")
         local hrp = char and char:FindFirstChild("HumanoidRootPart")
         if not (hum and hrp) then return false end
 
-        local path = PathfindingService:CreatePath({ AgentRadius = 2, AgentHeight = 5, AgentCanJump = true })
-        local ok = pcall(function()
-            path:ComputeAsync(hrp.Position, target)
-        end)
-        local waypoints
-        if ok and path.Status == Enum.PathStatus.Success then
-            waypoints = path:GetWaypoints()
-        else
-            -- หาทางไม่เจอ: เดินตรงไปเลย
-            waypoints = { { Position = target, Action = Enum.PathWaypointAction.Walk } }
-        end
-
         local deadline = os.clock() + timeout
-        for _, wp in ipairs(waypoints) do
-            if wp.Action == Enum.PathWaypointAction.Jump then
+        for _, p in ipairs(points) do
+            local pos = typeof(p) == "Vector3" and p or p.Position
+            if typeof(p) ~= "Vector3" and p.Action == Enum.PathWaypointAction.Jump then
                 hum.Jump = true
             end
             local started = os.clock()
             local lastMove = 0
-            while true do
-                local flat = (hrp.Position - wp.Position) * Vector3.new(1, 0, 1)
-                if flat.Magnitude < 3 then break end
+            local lastPos, lastProgress = hrp.Position, os.clock()
+            while flatDist(hrp.Position, pos) > 2.5 do
                 if os.clock() > deadline then return false end
-                if os.clock() - started > 8 then break end -- ติดอยู่จุดนี้ ข้ามไปจุดถัดไป
+                if hum:GetState() == Enum.HumanoidStateType.Swimming then
+                    return false, "ตกน้ำ"
+                end
+                -- ไม่ขยับเลย 3 วิ = ติด
+                if (hrp.Position - lastPos).Magnitude > 1 then
+                    lastPos, lastProgress = hrp.Position, os.clock()
+                elseif os.clock() - lastProgress > 3 then
+                    return false, "เดินติด"
+                end
+                if os.clock() - started > 10 then
+                    return false, "เดินติด"
+                end
+                -- ขั้นสูงกว่าเดิม -> กระโดด
+                if pos.Y - hrp.Position.Y > 2.5 then
+                    hum.Jump = true
+                end
                 if os.clock() - lastMove > 1 then
-                    hum:MoveTo(wp.Position)
+                    hum:MoveTo(pos)
                     lastMove = os.clock()
                 end
                 task.wait(0.1)
             end
         end
-        return ((hrp.Position - target) * Vector3.new(1, 0, 1)).Magnitude <= SHOP_RANGE
+        return true
     end
+
+    local function pathTo(target)
+        local hrp = getRoot()
+        if not hrp then return nil end
+        local path = PathfindingService:CreatePath({
+            AgentRadius = 2, AgentHeight = 5, AgentCanJump = true,
+            Costs = { Water = math.huge }, -- ห้ามเดินลงน้ำ
+        })
+        local ok = pcall(function()
+            path:ComputeAsync(hrp.Position, target)
+        end)
+        if ok and path.Status == Enum.PathStatus.Success then
+            return path:GetWaypoints()
+        end
+        return nil
+    end
+
+    -- เดินไปร้าน (toShop = true) หรือเดินกลับจุดตกปลา
+    local function walkTrip(target, toShop)
+        local route = env.AutoFishRoute
+        local hrp = getRoot()
+        if not hrp then return false end
+        if route and #route >= 2 then
+            local startPoint = toShop and route[1] or route[#route]
+            if flatDist(hrp.Position, startPoint) <= 15 then
+                local points = {}
+                if toShop then
+                    points = route
+                else
+                    for i = #route, 1, -1 do
+                        table.insert(points, route[i])
+                    end
+                end
+                local ok, why = walkPoints(points, WALK_TIMEOUT)
+                if not ok then return false, why end
+                return walkPoints({ target }, 10)
+            end
+        end
+        local waypoints = pathTo(target)
+        if not waypoints then
+            return false, "หาทางเดินไม่เจอ"
+        end
+        return walkPoints(waypoints, WALK_TIMEOUT)
+    end
+
+    -- ปุ่มบันทึกเส้นทาง
+    local recording = false
+    local function refreshRouteButton()
+        if recording then
+            routeButton.Text = "กำลังบันทึก... เดินไปร้านแล้วกดหยุด"
+            routeButton.BackgroundColor3 = Color3.fromRGB(170, 40, 40)
+        else
+            local route = env.AutoFishRoute
+            routeButton.Text = route and ("มีเส้นทางแล้ว %d จุด (กดบันทึกใหม่)"):format(#route)
+                or "บันทึกเส้นทางเดิน (เริ่มที่จุดตกปลา)"
+            routeButton.BackgroundColor3 = Color3.fromRGB(60, 60, 90)
+        end
+    end
+    refreshRouteButton()
+
+    routeButton.MouseButton1Click:Connect(function()
+        if recording then
+            -- หยุดบันทึก: จุดสุดท้ายคือร้าน บันทึกจุดร้านไปด้วยเลย
+            recording = false
+            local hrp = getRoot()
+            if hrp then
+                local route = env.AutoFishRecording or {}
+                table.insert(route, hrp.Position)
+                env.AutoFishRoute = #route >= 2 and route or nil
+                env.AutoFishShopCFrame = hrp.CFrame
+                refreshShopButton()
+                bagLabel.Text = "บันทึกเส้นทาง + จุดร้านแล้ว"
+            end
+            env.AutoFishRecording = nil
+            refreshRouteButton()
+            return
+        end
+        recording = true
+        env.AutoFishRecording = {}
+        refreshRouteButton()
+        task.spawn(function()
+            local route = env.AutoFishRecording
+            while recording and ScreenGui.Parent do
+                local hrp = getRoot()
+                if hrp then
+                    local last = route[#route]
+                    if not last or (hrp.Position - last).Magnitude >= 3 then
+                        table.insert(route, hrp.Position)
+                    end
+                end
+                task.wait(0.15)
+            end
+        end)
+    end)
 
     local function sellRequest(ids)
         local before = LocalPlayer:GetAttribute("Coins")
@@ -1426,17 +1546,38 @@ do
                         task.wait(0.8)
                     else
                         bagLabel.Text = "เดินไปขายที่ร้าน..."
-                        if walkTo(shop.Position, WALK_TIMEOUT) then
+                        local reached, why = walkTrip(shop.Position, true)
+                        local warped = false
+                        if not reached and settings.walkFallbackWarp then
+                            -- เดินติด/ตกน้ำ: วาร์ปไปร้านแทน
+                            bagLabel.Text = ("%s วาร์ปไปร้านแทน"):format(why or "เดินไม่ถึง")
+                            hrp = getRoot()
+                            if hrp then
+                                hrp.CFrame = shop
+                                task.wait(0.8)
+                                reached, warped = true, true
+                            end
+                        end
+                        if reached then
                             task.wait(0.5)
                             sellRequest(ids)
                         else
-                            bagLabel.Text = "เดินไปร้านไม่ถึง (ทางตัน?) ลองใช้วาร์ป"
+                            bagLabel.Text = ("เดินไปร้านไม่ถึง (%s)"):format(why or "?")
                         end
-                        walkTo(back.Position, WALK_TIMEOUT)
+
+                        -- กลับจุดตกปลา: เดินกลับ ถ้าไม่ถึง (หรือขาไปวาร์ปมา) วาร์ปกลับจุดเดิมเป๊ะ
+                        local returned = false
+                        if not warped then
+                            returned = walkTrip(back.Position, false)
+                        end
                         hrp = getRoot()
                         if hrp then
-                            -- หันหน้ากลับทางเดิม (หมุนตัวอยู่กับที่ ไม่ได้วาร์ป)
-                            hrp.CFrame = CFrame.new(hrp.Position) * back.Rotation
+                            if returned and flatDist(hrp.Position, back.Position) <= 3 then
+                                -- หันหน้ากลับทางเดิม (หมุนตัวอยู่กับที่ ไม่ได้วาร์ป)
+                                hrp.CFrame = CFrame.new(hrp.Position) * back.Rotation
+                            elseif settings.walkFallbackWarp or warped then
+                                hrp.CFrame = back
+                            end
                         end
                         task.wait(0.5)
                     end
