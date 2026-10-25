@@ -18,6 +18,9 @@ end
 
 local settings = {
     autoDash = false,
+    autoTrain = false,   -- ถือของช่อง 1 แล้วคลิกเพิ่มพลังรัวๆ
+    trainDelay = 0.15,   -- คลิกทุกกี่วิ
+    clickX2 = true,      -- เจอปุ่ม x2 เด้งบนจอ กดให้ (ตอนเปิดฝึกพลังหรือชาร์จอัตโนมัติ)
     autoPlace = false,
     antiAfk = false,
     autoRebirth = false,
@@ -114,6 +117,7 @@ local afterDash = function() end
 
 -- ชาร์จ -> บิน -> รอจนหยุด -> กลับแท่นชาร์จ
 local dashCount = 0
+local busy = 0 -- >0 = กำลังบิน/วางตัวละคร (ฝึกพลังหยุดก่อน)
 local function dashRound()
     local spot = findChargeSpot()
     local hrp = getRoot()
@@ -732,6 +736,92 @@ task.spawn(function()
     end
 end)
 
+---------------------------------------------------------------- ฝึกพลัง (ช่อง 1) + ปุ่ม x2
+-- ช่อง 1 ในแถบด้านล่างคือของฝึกพลัง (ออร่าสีฟ้า) ถือแล้วคลิก ได้ +10 พลังต่อครั้ง
+-- บางครั้งมีวงกลม "x2" เด้งกลางจอ กดแล้วได้พลังคูณ 2
+
+-- ของฝึกพลัง = Tool ในกระเป๋าที่ไม่ใช่ตัวละคร
+local function getTrainTool()
+    local char = LocalPlayer.Character
+    if char then
+        for _, t in ipairs(char:GetChildren()) do
+            if t:IsA("Tool") and not isCharacterTool(t) then return t end
+        end
+    end
+    local backpack = LocalPlayer:FindFirstChildOfClass("Backpack")
+    if backpack then
+        for _, t in ipairs(backpack:GetChildren()) do
+            if t:IsA("Tool") and not isCharacterTool(t) then return t end
+        end
+    end
+    return nil
+end
+
+local function clickGui(gui)
+    local c = gui.AbsolutePosition + gui.AbsoluteSize / 2
+    local sg = gui:FindFirstAncestorWhichIsA("ScreenGui")
+    if sg and not sg.IgnoreGuiInset then
+        c += game:GetService("GuiService"):GetGuiInset()
+    end
+    VirtualInputManager:SendMouseButtonEvent(c.X, c.Y, 0, true, game, 1)
+    task.wait(0.03)
+    VirtualInputManager:SendMouseButtonEvent(c.X, c.Y, 0, false, game, 1)
+end
+
+-- หาปุ่ม x2 ที่ขึ้นบนจอ (ข้อความ "x2" ตรงๆ อยู่ในปุ่ม/รูปที่กดได้)
+local x2Count = 0
+local function findX2Button()
+    for _, d in ipairs(LocalPlayer.PlayerGui:GetDescendants()) do
+        if (d:IsA("TextLabel") or d:IsA("TextButton")) and isShown(d)
+            and d.Text:gsub("%s", ""):lower() == "x2" then
+            return d:IsA("GuiButton") and d or d:FindFirstAncestorWhichIsA("GuiButton") or d
+        end
+    end
+    return nil
+end
+
+-- ปุ่ม x2: เช็คทุก 0.3 วิ ตอนเปิดฝึกพลังหรือชาร์จอัตโนมัติ
+task.spawn(function()
+    while alive() do
+        if settings.clickX2 and (settings.autoTrain or settings.autoDash) then
+            local button = findX2Button()
+            if button then
+                clickGui(button)
+                x2Count += 1
+                task.wait(0.5)
+            end
+        end
+        task.wait(0.3)
+    end
+end)
+
+local trainClicks = 0
+task.spawn(function()
+    while alive() do
+        if settings.autoTrain and busy == 0 then
+            local tool = getTrainTool()
+            local hum = getHumanoid()
+            if tool and hum then
+                if tool.Parent ~= LocalPlayer.Character then
+                    hum:EquipTool(tool)
+                    task.wait(0.2)
+                end
+                tool:Activate() -- เหมือนคลิกตอนถือของ
+                trainClicks += 1
+                if settings.autoDash == false then
+                    setStatus(("ฝึกพลัง (คลิกไป %d ครั้ง)"):format(trainClicks))
+                end
+            elseif not tool then
+                setStatus("หาของฝึกพลัง (ช่อง 1) ไม่เจอ")
+                task.wait(1)
+            end
+            task.wait(math.max(0.05, settings.trainDelay))
+        else
+            task.wait(0.3)
+        end
+    end
+end)
+
 ---------------------------------------------------------------- ลูปหลัก
 local lastPlace = 0
 task.spawn(function()
@@ -739,7 +829,9 @@ task.spawn(function()
         local didSomething = false
         if settings.autoPlace and os.clock() - lastPlace > settings.placeEvery then
             lastPlace = os.clock()
+            busy += 1
             local n, why = placeStrongest()
+            busy -= 1
             if n > 0 then
                 setStatus(("วางตัวละครแล้ว %d ตัว"):format(n))
             elseif why then
@@ -748,7 +840,11 @@ task.spawn(function()
             didSomething = true
         end
         if settings.autoDash then
-            dashRound()
+            busy += 1
+            local hum = getHumanoid()
+            if hum then hum:UnequipTools() end -- เก็บของในมือก่อนชาร์จ
+            pcall(dashRound)
+            busy -= 1
             didSomething = true
         end
         if not didSomething then
@@ -822,6 +918,25 @@ local Tabs = {
 }
 
 -- หลัก
+local trainSection = Tabs.main:AddSection("ฝึกพลัง (ของช่อง 1)")
+trainSection:AddToggle("DFTrain", {
+    Title = "ฝึกพลังอัตโนมัติ",
+    Description = "ถือของช่อง 1 แล้วคลิกรัวๆ (หยุดเองตอนบิน/วางตัวละคร)",
+    Default = false,
+}):OnChanged(function(v) settings.autoTrain = v end)
+trainSection:AddInput("DFTrainDelay", {
+    Title = "คลิกทุก (วินาที)",
+    Default = tostring(settings.trainDelay),
+    Numeric = true,
+    Finished = true,
+    Callback = function(v) settings.trainDelay = tonumber(v) or settings.trainDelay end,
+})
+trainSection:AddToggle("DFX2", {
+    Title = "กดปุ่ม x2 ให้อัตโนมัติ",
+    Description = "วงกลม x2 เด้งกลางจอตอนฝึก/ชาร์จ จะกดให้ทันที",
+    Default = settings.clickX2,
+}):OnChanged(function(v) settings.clickX2 = v end)
+
 local dashSection = Tabs.main:AddSection("ชาร์จ + บิน")
 dashSection:AddToggle("DFDash", { Title = "ชาร์จและบินอัตโนมัติ", Default = false })
     :OnChanged(function(v) settings.autoDash = v end)
@@ -992,8 +1107,8 @@ Window:SelectTab(1)
 task.spawn(function()
     while alive() and not Fluent.Unloaded do
         pcall(function()
-            statusPara:SetDesc(("%s\nบินแล้ว %d รอบ  •  วางตัวละครแล้ว %d ตัว  •  รีเบิร์ธ %d ครั้ง  •  เจอตัวไล่ %d ครั้ง\nรีเบิร์ธ: %s")
-                :format(status, dashCount, placedCount, rebirthCount, chaseEscapes, rebirthInfo))
+            statusPara:SetDesc(("%s\nบินแล้ว %d รอบ  •  วางตัวละครแล้ว %d ตัว  •  รีเบิร์ธ %d ครั้ง  •  เจอตัวไล่ %d ครั้ง\nฝึกพลังคลิกไป %d ครั้ง  •  กด x2 ไป %d ครั้ง\nรีเบิร์ธ: %s")
+                :format(status, dashCount, placedCount, rebirthCount, chaseEscapes, trainClicks, x2Count, rebirthInfo))
         end)
         local lines = {}
         for i, t in ipairs(getCharacterTools()) do
