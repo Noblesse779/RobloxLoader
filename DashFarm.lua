@@ -416,47 +416,67 @@ local function costOf(text)
     return num and parseNumber(num) or math.huge
 end
 
--- รวบรวมป้ายอัพเกรดในฐานของเรา: { kind, target, part, cost }
+-- รวบรวมป้ายอัพเกรดรอบฐานของเรา: { kind, target, part, cost }
+-- หาทั้ง ClickDetector และปุ่มบน SurfaceGui/BillboardGui ที่อยู่ในรัศมีของฐาน
+-- (ป้ายอาจไม่ได้อยู่ในโฟลเดอร์ฐานตรงๆ) ค้นทั้งแมพหนัก เลยเก็บผลไว้ 30 วิ
+local upgradeCache, upgradeCacheAt, upgradeDebug = nil, 0, ""
 local function findUpgradeTargets()
+    if upgradeCache and os.clock() - upgradeCacheAt < 30 then
+        return upgradeCache
+    end
     local plot = getMyPlot()
     if not plot then return nil, "หาฐานของเราไม่เจอ" end
-    local list = {}
-    local seen = {}
+    local center = plot:GetPivot().Position
+    local radius = plot:GetExtentsSize().Magnitude / 2 + 25
+    local function near(part)
+        return part and part:IsA("BasePart") and (part.Position - center).Magnitude <= radius
+    end
 
-    -- ClickDetector ที่ชิ้นส่วนมีข้อความ "เลเวล"
-    for _, cd in ipairs(plot:GetDescendants()) do
-        if cd:IsA("ClickDetector") and cd.Parent and cd.Parent:IsA("BasePart") then
-            local holder = cd.Parent.Parent or cd.Parent
-            local text = guiText(cd.Parent) .. " " .. guiText(holder)
-            if text:find("เลเวล", 1, true) and not seen[cd] then
-                seen[cd] = true
-                table.insert(list, { kind = "click", target = cd, part = cd.Parent, cost = costOf(text) })
+    local list, seen = {}, {}
+    local clickCount, guiCount = 0, 0
+
+    for _, d in ipairs(workspace:GetDescendants()) do
+        if d:IsA("ClickDetector") then
+            local part = d.Parent
+            if near(part) and not seen[d] then
+                clickCount += 1
+                seen[d] = true
+                local holder = part.Parent or part
+                local text = guiText(part) .. " " .. guiText(holder)
+                table.insert(list, { kind = "click", target = d, part = part, cost = costOf(text), text = text })
             end
         end
     end
 
-    -- ปุ่มบน SurfaceGui (อยู่ในฐาน หรืออยู่ใน PlayerGui แล้วแปะบนชิ้นส่วนในฐาน)
     local function scanGui(root)
-        for _, sg in ipairs(root:GetDescendants()) do
-            if sg:IsA("SurfaceGui") then
-                local part = sg.Adornee or sg:FindFirstAncestorWhichIsA("BasePart")
-                if part and part:IsDescendantOf(plot) then
-                    local text = guiText(sg)
-                    if text:find("เลเวล", 1, true) then
-                        local button = sg:FindFirstChildWhichIsA("GuiButton", true)
-                        if button and not seen[button] then
-                            seen[button] = true
-                            table.insert(list, { kind = "button", target = button, part = part, cost = costOf(text) })
+        for _, g in ipairs(root:GetDescendants()) do
+            if g:IsA("SurfaceGui") or g:IsA("BillboardGui") then
+                local part = g.Adornee or g:FindFirstAncestorWhichIsA("BasePart")
+                if near(part) then
+                    local text = guiText(g)
+                    if text:find("เลเวล", 1, true) or text:find(">", 1, true) then
+                        guiCount += 1
+                        local button = g:FindFirstChildWhichIsA("GuiButton", true)
+                        local item = { kind = button and "button" or "partclick", target = button,
+                            part = part, cost = costOf(text), text = text }
+                        if not seen[button or part] then
+                            seen[button or part] = true
+                            table.insert(list, item)
                         end
                     end
                 end
             end
         end
     end
-    scanGui(plot)
+    scanGui(workspace)
     scanGui(LocalPlayer.PlayerGui)
 
-    table.sort(list, function(a, b) return a.cost < b.cost end) -- ถูกสุดก่อน
+    table.sort(list, function(x, y) return x.cost < y.cost end) -- ถูกสุดก่อน
+    upgradeDebug = ("ClickDetector %d  •  ป้ายข้อความ %d"):format(clickCount, guiCount)
+    if list[1] then
+        upgradeDebug ..= "\nตัวอย่าง: " .. list[1].part:GetFullName()
+    end
+    upgradeCache, upgradeCacheAt = list, os.clock()
     return list
 end
 
@@ -473,6 +493,9 @@ local function clickPart(part)
 end
 
 local function pressUpgrade(item)
+    if item.kind == "partclick" then
+        return clickPart(item.part)
+    end
     if item.kind == "click" then
         if typeof(fireclickdetector) == "function" then
             return pcall(fireclickdetector, item.target)
@@ -504,7 +527,8 @@ local function upgradeAll()
         return 0
     end
     if #list == 0 then
-        upgradeInfo = "ไม่เจอป้ายอัพเกรดในฐาน"
+        upgradeInfo = "ไม่เจอป้ายอัพเกรดรอบฐาน (" .. upgradeDebug .. ")"
+        upgradeCache = nil -- ค้นใหม่รอบหน้า
         return 0
     end
     local pressed = 0
@@ -514,7 +538,7 @@ local function upgradeAll()
         task.wait(0.15)
     end
     upgradeCount += pressed
-    upgradeInfo = ("เจอป้าย %d ป้าย (%s)  กดไป %d ครั้ง"):format(#list, list[1].kind, pressed)
+    upgradeInfo = ("เจอป้าย %d ป้าย (%s)  กดไป %d ครั้ง\n%s"):format(#list, list[1].kind, pressed, upgradeDebug)
     return pressed
 end
 
