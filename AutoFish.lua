@@ -859,6 +859,26 @@ end)
     local bagLabel = proxyLabel(sellSection, "ผลการขาย", "-")
 
     ---- หน้า เดิน / เส้นทาง
+    local SLOT_COUNT = 5
+    local slotSection = Tabs.walk:AddSection("จุดที่บันทึกไว้ (แต่ละช่องมีจุดตกปลา + เส้นทาง + ร้าน)")
+    local slotNames = {}
+    for i = 1, SLOT_COUNT do
+        slotNames[i] = "จุด " .. i
+    end
+    uiHooks.slotChanged = function() end -- กำหนดจริงในส่วนการเดิน
+    slotSection:AddDropdown("AFSlot", {
+        Title = "ใช้จุด",
+        Values = slotNames,
+        Default = env.AutoFishSlot or 1,
+    }):OnChanged(function(v)
+        local i = tonumber(tostring(v):match("%d+"))
+        if i then
+            uiHooks.slotChanged(i)
+        end
+    end)
+    local slotLabel = proxyLabel(slotSection, "ข้อมูลจุดนี้", "-")
+    local warpSpotButton = proxyButton(slotSection, "วาร์ปไปจุดตกปลาของช่องนี้", "หรือกด \"เดินกลับจุดตกปลา\" ด้านล่าง")
+
     local tripSection = Tabs.walk:AddSection("ไปขาย / กลับ")
     local TRAVEL = { ["เดินไป (เนียน)"] = "walk", ["วาร์ป (เร็ว)"] = "warp" }
     tripSection:AddDropdown("AFTravel", {
@@ -1294,9 +1314,43 @@ end)
     -- ไปยืนที่ร้านแล้วกด "บันทึกจุดร้าน" ครั้งเดียว ตอนขายสคริปต์จะพักตกปลา วาร์ปไปขาย แล้ววาร์ปกลับจุดเดิม
     local SHOP_RANGE = 12 -- อยู่ห่างจุดร้านไม่เกินกี่ studs ถือว่าอยู่ที่ร้านแล้ว ไม่ต้องวาร์ป
 
+    -- ===== ช่องบันทึก (จุด 1-5) =====
+    -- ค่าที่ใช้งานอยู่คือ env.AutoFishRoute / AutoFishFishSpot / AutoFishShopCFrame
+    -- เปลี่ยนช่อง = เก็บค่าปัจจุบันลงช่องเดิม แล้วโหลดค่าของช่องใหม่มาใช้
+    env.AutoFishSlots = env.AutoFishSlots or {}
+    env.AutoFishSlot = env.AutoFishSlot or 1
+
+    local function slotInfo()
+        local parts = {}
+        table.insert(parts, env.AutoFishFishSpot and "✓ จุดตกปลา" or "✗ จุดตกปลา")
+        table.insert(parts, env.AutoFishRoute and ("✓ เส้นทาง %d จุด"):format(#env.AutoFishRoute) or "✗ เส้นทาง")
+        table.insert(parts, env.AutoFishShopCFrame and "✓ ร้าน" or "✗ ร้าน")
+        return ("จุด %d:  %s"):format(env.AutoFishSlot, table.concat(parts, "   "))
+    end
+
+    -- เก็บค่าที่ใช้อยู่ลงช่องปัจจุบัน (เรียกทุกครั้งที่บันทึก/ล้าง)
+    local function saveSlot()
+        env.AutoFishSlots[env.AutoFishSlot] = {
+            route = env.AutoFishRoute,
+            spot = env.AutoFishFishSpot,
+            shop = env.AutoFishShopCFrame,
+        }
+        slotLabel.Text = slotInfo()
+    end
+
+    local function loadSlot(i)
+        local data = env.AutoFishSlots[i] or {}
+        env.AutoFishSlot = i
+        env.AutoFishRoute = data.route
+        env.AutoFishFishSpot = data.spot
+        env.AutoFishShopCFrame = data.shop
+        slotLabel.Text = slotInfo()
+    end
+
     local function refreshShopButton()
         shopButton.Text = env.AutoFishShopCFrame and "บันทึกจุดร้านแล้ว (กดเพื่อบันทึกใหม่)"
             or "บันทึกจุดร้าน (ยืนที่ร้านแล้วกด)"
+        saveSlot()
     end
     refreshShopButton()
 
@@ -1426,6 +1480,7 @@ end)
             routeButton.Text = route and ("มีเส้นทางแล้ว %d จุด (กดบันทึกใหม่)"):format(#route)
                 or "บันทึกเส้นทางเดิน (เริ่มที่จุดตกปลา)"
             routeButton.BackgroundColor3 = Color3.fromRGB(60, 60, 90)
+            saveSlot()
         end
     end
     refreshRouteButton()
@@ -1571,6 +1626,30 @@ end)
     clearRouteButton.MouseButton1Click:Connect(function()
         clearRoute(false)
     end)
+    -- เปลี่ยนช่อง
+    uiHooks.slotChanged = function(i)
+        if i == env.AutoFishSlot then return end
+        recording = false -- กำลังบันทึกอยู่ = ยกเลิก
+        env.AutoFishRecording = nil
+        saveSlot()
+        loadSlot(i)
+        refreshRouteButton()
+        refreshShopButton()
+        drawRoute()
+        bagLabel.Text = ("ใช้จุด %d แล้ว"):format(i)
+    end
+
+    warpSpotButton.MouseButton1Click:Connect(function()
+        local spot = env.AutoFishFishSpot
+        local hrp = getRoot()
+        if not spot then
+            bagLabel.Text = ("จุด %d ยังไม่ได้บันทึกจุดตกปลา"):format(env.AutoFishSlot)
+        elseif hrp then
+            hrp.CFrame = spot
+            bagLabel.Text = ("วาร์ปไปจุดตกปลาของจุด %d แล้ว"):format(env.AutoFishSlot)
+        end
+    end)
+
     clearAllButton.MouseButton1Click:Connect(function()
         clearRoute(true)
     end)
