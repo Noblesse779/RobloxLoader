@@ -235,7 +235,8 @@ local function getActionLabel()
     actionLabel = nil
     for _, d in ipairs(LocalPlayer.PlayerGui:GetDescendants()) do
         if (d:IsA("TextLabel") or d:IsA("TextButton"))
-            and (d.Text:find("เหวี่ยง", 1, true) or d.Text:find(BITE_TEXT, 1, true)) then
+            and (d.Text:match("^%s*เหวี่ยง%s*$") or d.Text:find(BITE_TEXT, 1, true)) then
+            -- ต้องตรงคำว่า "เหวี่ยง" เป๊ะ ไม่งั้นจะไปเจอป้าย "แรงเหวี่ยง" บนหลอดชาร์จ
             actionLabel = d
             break
         end
@@ -375,7 +376,7 @@ end
 -- โหมด remote: Cast -> รอปลากิน -> Hook -> รอ -> Reel true (ตามลำดับที่ดักได้จาก Remote Spy)
 local function actionReady()
     local label = getActionLabel()
-    return label ~= nil and label.Text:find("เหวี่ยง", 1, true) ~= nil and isShown(label)
+    return label ~= nil and label.Text:match("^%s*เหวี่ยง%s*$") ~= nil and isShown(label)
 end
 
 local justCaught = false -- รอบก่อนเพิ่งส่ง "Reel", true (ปลาเด้งเข้าตัว) ไป
