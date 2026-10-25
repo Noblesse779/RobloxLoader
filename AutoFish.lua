@@ -686,760 +686,256 @@ end)
     -- ชื่อระดับความหายากที่รู้จัก (ถ้าเกมมีชื่ออื่นเพิ่มเข้าไปได้)
     local RARITIES = { "ทั่วไป", "พิเศษ", "หายาก", "ยอดเยี่ยม", "มหากาพย์", "ตำนาน", "ในตำนาน", "เทพ", "เทพเจ้า", "ลึกลับ" }
 
-    ---------------------------------------------------------------- UI
-    -- หน้าต่างธีมมืด: ซ้าย = ปุ่มเปิด/ปิด + สถานะ + เมนูหมวด, ขวา = การ์ดตั้งค่าของหมวดที่เลือก
-    -- ลากมุมขวาล่างเพื่อปรับขนาด, ปุ่ม – ย่อเหลือแถบหัว
-    local THEME = {
-        bg = Color3.fromRGB(17, 17, 20),
-        panel = Color3.fromRGB(23, 23, 27),
-        card = Color3.fromRGB(29, 29, 34),
-        input = Color3.fromRGB(21, 21, 25),
-        stroke = Color3.fromRGB(48, 48, 56),
-        accent = Color3.fromRGB(255, 140, 50),
-        text = Color3.fromRGB(235, 235, 240),
-        sub = Color3.fromRGB(150, 150, 162),
-        off = Color3.fromRGB(42, 42, 48),
+    ---------------------------------------------------------------- UI (Fluent)
+    -- หน้าต่างใช้ไลบรารี Fluent (https://github.com/dawid-scripts/Fluent)
+    -- ถ้าโหลดไม่ได้ จะใช้หน้าต่างเดิมแบบง่าย (มีแค่ปุ่มเปิด/ปิดตกปลา) ฟังก์ชันเสริมจะไม่ทำงาน
+    local FLUENT_URL = "https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"
+
+    local okFluent, Fluent = pcall(function()
+        return loadstring(game:HttpGet(FLUENT_URL))()
+    end)
+    if not okFluent or typeof(Fluent) ~= "table" then
+        warn("[AutoFish] โหลด Fluent ไม่ได้: " .. tostring(Fluent))
+        setStatus("โหลดหน้าต่างใหม่ไม่ได้")
+        return
+    end
+
+    ScreenGui.Enabled = false -- ซ่อนหน้าต่างเดิม (ส่วนตกปลายังใช้ตัวแปรในนั้นอยู่)
+
+    -- ปิดหน้าต่าง Fluent ไปพร้อมกับสคริปต์ (รันใหม่ / ปิดสคริปต์)
+    ScreenGui.AncestryChanged:Connect(function()
+        if not ScreenGui.Parent then
+            pcall(function() Fluent:Destroy() end)
+        end
+    end)
+
+    local Window = Fluent:CreateWindow({
+        Title = "ตกปลาอัตโนมัติ",
+        SubTitle = "เวอร์ชัน 2.0",
+        TabWidth = 160,
+        Size = UDim2.fromOffset(600, 460),
+        Acrylic = false,
+        Theme = "Darker",
+        MinimizeKey = HIDE_KEY, -- กด H ซ่อน/แสดงหน้าต่าง
+    })
+
+    local Tabs = {
+        main = Window:AddTab({ Title = "หลัก", Icon = "home" }),
+        sell = Window:AddTab({ Title = "ขายปลา", Icon = "coins" }),
+        walk = Window:AddTab({ Title = "เดิน / เส้นทาง", Icon = "map" }),
+        safe = Window:AddTab({ Title = "ความปลอดภัย", Icon = "shield" }),
+        char = Window:AddTab({ Title = "ตัวละคร", Icon = "user" }),
+        alert = Window:AddTab({ Title = "แจ้งเตือน", Icon = "bell" }),
     }
-    local FONT = Enum.Font.GothamMedium
-    local FONT_BOLD = Enum.Font.GothamBold
 
-    local function corner(gui, r)
-        local c = Instance.new("UICorner")
-        c.CornerRadius = UDim.new(0, r or 8)
-        c.Parent = gui
-        return c
+    -- ตัวกลางให้โค้ดส่วนอื่นใช้ได้เหมือนปุ่ม/ข้อความเดิม (.Text = ..., .MouseButton1Click:Connect)
+    local function proxyButton(container, title, desc)
+        local handlers = {}
+        local element = container:AddButton({
+            Title = title,
+            Description = desc,
+            Callback = function()
+                for _, h in ipairs(handlers) do
+                    task.spawn(h)
+                end
+            end,
+        })
+        local proxy = {
+            MouseButton1Click = {
+                Connect = function(_, fn)
+                    table.insert(handlers, fn)
+                end,
+            },
+        }
+        return setmetatable(proxy, {
+            __newindex = function(_, key, value)
+                if key == "Text" then
+                    pcall(function() element:SetTitle(value) end)
+                end
+            end,
+        })
     end
-    local function stroke(gui, color)
-        local st = Instance.new("UIStroke")
-        st.Color = color or THEME.stroke
-        st.Thickness = 1
-        st.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
-        st.Parent = gui
-        return st
+
+    local function proxyLabel(container, title, initial)
+        local element = container:AddParagraph({ Title = title, Content = initial or "-" })
+        local store = { Text = initial or "" }
+        return setmetatable({}, {
+            __index = store,
+            __newindex = function(_, key, value)
+                if key == "Text" then
+                    store.Text = value
+                    pcall(function() element:SetDesc(value) end)
+                end
+            end,
+        })
     end
 
-    local SIDEBAR_WIDTH = 175
-    local HEADER_HEIGHT = 46
-    local MIN_SIZE = Vector2.new(520, 320)
-    local windowSize = Vector2.new(660, 410)
+    local toggleCount = 0
+    local function addToggle(container, title, desc, get, set)
+        toggleCount += 1
+        local t = container:AddToggle("AFToggle" .. toggleCount, { Title = title, Description = desc, Default = get() })
+        t:OnChanged(function(v)
+            set(v)
+        end)
+        return t
+    end
 
-    MainFrame.Size = UDim2.fromOffset(windowSize.X, windowSize.Y)
-    MainFrame.Position = UDim2.new(0.5, -windowSize.X / 2, 0.08, 0)
-    MainFrame.BackgroundColor3 = THEME.bg
-    MainFrame.BorderSizePixel = 0
-    MainFrame.ClipsDescendants = true
-    corner(MainFrame, 12)
-    stroke(MainFrame)
+    local function addNumber(container, title, value, onChange)
+        toggleCount += 1
+        return container:AddInput("AFInput" .. toggleCount, {
+            Title = title,
+            Default = tostring(value),
+            Numeric = true,
+            Finished = true,
+            Callback = function(text)
+                local n = tonumber(text)
+                if n and n >= 0 then
+                    onChange(n)
+                end
+            end,
+        })
+    end
 
-    -- แถบหัว: โลโก้ + ชื่อ + เวอร์ชัน (ลากหน้าต่างจากตรงนี้)
-    TitleBar.Size = UDim2.new(1, 0, 0, HEADER_HEIGHT)
-    TitleBar.BackgroundTransparency = 1
-    TitleBar.Text = ""
-    TitleBar.ZIndex = 3
+    -- ส่วนอื่นมาเติมฟังก์ชันให้ (ส่วนพักตกปลาอยู่ข้างล่าง)
+    local uiHooks = {
+        fishingToggled = function(v) setEnabled(v) end,
+        wantFishing = function() return isAutoFishing end,
+    }
 
-    local Logo = Instance.new("TextLabel")
-    Logo.Size = UDim2.fromOffset(34, 34)
-    Logo.Position = UDim2.fromOffset(12, 6)
-    Logo.BackgroundColor3 = THEME.accent
-    Logo.Text = "🎣"
-    Logo.TextSize = 20
-    Logo.ZIndex = 3
-    Logo.Parent = TitleBar
-    corner(Logo, 9)
-
-    local TitleText = Instance.new("TextLabel")
-    TitleText.Size = UDim2.fromOffset(200, 20)
-    TitleText.Position = UDim2.fromOffset(54, 5)
-    TitleText.BackgroundTransparency = 1
-    TitleText.Text = "ตกปลาอัตโนมัติ"
-    TitleText.TextColor3 = THEME.text
-    TitleText.Font = FONT_BOLD
-    TitleText.TextSize = 17
-    TitleText.TextXAlignment = Enum.TextXAlignment.Left
-    TitleText.ZIndex = 3
-    TitleText.Parent = TitleBar
-
-    local VersionText = Instance.new("TextLabel")
-    VersionText.Size = UDim2.fromOffset(200, 14)
-    VersionText.Position = UDim2.fromOffset(54, 25)
-    VersionText.BackgroundTransparency = 1
-    VersionText.Text = "เวอร์ชัน 2.0  •  Auto Fish"
-    VersionText.TextColor3 = THEME.sub
-    VersionText.Font = FONT
-    VersionText.TextSize = 12
-    VersionText.TextXAlignment = Enum.TextXAlignment.Left
-    VersionText.ZIndex = 3
-    VersionText.Parent = TitleBar
-
-    -- พื้นหลังแถบซ้าย
-    local SidebarBg = Instance.new("Frame")
-    SidebarBg.Size = UDim2.new(0, SIDEBAR_WIDTH, 1, 0)
-    SidebarBg.BackgroundColor3 = THEME.panel
-    SidebarBg.BorderSizePixel = 0
-    SidebarBg.ZIndex = 1
-    SidebarBg.Parent = MainFrame
-
-    local HeaderLine = Instance.new("Frame")
-    HeaderLine.Size = UDim2.new(1, 0, 0, 1)
-    HeaderLine.Position = UDim2.fromOffset(0, HEADER_HEIGHT)
-    HeaderLine.BackgroundColor3 = THEME.stroke
-    HeaderLine.BorderSizePixel = 0
-    HeaderLine.ZIndex = 2
-    HeaderLine.Parent = MainFrame
-
-    -- ปุ่มเปิด/ปิดตกปลา + สถานะ (อยู่บนสุดของแถบซ้าย)
-    ToggleButton.Size = UDim2.fromOffset(SIDEBAR_WIDTH - 24, 38)
-    ToggleButton.Position = UDim2.fromOffset(12, HEADER_HEIGHT + 12)
-    ToggleButton.Font = FONT_BOLD
-    ToggleButton.TextSize = 15
-    ToggleButton.ZIndex = 3
-    corner(ToggleButton, 8)
-
-    StatusLabel.Size = UDim2.fromOffset(SIDEBAR_WIDTH - 24, 34)
-    StatusLabel.Position = UDim2.fromOffset(12, HEADER_HEIGHT + 54)
-    StatusLabel.TextScaled = false
-    StatusLabel.TextWrapped = true
-    StatusLabel.Font = FONT
-    StatusLabel.TextSize = 12
-    StatusLabel.TextColor3 = THEME.accent
-    StatusLabel.TextXAlignment = Enum.TextXAlignment.Left
-    StatusLabel.TextYAlignment = Enum.TextYAlignment.Top
-    StatusLabel.ZIndex = 3
-
-    local NavTitle = Instance.new("TextLabel")
-    NavTitle.Size = UDim2.fromOffset(SIDEBAR_WIDTH - 24, 16)
-    NavTitle.Position = UDim2.fromOffset(14, HEADER_HEIGHT + 94)
-    NavTitle.BackgroundTransparency = 1
-    NavTitle.Text = "เมนู"
-    NavTitle.TextColor3 = THEME.sub
-    NavTitle.Font = FONT
-    NavTitle.TextSize = 12
-    NavTitle.TextXAlignment = Enum.TextXAlignment.Left
-    NavTitle.ZIndex = 3
-    NavTitle.Parent = MainFrame
-
-    -- เมนูหมวด
-    local Sidebar = Instance.new("Frame")
-    Sidebar.Size = UDim2.new(0, SIDEBAR_WIDTH - 16, 1, -(HEADER_HEIGHT + 120))
-    Sidebar.Position = UDim2.fromOffset(8, HEADER_HEIGHT + 114)
-    Sidebar.BackgroundTransparency = 1
-    Sidebar.ZIndex = 3
-    Sidebar.Parent = MainFrame
-    local sidebarLayout = Instance.new("UIListLayout")
-    sidebarLayout.Padding = UDim.new(0, 2)
-    sidebarLayout.SortOrder = Enum.SortOrder.LayoutOrder
-    sidebarLayout.Parent = Sidebar
-
-    -- หัวข้อหน้าที่เปิดอยู่ (ขวาบน)
-    local PageTitle = Instance.new("TextLabel")
-    PageTitle.Size = UDim2.new(1, -(SIDEBAR_WIDTH + 24), 0, 26)
-    PageTitle.Position = UDim2.fromOffset(SIDEBAR_WIDTH + 16, HEADER_HEIGHT + 8)
-    PageTitle.BackgroundTransparency = 1
-    PageTitle.TextColor3 = THEME.text
-    PageTitle.Font = FONT_BOLD
-    PageTitle.TextSize = 19
-    PageTitle.TextXAlignment = Enum.TextXAlignment.Left
-    PageTitle.ZIndex = 2
-    PageTitle.Parent = MainFrame
-
-    -- พื้นที่การ์ด (ขวา)
-    local PageArea = Instance.new("Frame")
-    PageArea.Size = UDim2.new(1, -(SIDEBAR_WIDTH + 20), 1, -(HEADER_HEIGHT + 46))
-    PageArea.Position = UDim2.fromOffset(SIDEBAR_WIDTH + 12, HEADER_HEIGHT + 40)
-    PageArea.BackgroundTransparency = 1
-    PageArea.ZIndex = 2
-    PageArea.Parent = MainFrame
-
-    local pages, tabButtons = {}, {}
-    local currentPage -- หน้าที่กำลังใส่ของ (ตอนสร้าง UI)
-    local currentCard -- การ์ดที่กำลังใส่ของ
-
-    local function showPage(name)
-        for n, page in pairs(pages) do
-            local on = n == name
-            page.Visible = on
-            local tab = tabButtons[n]
-            tab.BackgroundTransparency = on and 0 or 1
-            tab.TextColor3 = on and THEME.accent or THEME.sub
-            tab:FindFirstChild("Bar").Visible = on
+    ---- หน้า หลัก
+    local fishSection = Tabs.main:AddSection("ตกปลา")
+    local syncingFishing = false
+    local fishingToggle = fishSection:AddToggle("AFFishing", {
+        Title = "เปิดตกปลาอัตโนมัติ",
+        Description = ("กด %s เปิด/ปิด  •  กด %s ซ่อนหน้าต่าง"):format(TOGGLE_KEY.Name, HIDE_KEY.Name),
+        Default = false,
+    })
+    fishingToggle:OnChanged(function(v)
+        if syncingFishing then return end
+        if v ~= uiHooks.wantFishing() then
+            uiHooks.fishingToggled(v)
         end
-        PageTitle.Text = name
-    end
+    end)
 
-    local tabCount = 0
-    local function addPage(name)
-        tabCount += 1
-        local page = Instance.new("ScrollingFrame")
-        page.Size = UDim2.new(1, 0, 1, 0)
-        page.BackgroundTransparency = 1
-        page.BorderSizePixel = 0
-        page.ScrollBarThickness = 3
-        page.ScrollBarImageColor3 = THEME.stroke
-        page.CanvasSize = UDim2.new()
-        page.AutomaticCanvasSize = Enum.AutomaticSize.Y
-        page.Visible = false
-        page.ZIndex = 2
-        page.Parent = PageArea
-        local l = Instance.new("UIListLayout")
-        l.Padding = UDim.new(0, 8)
-        l.SortOrder = Enum.SortOrder.LayoutOrder
-        l.Parent = page
-        local pad = Instance.new("UIPadding")
-        pad.PaddingRight = UDim.new(0, 8)
-        pad.PaddingBottom = UDim.new(0, 8)
-        pad.Parent = page
-        pages[name] = page
+    local statusPara = fishSection:AddParagraph({ Title = "สถานะ", Content = StatusLabel.Text })
+    StatusLabel:GetPropertyChangedSignal("Text"):Connect(function()
+        pcall(function() statusPara:SetDesc(StatusLabel.Text) end)
+    end)
 
-        local tab = Instance.new("TextButton")
-        tab.Size = UDim2.new(1, 0, 0, 32)
-        tab.BackgroundColor3 = Color3.fromRGB(34, 34, 40)
-        tab.BackgroundTransparency = 1
-        tab.AutoButtonColor = false
-        tab.TextColor3 = THEME.sub
-        tab.Font = FONT
-        tab.TextSize = 14
-        tab.Text = name
-        tab.TextXAlignment = Enum.TextXAlignment.Left
-        tab.LayoutOrder = tabCount
-        tab.ZIndex = 3
-        tab.Parent = Sidebar
-        corner(tab, 7)
-        local tabPad = Instance.new("UIPadding")
-        tabPad.PaddingLeft = UDim.new(0, 14)
-        tabPad.Parent = tab
-        local bar = Instance.new("Frame") -- แถบสีส้มข้างเมนูที่เลือก
-        bar.Name = "Bar"
-        bar.Size = UDim2.fromOffset(3, 18)
-        bar.Position = UDim2.new(0, -12, 0.5, -9)
-        bar.BackgroundColor3 = THEME.accent
-        bar.BorderSizePixel = 0
-        bar.Visible = false
-        bar.ZIndex = 4
-        bar.Parent = tab
-        corner(bar, 2)
-        tab.MouseButton1Click:Connect(function()
-            showPage(name)
-        end)
-        tabButtons[name] = tab
-        return page
-    end
+    local statsSection = Tabs.main:AddSection("สถิติ")
+    local statsLabel = proxyLabel(statsSection, "ผลการตก", "-")
+    local resetButton = proxyButton(statsSection, "รีเซ็ตสถิติ")
 
-    local PAGE_MAIN = "📊  หลัก"
-    local PAGE_SELL = "💰  ขายปลา"
-    local PAGE_WALK = "🚶  เดิน / เส้นทาง"
-    local PAGE_SAFE = "🛡️  ความปลอดภัย"
-    local PAGE_CHAR = "🏃  ตัวละคร"
-    local PAGE_ALERT = "🔔  แจ้งเตือน"
-    for _, n in ipairs({ PAGE_MAIN, PAGE_SELL, PAGE_WALK, PAGE_SAFE, PAGE_CHAR, PAGE_ALERT }) do
-        addPage(n)
-    end
-    local function setPage(name)
-        currentPage = pages[name]
-        currentCard = nil
-    end
-    setPage(PAGE_MAIN)
+    local stopSection = Tabs.main:AddSection("หยุดเอง (0 = ไม่จำกัด)")
+    addNumber(stopSection, "หยุดเมื่อได้ปลา (ตัว)", settings.stopFish, function(n) settings.stopFish = math.floor(n) end)
+    addNumber(stopSection, "หยุดเมื่อครบ (นาที)", settings.stopMinutes, function(n) settings.stopMinutes = n end)
 
-    ---- ปรับขนาดหน้าต่าง: ลากมุมขวาล่าง
-    local ResizeHandle = Instance.new("TextButton")
-    ResizeHandle.Size = UDim2.fromOffset(18, 18)
-    ResizeHandle.Position = UDim2.new(1, -18, 1, -18)
-    ResizeHandle.BackgroundTransparency = 1
-    ResizeHandle.AutoButtonColor = false
-    ResizeHandle.Text = "◢"
-    ResizeHandle.TextColor3 = THEME.sub
-    ResizeHandle.TextSize = 14
-    ResizeHandle.ZIndex = 6
-    ResizeHandle.Parent = MainFrame
-    do
-        local resizing, startMouse, startSize
-        ResizeHandle.InputBegan:Connect(function(input)
-            if input.UserInputType == Enum.UserInputType.MouseButton1
-                or input.UserInputType == Enum.UserInputType.Touch then
-                resizing = true
-                startMouse = Vector2.new(input.Position.X, input.Position.Y)
-                startSize = windowSize
-                input.Changed:Connect(function()
-                    if input.UserInputState == Enum.UserInputState.End then
-                        resizing = false
-                    end
-                end)
-            end
-        end)
-        UserInputService.InputChanged:Connect(function(input)
-            if resizing and (input.UserInputType == Enum.UserInputType.MouseMovement
-                or input.UserInputType == Enum.UserInputType.Touch) then
-                local delta = Vector2.new(input.Position.X, input.Position.Y) - startMouse
-                local view = workspace.CurrentCamera.ViewportSize
-                windowSize = Vector2.new(
-                    math.clamp(startSize.X + delta.X, MIN_SIZE.X, view.X),
-                    math.clamp(startSize.Y + delta.Y, MIN_SIZE.Y, view.Y)
-                )
-                MainFrame.Size = UDim2.fromOffset(windowSize.X, windowSize.Y)
-            end
-        end)
-    end
-
-    local order = 0
-    local function nextOrder()
-        order += 1
-        return order
-    end
-
-    -- การ์ด: กล่องมุมโค้งมีหัวข้อ ของที่สร้างต่อจากนี้จะอยู่ในการ์ดนี้ จนกว่าจะเปิดการ์ด/หน้าใหม่
-    local function makeHeader(text)
-        local card = Instance.new("Frame")
-        card.Size = UDim2.new(1, 0, 0, 0)
-        card.AutomaticSize = Enum.AutomaticSize.Y
-        card.BackgroundColor3 = THEME.card
-        card.BorderSizePixel = 0
-        card.LayoutOrder = nextOrder()
-        card.ZIndex = 2
-        card.Parent = currentPage
-        corner(card, 9)
-        stroke(card)
-        local pad = Instance.new("UIPadding")
-        pad.PaddingTop = UDim.new(0, 10)
-        pad.PaddingBottom = UDim.new(0, 12)
-        pad.PaddingLeft = UDim.new(0, 12)
-        pad.PaddingRight = UDim.new(0, 12)
-        pad.Parent = card
-        local l = Instance.new("UIListLayout")
-        l.Padding = UDim.new(0, 6)
-        l.SortOrder = Enum.SortOrder.LayoutOrder
-        l.Parent = card
-
-        local title = Instance.new("TextLabel")
-        title.Size = UDim2.new(1, 0, 0, 22)
-        title.BackgroundTransparency = 1
-        title.RichText = true
-        title.Text = ('<font color="#FF8C32">●</font>  %s'):format(text)
-        title.TextColor3 = THEME.text
-        title.Font = FONT_BOLD
-        title.TextSize = 15
-        title.TextXAlignment = Enum.TextXAlignment.Left
-        title.LayoutOrder = 0
-        title.ZIndex = 2
-        title.Parent = card
-
-        local line = Instance.new("Frame")
-        line.Size = UDim2.new(1, 0, 0, 1)
-        line.BackgroundColor3 = THEME.stroke
-        line.BorderSizePixel = 0
-        line.LayoutOrder = 1
-        line.ZIndex = 2
-        line.Parent = card
-
-        currentCard = card
-        return card
-    end
-
-    local function makeLabel(text, height, color)
-        local l = Instance.new("TextLabel")
-        l.Size = UDim2.new(1, 0, 0, height or 18)
-        l.BackgroundTransparency = 1
-        l.Text = text
-        l.TextColor3 = color or THEME.sub
-        l.Font = FONT
-        l.TextSize = 13
-        l.TextWrapped = true
-        l.TextXAlignment = Enum.TextXAlignment.Left
-        l.TextYAlignment = Enum.TextYAlignment.Top
-        l.LayoutOrder = nextOrder()
-        l.ZIndex = 2
-        l.Parent = currentCard or currentPage
-        return l
-    end
-
-    local function makeRow()
-        local row = Instance.new("Frame")
-        row.Size = UDim2.new(1, 0, 0, 30)
-        row.BackgroundTransparency = 1
-        row.LayoutOrder = nextOrder()
-        row.ZIndex = 2
-        row.Parent = currentCard or currentPage
-        return row
-    end
-
-    -- ตัวเลือกเปิด/ปิด: ข้อความซ้าย + ช่องติ๊กขวา (ส้ม = เปิด)
-    local function makeToggle(parent, text, get, set, width)
-        local b = Instance.new("TextButton")
-        b.Size = width or UDim2.new(1, 0, 1, 0)
-        b.BackgroundTransparency = 1
-        b.AutoButtonColor = false
-        b.Font = FONT
-        b.TextSize = 14
-        b.TextColor3 = THEME.text
-        b.Text = text
-        b.TextXAlignment = Enum.TextXAlignment.Left
-        b.ZIndex = 2
-        b:SetAttribute("AF_Toggle", true)
-        b.Parent = parent
-        local pad = Instance.new("UIPadding")
-        pad.PaddingRight = UDim.new(0, 30)
-        pad.Parent = b
-
-        local box = Instance.new("Frame")
-        box.Size = UDim2.fromOffset(20, 20)
-        box.AnchorPoint = Vector2.new(1, 0.5)
-        box.Position = UDim2.new(1, 26, 0.5, 0)
-        box.BorderSizePixel = 0
-        box.ZIndex = 3
-        box.Parent = b
-        corner(box, 5)
-        local boxStroke = stroke(box)
-        local check = Instance.new("TextLabel")
-        check.Size = UDim2.fromScale(1, 1)
-        check.BackgroundTransparency = 1
-        check.Text = "✓"
-        check.TextColor3 = Color3.fromRGB(20, 20, 20)
-        check.Font = FONT_BOLD
-        check.TextSize = 15
-        check.ZIndex = 4
-        check.Parent = box
-
-        local function refresh()
-            local on = get()
-            box.BackgroundColor3 = on and THEME.accent or THEME.off
-            boxStroke.Color = on and THEME.accent or THEME.stroke
-            check.Visible = on
+    -- ให้ปุ่มเปิดตกปลาตรงกับสถานะจริง (เปิด/ปิดจาก F, หยุดเอง, พัก ฯลฯ)
+    -- ชื่อ refreshTitle เดิม: ลูปสถิติเรียกทุกครึ่งวิ
+    local function refreshTitle()
+        if Fluent.Unloaded then
+            -- ผู้เล่นกดปิดหน้าต่าง Fluent = ปิดสคริปต์
+            setEnabled(false)
+            ScreenGui:Destroy()
+            return
         end
-        b.MouseButton1Click:Connect(function()
-            set(not get())
-            refresh()
-        end)
-        refresh()
-        return b
+        local want = uiHooks.wantFishing()
+        if fishingToggle.Value ~= want then
+            syncingFishing = true
+            pcall(function() fishingToggle:SetValue(want) end)
+            syncingFishing = false
+        end
     end
 
-    -- ช่องพิมพ์ตัวเลข
-    local function makeNumberBox(parent, value, onChange, size, position)
-        local box = Instance.new("TextBox")
-        box.Size = size
-        box.Position = position or UDim2.new()
-        box.BackgroundColor3 = THEME.input
-        box.TextColor3 = THEME.text
-        box.Font = FONT
-        box.TextSize = 14
-        box.ZIndex = 2
-        corner(box, 6)
-        stroke(box)
-        box.Text = tostring(value)
-        box.ClearTextOnFocus = false
-        box.Parent = parent
-        box.FocusLost:Connect(function()
-            local n = tonumber(box.Text)
-            if n and n >= 0 then
-                onChange(n)
-            end
-            box.Text = tostring(n and n >= 0 and n or value)
-            value = tonumber(box.Text)
-        end)
-        return box
-    end
-
-    local function labelInRow(row, text, width)
-        local l = Instance.new("TextLabel")
-        l.Size = width
-        l.BackgroundTransparency = 1
-        l.Text = text
-        l.TextColor3 = THEME.text
-        l.Font = FONT
-        l.TextSize = 14
-        l.ZIndex = 2
-        l.TextXAlignment = Enum.TextXAlignment.Left
-        l.Parent = row
-        return l
-    end
-
-    -- ===== หน้า หลัก =====
-    makeHeader("สถิติ")
-    -- 2) สถิติ
-    local statsLabel = makeLabel("", 72, Color3.fromRGB(150, 220, 255))
-
-    local resetRow = makeRow()
-    local resetButton = Instance.new("TextButton")
-    resetButton.Size = UDim2.new(1, 0, 1, 0)
-    resetButton.BackgroundColor3 = Color3.fromRGB(60, 60, 90)
-    resetButton.TextColor3 = Color3.fromRGB(255, 255, 255)
-    resetButton.Font = Enum.Font.SourceSansBold
-    resetButton.TextSize = 14
-    resetButton.Text = "รีเซ็ตสถิติ"
-    resetButton.Parent = resetRow
-
-    -- ===== หน้า ความปลอดภัย =====
-    setPage(PAGE_SAFE)
-    makeHeader("กันโดนเตะ")
-    -- 1) กัน AFK
-    makeToggle(makeRow(), "กันโดนเตะ AFK",
-        function() return settings.antiAfk end,
-        function(v) settings.antiAfk = v end)
-
-    -- ===== หน้า ตัวละคร =====
-    setPage(PAGE_CHAR)
-    makeHeader("ความเร็ว / กระโดด (ใส่ตัวเลขช่องขวา)")
-    -- 6) วิ่งเร็ว / กระโดดสูง
-    local speedRow = makeRow()
-    makeToggle(speedRow, "วิ่งเร็ว",
-        function() return settings.speedOn end,
-        function(v) settings.speedOn = v end,
-        UDim2.new(0.65, -2, 1, 0))
-    makeNumberBox(speedRow, settings.speed, function(n) settings.speed = n end,
-        UDim2.new(0.35, 0, 1, 0), UDim2.new(0.65, 2, 0, 0))
-
-    local jumpRow = makeRow()
-    makeToggle(jumpRow, "กระโดดสูง",
-        function() return settings.jumpOn end,
-        function(v) settings.jumpOn = v end,
-        UDim2.new(0.65, -2, 1, 0))
-    makeNumberBox(jumpRow, settings.jump, function(n) settings.jump = n end,
-        UDim2.new(0.35, 0, 1, 0), UDim2.new(0.65, 2, 0, 0))
-
-    -- ===== หน้า หลัก: ตั้งเวลาหยุด =====
-    setPage(PAGE_MAIN)
-    makeHeader("หยุดเอง (0 = ไม่จำกัด)")
-    -- 4) ตั้งเวลาหยุด (0 = ไม่จำกัด)
-    local stopFishRow = makeRow()
-    labelInRow(stopFishRow, "หยุดเมื่อได้ปลา (ตัว)", UDim2.new(0.65, -2, 1, 0))
-    makeNumberBox(stopFishRow, settings.stopFish, function(n) settings.stopFish = math.floor(n) end,
-        UDim2.new(0.35, 0, 1, 0), UDim2.new(0.65, 2, 0, 0))
-
-    local stopTimeRow = makeRow()
-    labelInRow(stopTimeRow, "หยุดเมื่อครบ (นาที)", UDim2.new(0.65, -2, 1, 0))
-    makeNumberBox(stopTimeRow, settings.stopMinutes, function(n) settings.stopMinutes = n end,
-        UDim2.new(0.35, 0, 1, 0), UDim2.new(0.65, 2, 0, 0))
-
-    -- ===== หน้า ขายปลา =====
-    setPage(PAGE_SELL)
-    local sellCard = makeHeader("ขายอัตโนมัติ")
-    -- 7) ขายปลาอัตโนมัติ
-    local sellRow = makeRow()
-    makeToggle(sellRow, "ขายเมื่อครบ",
+    ---- หน้า ขายปลา
+    local sellSection = Tabs.sell:AddSection("ขายอัตโนมัติ")
+    addToggle(sellSection, "ขายเมื่อครบจำนวน", "ปลาในกระเป๋าครบแล้วขายทุกตัวทีเดียว",
         function() return settings.autoSell end,
-        function(v) settings.autoSell = v end,
-        UDim2.new(0.65, -2, 1, 0))
-    makeNumberBox(sellRow, settings.sellAt, function(n) settings.sellAt = math.max(1, math.floor(n)) end,
-        UDim2.new(0.35, 0, 1, 0), UDim2.new(0.65, 2, 0, 0))
+        function(v) settings.autoSell = v end)
+    addNumber(sellSection, "จำนวนที่จะขาย (ตัว)", settings.sellAt,
+        function(n) settings.sellAt = math.max(1, math.floor(n)) end)
+    local sellNowButton = proxyButton(sellSection, "ขายปลาทั้งหมดตอนนี้")
+    local shopButton = proxyButton(sellSection, "บันทึกจุดร้าน", "ยืนที่ร้านแล้วกด (เซิร์ฟเวอร์ให้ขายเฉพาะใกล้ร้าน)")
+    local bagLabel = proxyLabel(sellSection, "ผลการขาย", "-")
 
-    local sellNowRow = makeRow()
-    local sellNowButton = Instance.new("TextButton")
-    sellNowButton.Size = UDim2.new(1, 0, 1, 0)
-    sellNowButton.BackgroundColor3 = Color3.fromRGB(150, 110, 30)
-    sellNowButton.TextColor3 = Color3.fromRGB(255, 255, 255)
-    sellNowButton.Font = Enum.Font.SourceSansBold
-    sellNowButton.TextSize = 14
-    sellNowButton.Text = "ขายปลาทั้งหมดตอนนี้"
-    sellNowButton.Parent = sellNowRow
-
-    local shopRow = makeRow()
-    local shopButton = Instance.new("TextButton")
-    shopButton.Size = UDim2.new(1, 0, 1, 0)
-    shopButton.BackgroundColor3 = Color3.fromRGB(60, 60, 90)
-    shopButton.TextColor3 = Color3.fromRGB(255, 255, 255)
-    shopButton.Font = Enum.Font.SourceSansBold
-    shopButton.TextSize = 14
-    shopButton.Parent = shopRow
-
-    -- ===== หน้า เดิน/เส้นทาง =====
-    setPage(PAGE_WALK)
-    makeHeader("ไปขาย / กลับ")
-    -- วิธีไปร้าน: กดสลับ เดิน <-> วาร์ป
-    local travelRow = makeRow()
-    local travelButton = Instance.new("TextButton")
-    travelButton.Size = UDim2.new(1, 0, 1, 0)
-    travelButton.TextColor3 = Color3.fromRGB(255, 255, 255)
-    travelButton.Font = Enum.Font.SourceSansBold
-    travelButton.TextSize = 14
-    travelButton.Parent = travelRow
-    local function refreshTravel()
-        local walk = settings.sellTravel == "walk"
-        travelButton.Text = "ไปร้านโดย: " .. (walk and "เดิน (เนียน)" or "วาร์ป (เร็ว)")
-        travelButton.BackgroundColor3 = walk and Color3.fromRGB(40, 110, 150) or Color3.fromRGB(150, 70, 40)
-    end
-    travelButton.MouseButton1Click:Connect(function()
-        settings.sellTravel = settings.sellTravel == "walk" and "warp" or "walk"
-        refreshTravel()
+    ---- หน้า เดิน / เส้นทาง
+    local tripSection = Tabs.walk:AddSection("ไปขาย / กลับ")
+    local TRAVEL = { ["เดินไป (เนียน)"] = "walk", ["วาร์ป (เร็ว)"] = "warp" }
+    tripSection:AddDropdown("AFTravel", {
+        Title = "ไปร้านโดย",
+        Values = { "เดินไป (เนียน)", "วาร์ป (เร็ว)" },
+        Default = settings.sellTravel == "warp" and 2 or 1,
+    }):OnChanged(function(v)
+        settings.sellTravel = TRAVEL[v] or settings.sellTravel
     end)
-    refreshTravel()
-
-    -- ขายเสร็จแล้วกลับยังไง: กดสลับ เดิน -> วาร์ป -> ไม่กลับ
-    local RETURN_LABELS = { walk = "เดินกลับ", warp = "วาร์ปกลับ", stay = "ไม่กลับ (หยุดตกที่ร้าน)" }
-    local RETURN_NEXT = { walk = "warp", warp = "stay", stay = "walk" }
-    local RETURN_COLORS = {
-        walk = Color3.fromRGB(40, 110, 150),
-        warp = Color3.fromRGB(150, 70, 40),
-        stay = Color3.fromRGB(70, 70, 70),
-    }
-    local returnRow = makeRow()
-    local returnButton = Instance.new("TextButton")
-    returnButton.Size = UDim2.new(1, 0, 1, 0)
-    returnButton.TextColor3 = Color3.fromRGB(255, 255, 255)
-    returnButton.Font = Enum.Font.SourceSansBold
-    returnButton.TextSize = 14
-    returnButton.Parent = returnRow
-    local function refreshReturn()
-        returnButton.Text = "ขายเสร็จแล้ว: " .. RETURN_LABELS[settings.returnMode]
-        returnButton.BackgroundColor3 = RETURN_COLORS[settings.returnMode]
-    end
-    returnButton.MouseButton1Click:Connect(function()
-        settings.returnMode = RETURN_NEXT[settings.returnMode]
-        refreshReturn()
+    local RETURN = { ["เดินกลับ"] = "walk", ["วาร์ปกลับ"] = "warp", ["ไม่กลับ (หยุดตกที่ร้าน)"] = "stay" }
+    tripSection:AddDropdown("AFReturn", {
+        Title = "ขายเสร็จแล้ว",
+        Values = { "เดินกลับ", "วาร์ปกลับ", "ไม่กลับ (หยุดตกที่ร้าน)" },
+        Default = settings.returnMode == "warp" and 2 or settings.returnMode == "stay" and 3 or 1,
+    }):OnChanged(function(v)
+        settings.returnMode = RETURN[v] or settings.returnMode
     end)
-    refreshReturn()
-
-    makeToggle(makeRow(), "เดินติดให้วาร์ปแทน",
+    addToggle(tripSection, "เดินติดให้วาร์ปแทน", "ตกน้ำ / ติด / หาทางไม่เจอ จะวาร์ปไปแทน",
         function() return settings.walkFallbackWarp end,
         function(v) settings.walkFallbackWarp = v end)
 
-    makeHeader("เส้นทาง (บันทึกจากจุดตกปลา → ร้าน)")
-    -- บันทึกเส้นทางเดิน: กดเริ่มที่จุดตกปลา เดินไปร้านเอง แล้วกดหยุดที่ร้าน
-    local routeRow = makeRow()
-    local routeButton = Instance.new("TextButton")
-    routeButton.Size = UDim2.new(1, 0, 1, 0)
-    routeButton.BackgroundColor3 = Color3.fromRGB(60, 60, 90)
-    routeButton.TextColor3 = Color3.fromRGB(255, 255, 255)
-    routeButton.Font = Enum.Font.SourceSansBold
-    routeButton.TextSize = 14
-    routeButton.Parent = routeRow
-
-    -- ล้างเส้นทาง (ย้ายไปตกจุดใหม่)
-    local resetRouteRow = makeRow()
-    local function halfButtonIn(row, text, x, color)
-        local b = Instance.new("TextButton")
-        b.Size = UDim2.new(0.5, -2, 1, 0)
-        b.Position = UDim2.new(x, x > 0 and 2 or 0, 0, 0)
-        b.BackgroundColor3 = color
-        b.TextColor3 = Color3.fromRGB(255, 255, 255)
-        b.Font = Enum.Font.SourceSansBold
-        b.TextSize = 14
-        b.Text = text
-        b.Parent = row
-        return b
-    end
-    local clearRouteButton = halfButtonIn(resetRouteRow, "ล้างเส้นทาง+จุดตกปลา", 0, Color3.fromRGB(150, 60, 60))
-    local clearAllButton = halfButtonIn(resetRouteRow, "ล้างทั้งหมด (รวมร้าน)", 0.5, Color3.fromRGB(110, 40, 40))
-
-    -- ปุ่มเดินเอง: กลับจุดตกปลา / ไปร้าน
-    local goRow = makeRow()
-    local function halfButton(text, x)
-        local b = Instance.new("TextButton")
-        b.Size = UDim2.new(0.5, -2, 1, 0)
-        b.Position = UDim2.new(x, x > 0 and 2 or 0, 0, 0)
-        b.BackgroundColor3 = Color3.fromRGB(40, 110, 150)
-        b.TextColor3 = Color3.fromRGB(255, 255, 255)
-        b.Font = Enum.Font.SourceSansBold
-        b.TextSize = 14
-        b.Text = text
-        b.Parent = goRow
-        return b
-    end
-    local goBackButton = halfButton("เดินกลับจุดตกปลา", 0)
-    local goShopButton = halfButton("เดินไปร้าน", 0.5)
-
+    local routeSection = Tabs.walk:AddSection("เส้นทาง (บันทึกจากจุดตกปลา → ร้าน)")
+    local routeButton = proxyButton(routeSection, "บันทึกเส้นทางเดิน",
+        "ยืนที่จุดตกปลาแล้วกด เดินไปร้านเอง แล้วกดอีกครั้งที่ร้าน")
+    local goBackButton = proxyButton(routeSection, "เดินกลับจุดตกปลา")
+    local goShopButton = proxyButton(routeSection, "เดินไปร้าน")
     local drawRoute = function() end -- กำหนดจริงในส่วนการเดิน
-    makeToggle(makeRow(), "แสดงเส้นทางในโลก",
+    addToggle(routeSection, "แสดงเส้นทางในโลก", "เขียว = จุดตกปลา, เหลือง = ร้าน, ฟ้า = ทางเดิน (เห็นคนเดียว)",
         function() return settings.showRoute end,
         function(v)
             settings.showRoute = v
             drawRoute()
         end)
+    local clearRouteButton = proxyButton(routeSection, "ล้างเส้นทาง + จุดตกปลา", "ย้ายไปตกจุดใหม่ (จุดร้านยังอยู่)")
+    local clearAllButton = proxyButton(routeSection, "ล้างทั้งหมด (รวมจุดร้าน)")
 
-    setPage(PAGE_SELL)
-    currentCard = sellCard
-    local bagLabel = makeLabel("", 18, Color3.fromRGB(255, 220, 120))
+    ---- หน้า ความปลอดภัย
+    local afkSection = Tabs.safe:AddSection("กันโดนเตะ")
+    addToggle(afkSection, "กันโดนเตะ AFK", nil,
+        function() return settings.antiAfk end,
+        function(v) settings.antiAfk = v end)
 
-    setPage(PAGE_SAFE)
-    makeHeader("พักเป็นระยะ (สุ่มให้ไม่เท่ากัน)")
-    -- 8) พักเป็นระยะ
-    local breakRow = makeRow()
-    makeToggle(breakRow, "พักทุก (ตัว)",
+    local breakSection = Tabs.safe:AddSection("พักเป็นระยะ (สุ่มให้ไม่เท่ากัน)")
+    addToggle(breakSection, "พักเป็นระยะ", nil,
         function() return settings.breakOn end,
-        function(v) settings.breakOn = v end,
-        UDim2.new(0.65, -2, 1, 0))
-    makeNumberBox(breakRow, settings.breakEvery, function(n) settings.breakEvery = math.max(1, math.floor(n)) end,
-        UDim2.new(0.35, 0, 1, 0), UDim2.new(0.65, 2, 0, 0))
+        function(v) settings.breakOn = v end)
+    addNumber(breakSection, "พักทุก (ตัว)", settings.breakEvery,
+        function(n) settings.breakEvery = math.max(1, math.floor(n)) end)
+    addNumber(breakSection, "พักนาน (วินาที)", settings.breakSeconds, function(n) settings.breakSeconds = n end)
 
-    local breakTimeRow = makeRow()
-    labelInRow(breakTimeRow, "พักนาน (วินาที)", UDim2.new(0.65, -2, 1, 0))
-    makeNumberBox(breakTimeRow, settings.breakSeconds, function(n) settings.breakSeconds = n end,
-        UDim2.new(0.35, 0, 1, 0), UDim2.new(0.65, 2, 0, 0))
-
-    makeHeader("มีผู้เล่นอื่นเข้าใกล้ (ระยะ studs)")
-    -- 9) หยุดเมื่อมีคนใกล้
-    local nearbyRow = makeRow()
-    makeToggle(nearbyRow, "พักเมื่อมีคนใกล้",
+    local nearbySection = Tabs.safe:AddSection("มีผู้เล่นอื่นเข้าใกล้")
+    addToggle(nearbySection, "พักเมื่อมีคนใกล้", "ไม่มีใครอยู่ใกล้ครบ 5 วิ จะตกต่อเอง",
         function() return settings.nearbyOn end,
-        function(v) settings.nearbyOn = v end,
-        UDim2.new(0.65, -2, 1, 0))
-    makeNumberBox(nearbyRow, settings.nearbyRange, function(n) settings.nearbyRange = n end,
-        UDim2.new(0.35, 0, 1, 0), UDim2.new(0.65, 2, 0, 0))
+        function(v) settings.nearbyOn = v end)
+    addNumber(nearbySection, "ระยะ (studs)", settings.nearbyRange, function(n) settings.nearbyRange = n end)
 
-    -- ===== หน้า แจ้งเตือน =====
-    setPage(PAGE_ALERT)
-    makeHeader("ปลาหายาก / ปลาชนิดใหม่")
-    -- 10) ปลาหายาก
-    makeToggle(makeRow(), "เตือนเมื่อได้ปลาหายาก",
+    ---- หน้า ตัวละคร
+    local moveSection = Tabs.char:AddSection("ความเร็ว / กระโดด")
+    addToggle(moveSection, "วิ่งเร็ว", nil,
+        function() return settings.speedOn end,
+        function(v) settings.speedOn = v end)
+    addNumber(moveSection, "ความเร็ววิ่ง", settings.speed, function(n) settings.speed = n end)
+    addToggle(moveSection, "กระโดดสูง", nil,
+        function() return settings.jumpOn end,
+        function(v) settings.jumpOn = v end)
+    addNumber(moveSection, "แรงกระโดด", settings.jump, function(n) settings.jump = n end)
+
+    ---- หน้า แจ้งเตือน
+    local rareSection = Tabs.alert:AddSection("ปลาหายาก / ปลาชนิดใหม่")
+    addToggle(rareSection, "เตือนเมื่อได้ปลาหายาก", "ระดับที่ไม่ใช่ \"ทั่วไป\" หรือปลาชนิดใหม่",
         function() return settings.rareAlert end,
         function(v) settings.rareAlert = v end)
-    makeToggle(makeRow(), "หยุดเมื่อได้ปลาหายาก",
+    addToggle(rareSection, "หยุดเมื่อได้ปลาหายาก", nil,
         function() return settings.rareStop end,
         function(v) settings.rareStop = v end)
 
-    -- 3) บอกปุ่มลัด (หน้าหลัก)
-    setPage(PAGE_MAIN)
-    makeHeader("ปุ่มลัด")
-    makeLabel(("%s = เปิด/ปิดตกปลา   %s = ซ่อนหน้าต่าง"):format(TOGGLE_KEY.Name, HIDE_KEY.Name),
-        16, Color3.fromRGB(160, 160, 160))
-
-    -- ปุ่มกดทั่วไปในการ์ด (ไม่ใช่ตัวเลือกติ๊ก): มุมโค้ง + ฟอนต์ธีม
-    for _, d in ipairs(PageArea:GetDescendants()) do
-        if d:IsA("TextButton") and not d:GetAttribute("AF_Toggle") then
-            d.Font = FONT_BOLD
-            d.TextSize = 13
-            d.ZIndex = 2
-            if not d:FindFirstChildOfClass("UICorner") then
-                corner(d, 7)
-            end
-        end
-    end
-
-    ---------------------------------------------------------------- 5) ย่อหน้าต่าง
-    local minimized = false
-    local MinButton = Instance.new("TextButton")
-    MinButton.Size = UDim2.new(0, 20, 0, 20)
-    MinButton.Position = UDim2.new(1, -20, 0, 0)
-    MinButton.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
-    MinButton.TextColor3 = Color3.fromRGB(255, 255, 255)
-    MinButton.Font = Enum.Font.SourceSansBold
-    MinButton.TextSize = 16
-    MinButton.Text = "–"
-    MinButton.Parent = TitleBar
-
-    local function refreshTitle()
-        TitleText.Text = minimized and ("ตกปลาอัตโนมัติ " .. (isAutoFishing and "(เปิด)" or "(ปิด)")) or "ตกปลาอัตโนมัติ"
-    end
-
-    MinButton.Size = UDim2.fromOffset(28, 28)
-    MinButton.Position = UDim2.new(1, -40, 0, 9)
-    MinButton.BackgroundColor3 = THEME.off
-    MinButton.TextColor3 = THEME.text
-    MinButton.Font = FONT_BOLD
-    MinButton.ZIndex = 4
-    corner(MinButton, 14)
-    MinButton.MouseButton1Click:Connect(function()
-        minimized = not minimized
-        -- ซ่อน/แสดงทุกอย่างยกเว้นแถบหัว
-        for _, gui in ipairs(MainFrame:GetChildren()) do
-            if gui:IsA("GuiObject") and gui ~= TitleBar then
-                gui.Visible = not minimized
-            end
-        end
-        -- ย่อเหลือแถบหัว / ขยายกลับขนาดเดิมที่ปรับไว้
-        MainFrame.Size = minimized and UDim2.fromOffset(280, HEADER_HEIGHT) or UDim2.fromOffset(windowSize.X, windowSize.Y)
-        MinButton.Text = minimized and "+" or "–"
-        refreshTitle()
-    end)
-
-    showPage(PAGE_MAIN)
+    Window:SelectTab(1)
 
     -- เก็บ connection ไว้ตัดทิ้งตอนรันสคริปต์ซ้ำ (ไม่งั้นปุ่มลัดของตัวเก่าจะยังทำงาน)
     local connections = {}
@@ -1486,7 +982,15 @@ end)
         pause.resume = false
     end
 
-    ToggleButton.MouseButton1Click:Connect(clearPauses)
+    -- กดปุ่มเปิดตกปลาในหน้าต่างเอง = ผู้เล่นสั่งเอง ล้างการพักทั้งหมด
+    uiHooks.fishingToggled = function(v)
+        clearPauses()
+        setEnabled(v)
+    end
+    -- ปุ่มในหน้าต่างแสดง "เปิด" ระหว่างพักด้วย (เดี๋ยวตกต่อเอง)
+    uiHooks.wantFishing = function()
+        return isAutoFishing or pause.resume
+    end
 
     ---------------------------------------------------------------- 3) ปุ่มลัด
     connections[#connections + 1] = UserInputService.InputBegan:Connect(function(input, gameProcessed)
@@ -1494,9 +998,7 @@ end)
         if input.KeyCode == TOGGLE_KEY then
             clearPauses()
             setEnabled(not isAutoFishing)
-        elseif input.KeyCode == HIDE_KEY then
-            ScreenGui.Enabled = not ScreenGui.Enabled
-        end
+        end -- ปุ่ม H (ซ่อนหน้าต่าง) Fluent จัดการเอง
     end)
 
     ---------------------------------------------------------------- 1) กัน AFK
@@ -1592,19 +1094,9 @@ end)
         return sell, isNew, rarity
     end
 
-    local StarterGui = game:GetService("StarterGui")
     local function notify(title, text)
         pcall(function()
-            StarterGui:SetCore("SendNotification", { Title = title, Text = text, Duration = 10 })
-        end)
-        -- กระพริบแถบหัวหน้าต่าง
-        task.spawn(function()
-            for _ = 1, 6 do
-                TitleBar.BackgroundColor3 = Color3.fromRGB(200, 150, 0)
-                task.wait(0.25)
-                TitleBar.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
-                task.wait(0.25)
-            end
+            Fluent:Notify({ Title = title, Content = text, Duration = 10 })
         end)
     end
 
