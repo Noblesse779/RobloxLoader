@@ -30,6 +30,7 @@ local MIN_BITE_WAIT = 1.5 -- โยนแล้วอย่างน้อยก
 local BITE_TEXT = "กดเลย"   -- ข้อความบนปุ่มตอนปลากินเหยื่อ
 local HOOK_REACTION = 0.3 -- (โหมด remote) ปลากินแล้วรอกี่วินาทีก่อนส่ง "Hook" (ให้ดูเหมือนคนกด)
 local HOOK_COOLDOWN = 1   -- ยิง "Hook" ซ้ำได้ทุกกี่วินาที ตอนป้าย Bang ยังขึ้นอยู่
+local AFTER_CATCH_DELAY = 2 -- ได้ปลาแล้วรอกี่วินาทีก่อนโยนใหม่ (ถ้าโยนไม่ออกเพราะหน้าต่างโชว์ปลาบัง ให้เพิ่ม)
 local READY_TIMEOUT = 5   -- หลังได้ปลา รอปุ่มกลับเป็น "เหวี่ยง" นานสุดกี่วินาที ก่อนลองเหวี่ยงต่อเลย
 local CAST_DELAY = 0.5    -- ก่อนเหวี่ยงแต่ละครั้งรออีกกี่วินาที
 local RECAST_RIGHT_AWAY = true -- ได้ปลาแล้วโยนต่อเลยโดยไม่รอปุ่มกลับเป็น "เหวี่ยง" (false = รอปุ่มก่อน)
@@ -473,11 +474,55 @@ local function remoteRound(myId)
     setStatus("ได้ปลาแล้ว โยนต่อ")
 end
 
+-- ===== ตรวจว่าได้ปลาแล้ว =====
+-- ตอนได้ปลา เกมจะยิง Remotes.Fishing.Action:FireServer("Reel", true) แล้วหน้าต่างโชว์ปลาเด้งขึ้น
+-- ดักการยิง remote ตัวนี้ด้วย hookmetamethod (ถ้า executor รองรับ)
+local env = (typeof(getgenv) == "function" and getgenv()) or _G
+env.AutoFishLastCatch = env.AutoFishLastCatch or 0
+
+if not env.AutoFishCatchHooked and typeof(hookmetamethod) == "function"
+    and typeof(getnamecallmethod) == "function" then
+    local remote = getActionRemote()
+    if remote then
+        env.AutoFishCatchHooked = true
+        local wrap = typeof(newcclosure) == "function" and newcclosure or function(f) return f end
+        local oldNamecall
+        oldNamecall = hookmetamethod(game, "__namecall", wrap(function(self, ...)
+            if self == remote and getnamecallmethod() == "FireServer" then
+                local action, value = ...
+                if action == "Reel" and value == true then
+                    env.AutoFishLastCatch = os.clock()
+                end
+            end
+            return oldNamecall(self, ...)
+        end))
+    end
+end
+
+-- สำรอง: ดูหน้าต่างโชว์ปลา (บรรทัด "ขายได้ ... เหรียญ") แค่ดูเฉยๆ ไม่คลิก
+local function catchPopupShown()
+    for _, d in ipairs(LocalPlayer.PlayerGui:GetDescendants()) do
+        if d:IsA("TextLabel") and d.Text:find("ขายได้", 1, true)
+            and d.Text:find("เหรียญ", 1, true) and isShown(d) then
+            return true
+        end
+    end
+    return false
+end
+
+local function caughtSince(t)
+    return env.AutoFishLastCatch > t or catchPopupShown()
+end
+
+local skipReadyWait = false -- รอบก่อนได้ปลา -> โยนต่อเลยไม่ต้องรอปุ่ม
+
 -- โหมด play: เล่นเหมือนคนกดปุ่มเอง
 -- เหวี่ยง (กดค้างชาร์จถึงจุดเหลือง) -> รอปุ่ม "กดเลย!" -> กดตวัด -> เล่นมินิเกมจนจบ
 local function playRound(myId)
     setStatus("รอปุ่ม เหวี่ยง พร้อม")
-    if not waitFor(myId, READY_TIMEOUT, actionReady) then
+    if skipReadyWait then
+        skipReadyWait = false
+    elseif not waitFor(myId, READY_TIMEOUT, actionReady) then
         if not isActive(myId) then return end
         -- ปุ่มไม่กลับเป็น "เหวี่ยง" (อาจมีหน้าต่างโชว์ปลาบังอยู่) ลองกดปุ่ม 1 ครั้งแล้วเหวี่ยงต่อเลย
         local label = getActionLabel()
@@ -494,6 +539,7 @@ local function playRound(myId)
     if not isActive(myId) then return end
 
     -- 1) เหวี่ยง
+    local roundStart = os.clock()
     castMouse(myId)
     if not isActive(myId) then return end
 
@@ -513,7 +559,12 @@ local function playRound(myId)
     -- 4) มินิเกม: ประคอง Zone ให้อยู่ตรงปลา จนปุ่มกลับเป็น "เหวี่ยง"
     setStatus("เล่นมินิเกม")
     waitFor(myId, 1, function() return not actionSaysBite() end)
+    local caught = false
     waitFor(myId, REEL_TIMEOUT, function()
+        if caughtSince(roundStart) then
+            caught = true
+            return true
+        end
         if actionReady() then return true end
         if isReeling() then
             reelStep()
@@ -523,7 +574,15 @@ local function playRound(myId)
     if mouseHeld then
         setMouse(false)
     end
-    setStatus("จบรอบ")
+
+    if caught then
+        -- 5) ได้ปลาแล้ว (ยิง "Reel", true / หน้าต่างโชว์ปลาขึ้น) รอแป๊บแล้วโยนใหม่เลย
+        setStatus(("ได้ปลา! โยนใหม่ใน %.1f วิ"):format(AFTER_CATCH_DELAY))
+        waitFor(myId, AFTER_CATCH_DELAY, function() return false end)
+        skipReadyWait = true
+    else
+        setStatus("จบรอบ")
+    end
 end
 
 -- ลูปการทำงานหลัก
