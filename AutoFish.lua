@@ -673,6 +673,7 @@ do
         sellAt = 100,    -- ปลาในกระเป๋าครบกี่ตัวแล้วขายทั้งหมด
         sellTravel = "walk", -- ไปร้านยังไง: "walk" = เดินไป (เนียนกว่า), "warp" = วาร์ป (เร็วกว่า)
         walkFallbackWarp = true, -- เดินแล้วติด/ตกน้ำ ให้วาร์ปแทน (ไม่งั้นจะติดค้างอยู่ตรงนั้น)
+        showRoute = true, -- แสดงจุดเส้นทาง/จุดตกปลา/จุดร้านในโลก (เห็นแค่เราคนเดียว)
         returnMode = "walk", -- ขายเสร็จแล้วกลับจุดตกปลายังไง: "walk" = เดิน, "warp" = วาร์ป, "stay" = ไม่กลับ (หยุดตกปลา)
         breakOn = false, breakEvery = 25, breakSeconds = 30, -- พักทุกประมาณกี่ตัว / พักประมาณกี่วิ (สุ่ม ±30-40%)
         nearbyOn = false, nearbyRange = 30, -- มีผู้เล่นอื่นเข้ามาใกล้กี่ studs ให้พัก
@@ -919,6 +920,31 @@ do
         refreshReturn()
     end)
     refreshReturn()
+
+    -- ปุ่มเดินเอง: กลับจุดตกปลา / ไปร้าน
+    local goRow = makeRow()
+    local function halfButton(text, x)
+        local b = Instance.new("TextButton")
+        b.Size = UDim2.new(0.5, -2, 1, 0)
+        b.Position = UDim2.new(x, x > 0 and 2 or 0, 0, 0)
+        b.BackgroundColor3 = Color3.fromRGB(40, 110, 150)
+        b.TextColor3 = Color3.fromRGB(255, 255, 255)
+        b.Font = Enum.Font.SourceSansBold
+        b.TextSize = 14
+        b.Text = text
+        b.Parent = goRow
+        return b
+    end
+    local goBackButton = halfButton("เดินกลับจุดตกปลา", 0)
+    local goShopButton = halfButton("เดินไปร้าน", 0.5)
+
+    local drawRoute = function() end -- กำหนดจริงในส่วนการเดิน
+    makeToggle(makeRow(), "แสดงเส้นทางในโลก",
+        function() return settings.showRoute end,
+        function(v)
+            settings.showRoute = v
+            drawRoute()
+        end)
 
     makeToggle(makeRow(), "เดินติดให้วาร์ปแทน",
         function() return settings.walkFallbackWarp end,
@@ -1365,6 +1391,7 @@ do
             env.AutoFishShopCFrame = hrp.CFrame
             bagLabel.Text = "บันทึกจุดร้านแล้ว"
             refreshShopButton()
+            drawRoute()
         end
     end)
 
@@ -1502,10 +1529,15 @@ do
             end
             env.AutoFishRecording = nil
             refreshRouteButton()
+            drawRoute()
             return
         end
         recording = true
         env.AutoFishRecording = {}
+        local startRoot = getRoot()
+        if startRoot then
+            env.AutoFishFishSpot = startRoot.CFrame -- จุดตกปลา + ทิศที่หันหน้า
+        end
         refreshRouteButton()
         task.spawn(function()
             local route = env.AutoFishRecording
@@ -1520,6 +1552,89 @@ do
                 task.wait(0.15)
             end
         end)
+    end)
+
+    -- ===== แสดงเส้นทางในโลก (เห็นแค่เรา) =====
+    -- เขียว = จุดตกปลา, เหลือง = จุดร้าน, ฟ้า = ทางที่บันทึกไว้
+    drawRoute = function()
+        local old = workspace:FindFirstChild("AutoFishRouteMarkers")
+        if old then old:Destroy() end
+        if not settings.showRoute then return end
+
+        local folder = Instance.new("Folder")
+        folder.Name = "AutoFishRouteMarkers"
+        local function marker(pos, size, color, shape)
+            local part = Instance.new("Part")
+            part.Anchored = true
+            part.CanCollide = false
+            part.CanQuery = false
+            part.CanTouch = false
+            part.Material = Enum.Material.Neon
+            part.Color = color
+            part.Transparency = 0.3
+            part.Shape = shape or Enum.PartType.Ball
+            part.Size = size
+            part.Position = pos
+            part.Parent = folder
+            return part
+        end
+        local route = env.AutoFishRoute
+        if route then
+            for i = 2, #route - 1, 2 do -- เว้นทีละจุด ไม่ให้แน่นเกิน
+                marker(route[i], Vector3.new(0.6, 0.6, 0.6), Color3.fromRGB(80, 180, 255))
+            end
+        end
+        if env.AutoFishFishSpot then
+            marker(env.AutoFishFishSpot.Position + Vector3.new(0, 4, 0), Vector3.new(1.5, 1.5, 1.5),
+                Color3.fromRGB(60, 220, 90))
+        end
+        if env.AutoFishShopCFrame then
+            marker(env.AutoFishShopCFrame.Position + Vector3.new(0, 4, 0), Vector3.new(1.5, 1.5, 1.5),
+                Color3.fromRGB(255, 210, 60))
+        end
+        folder.Parent = workspace
+    end
+    drawRoute()
+    ScreenGui.AncestryChanged:Connect(function()
+        if not ScreenGui.Parent then
+            local old = workspace:FindFirstChild("AutoFishRouteMarkers")
+            if old then old:Destroy() end
+        end
+    end)
+
+    -- ===== ปุ่มเดินเอง =====
+    local walkingByHand = false
+    local function manualWalk(toShop)
+        if walkingByHand or selling then return end
+        local spot = toShop and env.AutoFishShopCFrame or env.AutoFishFishSpot
+        if not spot then
+            bagLabel.Text = toShop and "ยังไม่ได้บันทึกจุดร้าน" or "ยังไม่ได้บันทึกจุดตกปลา (บันทึกเส้นทางก่อน)"
+            return
+        end
+        walkingByHand = true
+        pauseFishing("walk")
+        bagLabel.Text = toShop and "เดินไปร้าน..." or "เดินกลับจุดตกปลา..."
+        local ok, why = walkTrip(spot.Position, toShop)
+        local hrp = getRoot()
+        if hrp then
+            if ok and flatDist(hrp.Position, spot.Position) <= 3 then
+                hrp.CFrame = CFrame.new(hrp.Position) * spot.Rotation -- หันหน้าทางเดิม
+                bagLabel.Text = toShop and "ถึงร้านแล้ว" or "ถึงจุดตกปลาแล้ว"
+            elseif settings.walkFallbackWarp then
+                hrp.CFrame = spot
+                bagLabel.Text = ("%s วาร์ปไปแทนแล้ว"):format(why or "เดินไม่ถึง")
+            else
+                bagLabel.Text = ("เดินไม่ถึง (%s)"):format(why or "?")
+            end
+        end
+        resumeFishing("walk")
+        walkingByHand = false
+    end
+    goBackButton.MouseButton1Click:Connect(function()
+        task.spawn(manualWalk, false)
+    end)
+    goShopButton.MouseButton1Click:Connect(function()
+        task.spawn(manualWalk, true)
     end)
 
     local function sellRequest(ids)
