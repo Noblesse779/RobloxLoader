@@ -236,14 +236,35 @@ local function getEmptyStands()
     return empty
 end
 
-local function triggerPrompt(prompt)
-    if typeof(fireproximityprompt) == "function" then
-        fireproximityprompt(prompt)
-        return
+-- กดปุ่มในแมพ ลองทีละวิธีจนตัวละครหายจากมือ (= วางสำเร็จ)
+local function pressKey(key, hold)
+    VirtualInputManager:SendKeyEvent(true, key, false, game)
+    task.wait(hold)
+    VirtualInputManager:SendKeyEvent(false, key, false, game)
+end
+
+local function triggerPrompt(prompt, tool)
+    local function placed()
+        return tool.Parent == nil
+            or not (tool:IsDescendantOf(LocalPlayer.Character or game) or tool:IsDescendantOf(LocalPlayer))
     end
-    prompt:InputHoldBegin()
-    task.wait(prompt.HoldDuration + 0.1)
-    prompt:InputHoldEnd()
+    local hold = (prompt.HoldDuration or 0) + 0.15
+
+    -- 1) คำสั่งของ executor
+    if typeof(fireproximityprompt) == "function" then
+        pcall(fireproximityprompt, prompt)
+        if waitFor(0.8, placed) then return true end
+    end
+    -- 2) กดปุ่ม E จริง (ปุ่ม "สถานที่" ขึ้นบนจออยู่แล้ว)
+    pressKey(prompt.KeyboardKeyCode or Enum.KeyCode.E, hold)
+    if waitFor(0.8, placed) then return true end
+    -- 3) สั่งกดผ่าน prompt โดยตรง
+    pcall(function()
+        prompt:InputHoldBegin()
+        task.wait(hold)
+        prompt:InputHoldEnd()
+    end)
+    return waitFor(0.8, placed)
 end
 
 local placedCount = 0
@@ -273,9 +294,12 @@ local function placeStrongest()
         hrp.CFrame = slot.stand:GetPivot() + Vector3.new(0, 3, 0)
         -- รอปุ่ม "สถานที่" ขึ้น (ขึ้นเมื่อถือตัวละครและยืนใกล้แท่น)
         if waitFor(2, function() return slot.prompt.Parent ~= nil and slot.prompt.Enabled end) then
-            triggerPrompt(slot.prompt)
-            task.wait(0.6)
-            placed += 1
+            if triggerPrompt(slot.prompt, tool) then
+                placed += 1
+            else
+                setStatus("ปุ่มขึ้นแต่วางไม่ได้ที่ " .. slot.stand.Name)
+            end
+            task.wait(0.4)
         else
             setStatus("ปุ่มวางไม่ขึ้นที่ " .. slot.stand.Name)
             task.wait(0.3)
