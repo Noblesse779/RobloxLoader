@@ -28,7 +28,8 @@ local BITE_TEXT = "กดเลย"   -- ข้อความบนปุ่ม
 local HOOK_REACTION = 0.3 -- (โหมด remote) ปลากินแล้วรอกี่วินาทีก่อนส่ง "Hook" (ให้ดูเหมือนคนกด)
 local HOOK_COOLDOWN = 1   -- ยิง "Hook" ซ้ำได้ทุกกี่วินาที ตอนป้าย Bang ยังขึ้นอยู่
 local READY_TIMEOUT = 10  -- หลังได้ปลา รอปุ่มกลับเป็น "เหวี่ยง" นานสุดกี่วินาที
-local CAST_DELAY = 0.5    -- ปุ่มพร้อมแล้วรออีกกี่วินาทีค่อยเหวี่ยง
+local CAST_DELAY = 0.5    -- ก่อนเหวี่ยงแต่ละครั้งรออีกกี่วินาที
+local RECAST_RIGHT_AWAY = true -- ได้ปลาแล้วโยนต่อเลยโดยไม่รอปุ่มกลับเป็น "เหวี่ยง" (false = รอปุ่มก่อน)
 local BITE_TIMEOUT = 30   -- โยนแล้วรอปลากินนานสุดกี่วินาที ก่อนโยนใหม่
 -- วิธีสั่งงาน: "remote" = ยิง Remotes.Fishing.Action ตรงๆ ("Cast" / "Hook" / "Reel") ไม่ต้องพึ่งเมาส์
 --             "mouse"  = จำลองคลิกเมาส์ (mouse1press หรือ VirtualInputManager)
@@ -371,13 +372,20 @@ local function actionReady()
     return label ~= nil and label.Text:find("เหวี่ยง", 1, true) ~= nil and isShown(label)
 end
 
+local justCaught = false -- รอบก่อนเพิ่งส่ง "Reel", true (ปลาเด้งเข้าตัว) ไป
+
 local function remoteRound(myId)
     local remote = getActionRemote()
 
-    -- รอให้ปุ่มกลับมาเป็น "เหวี่ยง" ก่อน (หลังได้ปลาเกมยังเล่นอนิเมชัน/โชว์ปลาอยู่)
-    setStatus("รอปุ่ม เหวี่ยง พร้อม")
-    if not waitFor(myId, READY_TIMEOUT, actionReady) and getActionLabel() then
-        setStatus("ปุ่มไม่กลับเป็น เหวี่ยง: " .. getActionLabel().Text)
+    if justCaught and RECAST_RIGHT_AWAY then
+        -- ปลาเด้งเข้าตัวแล้ว โยนต่อเลยไม่ต้องรอปุ่ม
+        justCaught = false
+    else
+        -- รอให้ปุ่มกลับมาเป็น "เหวี่ยง" ก่อน
+        setStatus("รอปุ่ม เหวี่ยง พร้อม")
+        if not waitFor(myId, READY_TIMEOUT, actionReady) and getActionLabel() then
+            setStatus("ปุ่มไม่กลับเป็น เหวี่ยง: " .. getActionLabel().Text)
+        end
     end
     if not isActive(myId) then return end
     task.wait(CAST_DELAY)
@@ -404,10 +412,9 @@ local function remoteRound(myId)
     setStatus(("ดึงปลา รอ %.1f วิ"):format(REEL_FINISH_DELAY))
     waitFor(myId, REEL_FINISH_DELAY, function() return false end)
     if not isActive(myId) then return end
-    remote:FireServer("Reel", true)
-
-    setStatus("ได้ปลาแล้ว")
-    waitFor(myId, 5, function() return not isReeling() end)
+    remote:FireServer("Reel", true) -- ปลาเด้งเข้าตัว
+    justCaught = true
+    setStatus("ได้ปลาแล้ว โยนต่อ")
 end
 
 -- ลูปการทำงานหลัก
