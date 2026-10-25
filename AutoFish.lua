@@ -663,21 +663,22 @@ do
     local TOGGLE_KEY = Enum.KeyCode.F -- ปุ่มเปิด/ปิดตกปลา
     local HIDE_KEY = Enum.KeyCode.H   -- ปุ่มซ่อน/แสดงหน้าต่าง
 
+    -- ทุกฟังก์ชันปิดไว้ตอนเริ่ม เปิดเองในหน้าต่าง
     local settings = {
-        antiAfk = true,
+        antiAfk = false,
         speedOn = false, speed = 32,
         jumpOn = false, jump = 100,
         stopFish = 0,    -- 0 = ไม่จำกัด
         stopMinutes = 0, -- 0 = ไม่จำกัด
-        autoSell = true,
+        autoSell = false,
         sellAt = 100,    -- ปลาในกระเป๋าครบกี่ตัวแล้วขายทั้งหมด
         sellTravel = "walk", -- ไปร้านยังไง: "walk" = เดินไป (เนียนกว่า), "warp" = วาร์ป (เร็วกว่า)
-        walkFallbackWarp = true, -- เดินแล้วติด/ตกน้ำ ให้วาร์ปแทน (ไม่งั้นจะติดค้างอยู่ตรงนั้น)
-        showRoute = true, -- แสดงจุดเส้นทาง/จุดตกปลา/จุดร้านในโลก (เห็นแค่เราคนเดียว)
+        walkFallbackWarp = false, -- เดินแล้วติด/ตกน้ำ ให้วาร์ปแทน (ไม่งั้นจะติดค้างอยู่ตรงนั้น)
+        showRoute = false, -- แสดงจุดเส้นทาง/จุดตกปลา/จุดร้านในโลก (เห็นแค่เราคนเดียว)
         returnMode = "walk", -- ขายเสร็จแล้วกลับจุดตกปลายังไง: "walk" = เดิน, "warp" = วาร์ป, "stay" = ไม่กลับ (หยุดตกปลา)
         breakOn = false, breakEvery = 25, breakSeconds = 30, -- พักทุกประมาณกี่ตัว / พักประมาณกี่วิ (สุ่ม ±30-40%)
         nearbyOn = false, nearbyRange = 30, -- มีผู้เล่นอื่นเข้ามาใกล้กี่ studs ให้พัก
-        rareAlert = true, rareStop = false, -- เตือน / หยุด เมื่อได้ปลาที่ไม่ใช่ระดับ "ทั่วไป"
+        rareAlert = false, rareStop = false, -- เตือน / หยุด เมื่อได้ปลาที่ไม่ใช่ระดับ "ทั่วไป"
     }
 
     -- ชื่อระดับความหายากที่รู้จัก (ถ้าเกมมีชื่ออื่นเพิ่มเข้าไปได้)
