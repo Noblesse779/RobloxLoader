@@ -22,6 +22,8 @@ local settings = {
     antiAfk = false,
     autoRebirth = false,
     autoUpgrade = false,
+    upgradePick = {},        -- แท่นที่เลือกให้อัพก่อน: [ชื่อเต็มของแท่น] = true
+    upgradeOnlyPicked = false, -- true = อัพเฉพาะตัวที่เลือก
     upgradeEvery = 5, -- กดป้ายอัพเกรดทุกกี่วิ (เงินไม่พอ เกมไม่ให้อัพเอง)
     rebirthCheckEvery = 2, -- เช็คหลอดรีเบิร์ธทุกกี่วิ
     chargeTimeout = 20, -- ชาร์จนานสุดกี่วิ (ถ้าอ่าน % ไม่ได้ จะปล่อยตอนครบเวลานี้)
@@ -440,6 +442,7 @@ local function findUpgradeTargets()
                         kind = "click", target = cd,
                         part = cd.Parent:IsA("BasePart") and cd.Parent or up:FindFirstChildWhichIsA("BasePart", true),
                         cost = costOf(text), text = text,
+                        stand = stand, standKey = stand:GetFullName(),
                     })
                 end
             end
@@ -547,6 +550,57 @@ end
 
 local upgradeCount = 0
 local upgradeInfo = "-"
+-- ตัวละครที่วางอยู่บนแท่น: WorkingBrainrots มี attribute Place = ชื่อเต็มของแท่น
+local function placedByStand()
+    local map = {}
+    local folder = workspace:FindFirstChild("WorkingBrainrots")
+    if folder then
+        for _, b in ipairs(folder:GetChildren()) do
+            local place = b:GetAttribute("Place")
+            if place then map[place] = b end
+        end
+    end
+    return map
+end
+
+local function shortNumber(n)
+    if typeof(n) ~= "number" then return "?" end
+    local units = { { 1e15, "Qa" }, { 1e12, "T" }, { 1e9, "B" }, { 1e6, "M" }, { 1e3, "K" } }
+    for _, u in ipairs(units) do
+        if n >= u[1] then
+            return (("%.2f%s"):format(n / u[1], u[2]):gsub("%.?0+(%a)$", "%1"))
+        end
+    end
+    return tostring(math.floor(n))
+end
+
+-- รายการตัวบนแท่นสำหรับเมนูเลือก: { label, key }
+local function standChoices()
+    local list = findUpgradeTargets() or {}
+    local placed = placedByStand()
+    local out = {}
+    for _, item in ipairs(list) do
+        if item.standKey then
+            local b = placed[item.standKey]
+            local name = b and (b:GetAttribute("DisplayName") or b:GetAttribute("BrainrotName") or b.Name)
+            local num = item.stand.Name:match("%d+") or "?"
+            local floor = item.stand.Name:match("_F(%d+)")
+            local standLabel = floor and ("ชั้น %s แท่น %s"):format(floor, num) or ("แท่น " .. num)
+            local label
+            if b then
+                label = ("%s: %s (%s) เลเวล %s • $%s/s"):format(standLabel, tostring(name),
+                    tostring(b:GetAttribute("Rarity") or "?"), tostring(b:GetAttribute("Level") or "?"),
+                    shortNumber(b:GetAttribute("Revenue")))
+            else
+                label = standLabel .. ": (ว่าง)"
+            end
+            table.insert(out, { label = label, key = item.standKey })
+        end
+    end
+    table.sort(out, function(a, b) return a.label < b.label end)
+    return out
+end
+
 local function upgradeAll()
     local list, err = findUpgradeTargets()
     if not list then
@@ -558,14 +612,32 @@ local function upgradeAll()
         upgradeCache = nil -- ค้นใหม่รอบหน้า
         return 0
     end
-    local pressed = 0
+    -- เรียง: ตัวที่เลือกก่อน (ถูกสุดก่อน) แล้วค่อยตัวอื่น / หรืออัพเฉพาะตัวที่เลือก
+    local picked, others = {}, {}
     for _, item in ipairs(list) do
+        if item.standKey and settings.upgradePick[item.standKey] then
+            table.insert(picked, item)
+        else
+            table.insert(others, item)
+        end
+    end
+    local order = picked
+    if not settings.upgradeOnlyPicked then
+        for _, item in ipairs(others) do table.insert(order, item) end
+    elseif #picked == 0 then
+        upgradeInfo = "โหมดอัพเฉพาะที่เลือก แต่ยังไม่ได้เลือกตัวไหน"
+        return 0
+    end
+
+    local pressed = 0
+    for _, item in ipairs(order) do
         if not alive() then break end
         if pressUpgrade(item) then pressed += 1 end
         task.wait(0.15)
     end
     upgradeCount += pressed
-    upgradeInfo = ("เจอป้าย %d ป้าย (%s)  กดไป %d ครั้ง\n%s"):format(#list, list[1].kind, pressed, upgradeDebug)
+    upgradeInfo = ("เจอป้าย %d ป้าย  •  เลือกไว้ %d ตัว  •  กดไป %d ครั้ง\n%s")
+        :format(#list, #picked, pressed, upgradeDebug)
     return pressed
 end
 
@@ -744,6 +816,62 @@ upgradeSection:AddButton({
     end,
 })
 local upgradePara = upgradeSection:AddParagraph({ Title = "ผลการอัพเกรด", Content = "-" })
+
+-- เลือกตัวที่จะอัพก่อน
+local labelToKey = {}
+local pickDropdown = upgradeSection:AddDropdown("DFUpgradePick", {
+    Title = "ตัวที่จะอัพก่อน (เลือกได้หลายตัว)",
+    Description = "ตัวที่เลือกจะถูกอัพก่อนเสมอ",
+    Values = {},
+    Multi = true,
+    Default = {},
+})
+pickDropdown:OnChanged(function(value)
+    local pick = {}
+    for label, on in pairs(value or {}) do
+        if on and labelToKey[label] then
+            pick[labelToKey[label]] = true
+        end
+    end
+    settings.upgradePick = pick
+end)
+
+local function refreshPickList()
+    local choices = standChoices()
+    local labels, keep = {}, {}
+    labelToKey = {}
+    for _, c in ipairs(choices) do
+        table.insert(labels, c.label)
+        labelToKey[c.label] = c.key
+        if settings.upgradePick[c.key] then
+            keep[c.label] = true -- เลเวลเปลี่ยน ชื่อในเมนูเปลี่ยน แต่ยังเลือกแท่นเดิมไว้
+        end
+    end
+    local saved = settings.upgradePick
+    pcall(function() pickDropdown:SetValues(labels) end)
+    pcall(function() pickDropdown:SetValue(keep) end)
+    settings.upgradePick = saved
+    return #labels
+end
+
+upgradeSection:AddDropdown("DFUpgradeMode", {
+    Title = "โหมด",
+    Values = { "อัพที่เลือกก่อน แล้วค่อยตัวอื่น", "อัพเฉพาะตัวที่เลือก" },
+    Default = 1,
+}):OnChanged(function(v)
+    settings.upgradeOnlyPicked = v == "อัพเฉพาะตัวที่เลือก"
+end)
+
+upgradeSection:AddButton({
+    Title = "รีเฟรชรายชื่อตัวบนแท่น",
+    Description = "กดหลังวางตัวใหม่ หรือเลเวลเปลี่ยน",
+    Callback = function()
+        upgradeCache = nil
+        local n = refreshPickList()
+        Fluent:Notify({ Title = "รายชื่อตัวบนแท่น", Content = ("เจอ %d แท่น"):format(n), Duration = 4 })
+    end,
+})
+task.delay(2, function() pcall(refreshPickList) end)
 
 -- ความปลอดภัย
 local afkSection = Tabs.safe:AddSection("กันโดนเตะ")
