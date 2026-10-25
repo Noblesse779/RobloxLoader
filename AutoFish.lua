@@ -57,6 +57,7 @@ if old then old:Destroy() end
 local ScreenGui = Instance.new("ScreenGui")
 ScreenGui.Name = "AutoFishUI"
 ScreenGui.ResetOnSpawn = false
+ScreenGui.Enabled = false -- ซ่อนไว้ก่อน ใช้หน้าต่าง Fluent แทน (แสดงเฉพาะตอนโหลด Fluent ไม่ได้)
 ScreenGui.Parent = CoreGui
 
 local MainFrame = Instance.new("Frame")
@@ -699,10 +700,10 @@ end)
     if not okFluent or typeof(Fluent) ~= "table" then
         warn("[AutoFish] โหลด Fluent ไม่ได้: " .. tostring(Fluent))
         setStatus("โหลดหน้าต่างใหม่ไม่ได้")
+        ScreenGui.Enabled = true -- ใช้หน้าต่างเดิมแบบง่ายแทน
         return
     end
 
-    ScreenGui.Enabled = false -- ซ่อนหน้าต่างเดิม (ส่วนตกปลายังใช้ตัวแปรในนั้นอยู่)
 
     -- ปิดหน้าต่าง Fluent ไปพร้อมกับสคริปต์ (รันใหม่ / ปิดสคริปต์)
     ScreenGui.AncestryChanged:Connect(function()
