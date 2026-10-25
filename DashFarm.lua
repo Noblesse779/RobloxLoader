@@ -23,9 +23,6 @@ local settings = {
     antiAfk = false,
     autoRebirth = false,
     autoUpgrade = false,
-    escapeChase = false,  -- มีตัวไล่ -> วาร์ปกลับฐานทันที
-    chaseResult = false,  -- (ทดลอง) มีตัวไล่ -> ส่ง ChaseResult(true) บอกว่าหนีรอดเลย
-    returnToBase = true,  -- บินจบแล้ววาร์ปกลับฐานก่อน (ส่งตัวละครที่ได้) แล้วค่อยไปแท่นชาร์จ
     upgradePick = {},        -- แท่นที่เลือกให้อัพก่อน: [ชื่อเต็มของแท่น] = true
     upgradeOnlyPicked = false, -- true = อัพเฉพาะตัวที่เลือก
     upgradeEvery = 5, -- กดป้ายอัพเกรดทุกกี่วิ (เงินไม่พอ เกมไม่ให้อัพเอง)
@@ -110,9 +107,6 @@ local function setShift(down)
     VirtualInputManager:SendKeyEvent(down, Enum.KeyCode.LeftShift, false, game)
 end
 
--- บินจบแล้วทำอะไรต่อ (กำหนดจริงในส่วนหนีตัวไล่ ข้างล่าง)
-local afterDash = function() end
-
 -- ชาร์จ -> บิน -> รอจนหยุด -> กลับแท่นชาร์จ
 local dashCount = 0
 local busy = 0 -- >0 = กำลังบิน/วางตัวละคร (ฝึกพลังหยุดก่อน)
@@ -169,7 +163,6 @@ local function dashRound()
         return os.clock() - still > 2
     end)
     dashCount += 1
-    afterDash()
     setStatus(("บินจบ (รอบที่ %d)"):format(dashCount))
     task.wait(2) -- รอเกมให้ตัวละคร
 end
@@ -405,81 +398,6 @@ task.spawn(function()
             end
         end
         task.wait(math.max(1, settings.rebirthCheckEvery))
-    end
-end)
-
----------------------------------------------------------------- หนีตัวไล่
--- ได้ตัวละครแล้วบางครั้งมีตัวอนิเมะไล่ยิงพลังใส่ ต้องกลับถึงฐานก่อนโดนยิง
--- ตัวไล่น่าจะอยู่ใน workspace.AI (โฟลเดอร์ที่เห็นในรายชื่อแมพ)
--- กลับถึงฐานแล้วเกมส่ง Events.ChaseResult(true) เอง
-local function baseCFrame()
-    local plot = getMyPlot()
-    if not plot then return nil end
-    return plot:GetPivot() + Vector3.new(0, 6, 0)
-end
-
-local function goToBase()
-    local hrp, base = getRoot(), baseCFrame()
-    if hrp and base then
-        hrp.CFrame = base
-        return true
-    end
-    return false
-end
-
-local function chaserActive()
-    local ai = workspace:FindFirstChild("AI")
-    if not ai then return false end
-    local hrp = getRoot()
-    for _, m in ipairs(ai:GetChildren()) do
-        if m:IsA("Model") then
-            local pos = m:GetPivot().Position
-            -- อยู่ใกล้เรา (ไล่เราอยู่) ไม่นับตัวที่ยืนเฉยๆ ไกลๆ
-            if not hrp or (pos - hrp.Position).Magnitude < 400 then
-                return true, m
-            end
-        end
-    end
-    return false
-end
-
-local chaseEscapes = 0
-local function sendChaseResult()
-    local events = game:GetService("ReplicatedStorage"):FindFirstChild("Events")
-    local remote = events and events:FindFirstChild("ChaseResult")
-    if remote then
-        remote:FireServer(true)
-        return true
-    end
-    return false
-end
-
-afterDash = function()
-    if settings.returnToBase and goToBase() then
-        setStatus("บินจบ วาร์ปกลับฐานส่งตัวละคร")
-        task.wait(2)
-    end
-end
-
-task.spawn(function()
-    local handled = false
-    while alive() do
-        local active, chaser = chaserActive()
-        if active and not handled and (settings.escapeChase or settings.chaseResult) then
-            handled = true
-            chaseEscapes += 1
-            if settings.escapeChase then
-                goToBase()
-                setStatus("มีตัวไล่ (" .. chaser.Name .. ") วาร์ปกลับฐานแล้ว")
-            end
-            if settings.chaseResult then
-                task.wait(0.5)
-                sendChaseResult()
-            end
-        elseif not active then
-            handled = false
-        end
-        task.wait(0.2)
     end
 end)
 
@@ -1091,32 +1009,6 @@ upgradeSection:AddButton({
 })
 task.delay(2, function() pcall(refreshPickList) end)
 
--- หนีตัวไล่
-local chaseSection = Tabs.main:AddSection("หนีตัวไล่ / กลับฐาน")
-chaseSection:AddToggle("DFReturnBase", {
-    Title = "บินจบแล้ววาร์ปกลับฐาน",
-    Description = "ส่งตัวละครที่ได้ถึงฐานก่อน แล้วค่อยไปแท่นชาร์จ (ใช้กับชาร์จอัตโนมัติ)",
-    Default = settings.returnToBase,
-}):OnChanged(function(v) settings.returnToBase = v end)
-chaseSection:AddToggle("DFEscape", {
-    Title = "มีตัวไล่ วาร์ปกลับฐานทันที",
-    Description = "ตัวอนิเมะไล่ยิงพลังใส่ จะวาร์ปถึงฐานก่อนโดนยิง",
-    Default = false,
-}):OnChanged(function(v) settings.escapeChase = v end)
-chaseSection:AddToggle("DFChaseResult", {
-    Title = "(ทดลอง) บอกเซิร์ฟเวอร์ว่าหนีรอดทันที",
-    Description = "ส่ง ChaseResult(true) ตอนเจอตัวไล่ ไม่ต้องกลับฐาน (เสี่ยงกว่า)",
-    Default = false,
-}):OnChanged(function(v) settings.chaseResult = v end)
-chaseSection:AddButton({
-    Title = "วาร์ปกลับฐานตอนนี้",
-    Callback = function()
-        if not goToBase() then
-            Fluent:Notify({ Title = "กลับฐาน", Content = "หาฐานของเราไม่เจอ", Duration = 4 })
-        end
-    end,
-})
-
 -- ความปลอดภัย
 local afkSection = Tabs.safe:AddSection("กันโดนเตะ")
 afkSection:AddToggle("DFAfk", { Title = "กันโดนเตะ AFK", Default = false })
@@ -1128,8 +1020,8 @@ Window:SelectTab(1)
 task.spawn(function()
     while alive() and not Fluent.Unloaded do
         pcall(function()
-            statusPara:SetDesc(("%s\nบินแล้ว %d รอบ  •  วางตัวละครแล้ว %d ตัว  •  รีเบิร์ธ %d ครั้ง  •  เจอตัวไล่ %d ครั้ง\nกด x2 ไป %d ครั้ง  •  กดของเด้งไป %d ครั้ง\nรีเบิร์ธ: %s")
-                :format(status, dashCount, placedCount, rebirthCount, chaseEscapes, x2Count, popupCount, rebirthInfo))
+            statusPara:SetDesc(("%s\nบินแล้ว %d รอบ  •  วางตัวละครแล้ว %d ตัว  •  รีเบิร์ธ %d ครั้ง\nกด x2 ไป %d ครั้ง  •  กดของเด้งไป %d ครั้ง\nรีเบิร์ธ: %s")
+                :format(status, dashCount, placedCount, rebirthCount, x2Count, popupCount, rebirthInfo))
         end)
         local lines = {}
         for i, t in ipairs(getCharacterTools()) do
