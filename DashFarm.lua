@@ -937,10 +937,20 @@ end
 
 -- เหยียบพื้นแดงหน้าร้าน -> คนขายถาม "1. แสดงออร่าให้ฉันดูหน่อย!  2. อาจจะในภายหลัง"
 -- ต้องเลือกข้อ 1 ร้านถึงจะเปิด (หน้าต่างร้านถูกสร้างตอนเปิด ปิดแล้วหายไป)
+local OPTION_WORDS = { "แสดงออร่า", "ให้ฉันดู", "แสดงออ" } -- หลายแบบ กันตัวสระ/วรรณยุกต์เรียงไม่ตรง
+local function isShowOption(text)
+    for _, w in ipairs(OPTION_WORDS) do
+        if text:find(w, 1, true) then return true end
+    end
+    return false
+end
+
 local function findShowAuraOption()
-    for _, root in ipairs({ LocalPlayer.PlayerGui, workspace }) do
+    local roots = { LocalPlayer.PlayerGui, workspace }
+    pcall(function() table.insert(roots, game:GetService("CoreGui")) end)
+    for _, root in ipairs(roots) do
         for _, d in ipairs(root:GetDescendants()) do
-            if (d:IsA("TextButton") or d:IsA("TextLabel")) and d.Text:find("แสดงออร่า", 1, true) then
+            if (d:IsA("TextButton") or d:IsA("TextLabel")) and isShowOption(d.Text) then
                 local gui = d:FindFirstAncestorWhichIsA("LayerCollector")
                 if gui and (not gui:IsA("ScreenGui") or isShown(d)) then
                     return d:IsA("GuiButton") and d or d:FindFirstAncestorWhichIsA("GuiButton") or d
@@ -1007,7 +1017,7 @@ local function auraCheck()
         return auraCheckInner()
     end
     if not env.DashAuraPad then
-        auraInfo = "ยังไม่รู้ว่าร้านอยู่ไหน: เดินไปเหยียบพื้นแดงหน้าร้านออร่าเองหนึ่งครั้ง"
+        auraInfo = "ยังไม่รู้ว่าร้านอยู่ไหน: ยืนบนพื้นแดงหน้าร้าน แล้วกด บันทึกจุดร้านออร่า"
         return
     end
     -- วาร์ปไปเหยียบพื้นหน้าร้าน -> เลือก "แสดงออร่าให้ฉันดูหน่อย!" -> รอหน้าต่างเปิด -> ซื้อ/ใส่ -> กลับที่เดิม
@@ -1017,13 +1027,13 @@ local function auraCheck()
     local back = hrp.CFrame
     hrp.CFrame = env.DashAuraPad
     local option
-    waitFor(4, function()
+    waitFor(3, function()
         option = findShowAuraOption()
         return option ~= nil or findAuraShop() ~= nil
     end)
-    if option and not findAuraShop() then
-        -- ลอง 1) กดที่ตัวเลือก  2) กดปุ่มเลข 1 บนคีย์บอร์ด (ตัวเลือกขึ้นต้นด้วย "1.")
-        if option:IsA("GuiButton") then
+    if not findAuraShop() then
+        -- ลอง 1) กดที่ตัวเลือก (ถ้าหาเจอและกดได้)  2) กดปุ่มเลข 1 บนคีย์บอร์ด (ตัวเลือกขึ้นต้นด้วย "1.")
+        if option and option:IsA("GuiButton") then
             pressButton(option)
         end
         if not waitFor(1.5, function() return findAuraShop() ~= nil end) then
@@ -1211,6 +1221,18 @@ auraSection:AddToggle("DFAura", {
     Description = "เช็คทันทีที่รีเบิร์ธเปลี่ยน และทุก 60 วิ (วาร์ปไปเหยียบหน้าร้านให้เอง) ซื้อด้วยเงินเท่านั้น ไม่แตะปุ่ม Robux",
     Default = false,
 }):OnChanged(function(v) settings.autoAura = v end)
+auraSection:AddButton({
+    Title = "บันทึกจุดร้านออร่า",
+    Description = "ยืนบนพื้นแดงหน้าร้าน (ตอนคนขายถาม) แล้วกด",
+    Callback = function()
+        local hrp = getRoot()
+        if hrp then
+            env.DashAuraPad = hrp.CFrame
+            auraInfo = "บันทึกจุดร้านแล้ว"
+            Fluent:Notify({ Title = "ร้านออร่า", Content = "บันทึกจุดร้านแล้ว", Duration = 4 })
+        end
+    end,
+})
 local auraPara = auraSection:AddParagraph({ Title = "ออร่า", Content = "-" })
 
 local trainSection = Tabs.main:AddSection("ฝึกพลัง (ของช่อง 1)")
