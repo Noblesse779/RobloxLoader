@@ -28,23 +28,14 @@ local POWER_APPEAR_TIMEOUT = 0.5 -- กดแล้วรอหลอด Power �
 local CHARGE_TIME = 1.0   -- ถ้าไม่เห็นหลอด Power: กดค้างชาร์จกี่วินาทีแล้วปล่อย
 local MIN_BITE_WAIT = 1.5 -- โยนแล้วอย่างน้อยกี่วินาทีถึงเริ่มเช็คว่าปลากิน
 local BITE_TEXT = "กดเลย"   -- ข้อความบนปุ่มตอนปลากินเหยื่อ
-local HOOK_REACTION = 0.3 -- (โหมด remote) ปลากินแล้วรอกี่วินาทีก่อนส่ง "Hook" (ให้ดูเหมือนคนกด)
-local HOOK_COOLDOWN = 1   -- ยิง "Hook" ซ้ำได้ทุกกี่วินาที ตอนป้าย Bang ยังขึ้นอยู่
+local HOOK_REACTION = 0.3 -- ปลากินแล้วรอกี่วินาทีก่อนกดตวัด (ให้ดูเหมือนคนกด)
 local SKIP_MINIGAME = true      -- true = ข้ามมินิเกมดึงปลา (ยิง "Reel", true เอง) ถ้าเซิร์ฟเวอร์ไม่ให้ปลาจะเล่นมินิเกมต่อให้
 local SKIP_MINIGAME_DELAY = 2.8 -- ตวัดแล้วรอกี่วินาทีก่อนยิง (2.7 วิบางรอบไม่ได้ปลา, 2.8 วิได้ทุกรอบ)
 local AFTER_CATCH_DELAY = 2 -- ได้ปลาแล้วรอกี่วินาทีก่อนโยนใหม่ (ถ้าโยนไม่ออกเพราะหน้าต่างโชว์ปลาบัง ให้เพิ่ม)
 local READY_TIMEOUT = 5   -- หลังได้ปลา รอปุ่มกลับเป็น "เหวี่ยง" นานสุดกี่วินาที ก่อนลองเหวี่ยงต่อเลย
 local CAST_DELAY = 0.5    -- ก่อนเหวี่ยงแต่ละครั้งรออีกกี่วินาที
-local RECAST_RIGHT_AWAY = true -- ได้ปลาแล้วโยนต่อเลยโดยไม่รอปุ่มกลับเป็น "เหวี่ยง" (false = รอปุ่มก่อน)
 local BITE_TIMEOUT = 30   -- โยนแล้วรอปลากินนานสุดกี่วินาที ก่อนโยนใหม่
--- วิธีสั่งงาน: "play"   = กดปุ่ม เหวี่ยง ของเกมเหมือนคนเล่น (ชาร์จ, ตวัด, เล่นมินิเกม) <- แนะนำ
---             "remote" = ยิง Remotes.Fishing.Action ตรงๆ ข้ามการชาร์จและมินิเกม (เซิร์ฟเวอร์อาจไม่ให้ปลา)
-local INPUT_MODE = "play"
 local REEL_TIMEOUT = 25   -- (โหมด play) เล่นมินิเกมนานสุดกี่วินาที
-local CAST_DISTANCE = 20  -- (โหมด remote) ให้เบ็ดตกห่างจากตัวกี่ studs ข้างหน้า
-local CAST_PERFECT = true -- (โหมด remote) ค่าตัวที่ 3 ของ "Cast" ที่เกมส่งตอนเหวี่ยงเข้า PerfectZone
-local REEL_FINISH_DELAY = 0 -- (โหมด remote) หลัง Hook รอกี่วินาทีแล้วส่ง "Reel", true (ข้ามมินิเกม ได้ปลาเลย)
-                            -- ถ้าเซิร์ฟเวอร์ไม่ให้ปลา ให้เพิ่มเป็น 0.5 / 1 / 2
 local USE_EXECUTOR_MOUSE = false -- true = ใช้ mouse1press ของ executor แทน VirtualInputManager
 local REEL_HOLD = true    -- true = กดค้างตอน Zone ต้องเลื่อนหาปลา, false = คลิกทีละครั้ง (ลองสลับถ้าแบบแรกไม่ได้ผล)
 local REEL_INVERT = false -- true ถ้าคลิกแล้ว Zone เลื่อนไปทางตรงข้ามกับที่ควร
@@ -224,21 +215,6 @@ local function isReeling()
     return catchUI ~= nil and isShown(catchUI)
 end
 
--- เครื่องหมาย ! บนหัวตัวละคร (BillboardGui) = ปลากินเหยื่อ
-local function bangOverHead()
-    local char = LocalPlayer.Character
-    if not char then return false end
-    for _, d in ipairs(char:GetDescendants()) do
-        if d:IsA("TextLabel") and d.Visible and d.Text:match("^%s*!+%s*$") then
-            local bb = d:FindFirstAncestorWhichIsA("BillboardGui")
-            if bb and bb.Enabled then
-                return true
-            end
-        end
-    end
-    return false
-end
-
 -- ปุ่มแอคชันของเกม: ปกติเขียน "เหวี่ยง" พอปลากินจะเปลี่ยนเป็นสีแดง เขียน "กดเลย!"
 local actionLabel
 local lastLabelScan = 0
@@ -300,15 +276,6 @@ local function actionSaysBite()
     return label ~= nil and label.Text:find(BITE_TEXT, 1, true) ~= nil and isShown(label)
 end
 
--- ปลากินเหยื่อหรือยัง: ใช้ปุ่ม "กดเลย!" เป็นหลัก (แม่นสุด)
--- หน้าจอ Reel ไม่ใช้แล้ว เพราะบางทีมัน Visible ค้างอยู่ ทำให้ Hook ทั้งที่ปลายังไม่กิน
-local function isBite()
-    if getActionLabel() then
-        return actionSaysBite()
-    end
-    return bangOverHead()
-end
-
 -- รอจนกว่าเงื่อนไขจะเป็นจริง หรือหมดเวลา / ถูกปิด
 local function waitFor(myId, timeout, check)
     local elapsed = 0
@@ -317,34 +284,6 @@ local function waitFor(myId, timeout, check)
         elapsed += task.wait()
     end
     return false
-end
-
--- จุดที่จะให้เบ็ดตก: ข้างหน้าตัวละคร CAST_DISTANCE studs แล้วยิง ray ลงหาผิวน้ำ/พื้น
-local function getCastTarget()
-    local char = LocalPlayer.Character
-    local hrp = char and char:FindFirstChild("HumanoidRootPart")
-    if not hrp then return nil end
-
-    local ahead = hrp.Position + hrp.CFrame.LookVector * CAST_DISTANCE
-    local params = RaycastParams.new()
-    params.FilterType = Enum.RaycastFilterType.Exclude
-    params.FilterDescendantsInstances = { char }
-    params.IgnoreWater = false
-    local hit = workspace:Raycast(ahead + Vector3.new(0, 50, 0), Vector3.new(0, -200, 0), params)
-    if hit then
-        return hit.Position
-    end
-    return Vector3.new(ahead.X, hrp.Position.Y - 3, ahead.Z)
-end
-
--- โยนเบ็ดแบบ remote: ยิง "Cast", ตำแหน่ง, true ตรงๆ (เหมือนที่เกมส่งตอนปล่อยเข้า PerfectZone)
-local function castRemote()
-    local remote = getActionRemote()
-    local target = getCastTarget()
-    if not (remote and target) then return false end
-    setStatus("เหวี่ยง (remote)")
-    remote:FireServer("Cast", target, CAST_PERFECT)
-    return true
 end
 
 -- โยนเบ็ดแบบเมาส์: กดค้างเอง -> รอหลอด Power ขึ้น -> ปล่อยตอนเข้า PerfectZone
@@ -417,64 +356,10 @@ local function reelStep()
     end
 end
 
--- โหมด remote: Cast -> รอปลากิน -> Hook -> รอ -> Reel true (ตามลำดับที่ดักได้จาก Remote Spy)
+-- ปุ่มกลับมาเป็น "เหวี่ยง" = พร้อมเหวี่ยงรอบใหม่
 local function actionReady()
     local label = getActionLabel()
     return label ~= nil and label.Text:match("^%s*เหวี่ยง%s*$") ~= nil and isShown(label)
-end
-
-local justCaught = false -- รอบก่อนเพิ่งส่ง "Reel", true (ปลาเด้งเข้าตัว) ไป
-
-local function remoteRound(myId)
-    local remote = getActionRemote()
-
-    if justCaught and RECAST_RIGHT_AWAY then
-        -- ปลาเด้งเข้าตัวแล้ว โยนต่อเลยไม่ต้องรอปุ่ม
-        justCaught = false
-    else
-        -- รอให้ปุ่มกลับมาเป็น "เหวี่ยง" ก่อน
-        setStatus("รอปุ่ม เหวี่ยง พร้อม")
-        if not waitFor(myId, READY_TIMEOUT, actionReady) and getActionLabel() then
-            setStatus("ปุ่มไม่กลับเป็น เหวี่ยง: " .. getActionLabel().Text)
-        end
-    end
-    if not isActive(myId) then return end
-    task.wait(CAST_DELAY)
-    if not isActive(myId) then return end
-
-    -- ชาร์จหลอดให้เหมือนคนกดค้าง (หลอดบนจอไม่ขยับเพราะไม่ได้กดจริง แต่ส่ง Cast แบบเพอร์เฟกต์)
-    setStatus(("ชาร์จ %.1f วิ"):format(CHARGE_TIME))
-    waitFor(myId, CHARGE_TIME, function() return false end)
-    if not isActive(myId) then return end
-
-    if not castRemote() then
-        setStatus("หา HumanoidRootPart ไม่เจอ")
-        task.wait(1)
-        return
-    end
-
-    setStatus("เหวี่ยงแล้ว รอปลากิน")
-    -- ข้ามสถานะค้างจากรอบก่อน: รอให้สัญญาณปลากินหายก่อน แล้วค่อยรอปลากินรอบใหม่
-    waitFor(myId, 2, function() return not isBite() end)
-    -- ปลาไม่กินเร็วขนาดนี้ กันสัญญาณหลอก
-    waitFor(myId, MIN_BITE_WAIT, function() return false end)
-    if not waitFor(myId, BITE_TIMEOUT, isBite) then
-        return -- ไม่มีปลากิน โยนใหม่
-    end
-
-    setStatus("ปลากิน! Hook")
-    task.wait(HOOK_REACTION)
-    if not isActive(myId) then return end
-    remote:FireServer("Hook")
-
-    if REEL_FINISH_DELAY > 0 then
-        setStatus(("ดึงปลา รอ %.1f วิ"):format(REEL_FINISH_DELAY))
-        waitFor(myId, REEL_FINISH_DELAY, function() return false end)
-        if not isActive(myId) then return end
-    end
-    remote:FireServer("Reel", true) -- ปลาเด้งเข้าตัว
-    justCaught = true
-    setStatus("ได้ปลาแล้ว โยนต่อ")
 end
 
 -- ===== ตรวจว่าได้ปลาแล้ว =====
@@ -503,10 +388,13 @@ if not env.AutoFishCatchHooked and typeof(hookmetamethod) == "function"
 end
 
 -- สำรอง: ดูหน้าต่างโชว์ปลา (บรรทัด "ขายได้ ... เหรียญ") แค่ดูเฉยๆ ไม่คลิก
+local popupGui -- ScreenGui ของหน้าต่างโชว์ปลา (จำไว้ จะได้ไม่ต้องค้นทั้ง PlayerGui ทุกครั้ง)
 local function catchPopupShown()
-    for _, d in ipairs(LocalPlayer.PlayerGui:GetDescendants()) do
+    local root = (popupGui and popupGui.Parent) and popupGui or LocalPlayer.PlayerGui
+    for _, d in ipairs(root:GetDescendants()) do
         if d:IsA("TextLabel") and d.Text:find("ขายได้", 1, true)
             and d.Text:find("เหรียญ", 1, true) and isShown(d) then
+            popupGui = d:FindFirstAncestorWhichIsA("ScreenGui")
             return true
         end
     end
@@ -608,13 +496,6 @@ end
 
 -- ลูปการทำงานหลัก
 local function autoFishLoop(myId)
-    if INPUT_MODE == "remote" and getActionRemote() then
-        while isActive(myId) do
-            remoteRound(myId)
-        end
-        return
-    end
-
     while isActive(myId) do
         playRound(myId)
     end
@@ -694,9 +575,31 @@ end)
     -- ถ้าโหลดไม่ได้ จะใช้หน้าต่างเดิมแบบง่าย (มีแค่ปุ่มเปิด/ปิดตกปลา) ฟังก์ชันเสริมจะไม่ทำงาน
     local FLUENT_URL = "https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"
 
-    local okFluent, Fluent = pcall(function()
-        return loadstring(game:HttpGet(FLUENT_URL))()
-    end)
+    -- เก็บโค้ด Fluent ไว้ในไฟล์ รอบถัดไปโหลดจากเครื่อง ไม่ต้องดาวน์โหลดใหม่ (เปิดเร็วขึ้น)
+    local FLUENT_CACHE = "AutoFish/fluent.lua"
+    local canCache = typeof(readfile) == "function" and typeof(writefile) == "function"
+        and typeof(isfile) == "function"
+    local function loadFluent(useCache)
+        local source
+        if useCache and canCache and isfile(FLUENT_CACHE) then
+            source = readfile(FLUENT_CACHE)
+        else
+            source = game:HttpGet(FLUENT_URL)
+            if canCache then
+                pcall(function()
+                    if typeof(makefolder) == "function" and not (typeof(isfolder) == "function" and isfolder("AutoFish")) then
+                        makefolder("AutoFish")
+                    end
+                    writefile(FLUENT_CACHE, source)
+                end)
+            end
+        end
+        return loadstring(source)()
+    end
+    local okFluent, Fluent = pcall(loadFluent, true)
+    if not okFluent or typeof(Fluent) ~= "table" then
+        okFluent, Fluent = pcall(loadFluent, false) -- ไฟล์ในเครื่องเสีย: ดาวน์โหลดใหม่
+    end
     if not okFluent or typeof(Fluent) ~= "table" then
         warn("[AutoFish] โหลด Fluent ไม่ได้: " .. tostring(Fluent))
         setStatus("โหลดหน้าต่างใหม่ไม่ได้")
@@ -1081,7 +984,8 @@ end)
         while ScreenGui.Parent do
             local char = LocalPlayer.Character
             local hum = char and char:FindFirstChildOfClass("Humanoid")
-            if hum then
+            local active = settings.speedOn or settings.jumpOn or defaults.speedApplied or defaults.jumpApplied
+            if hum and active then
                 if defaults.hum ~= hum then
                     defaults = {
                         hum = hum,
@@ -1109,7 +1013,7 @@ end)
                 end
                 defaults.jumpApplied = settings.jumpOn
             end
-            task.wait(0.25)
+            task.wait(0.5)
         end
     end)
 
@@ -1128,9 +1032,11 @@ end)
         isRarity[r] = true
     end
 
+    local statsPopupGui -- จำ ScreenGui ของหน้าต่างโชว์ปลาไว้ ไม่ต้องค้นทั้ง PlayerGui
     local function findPopupLabels()
         local sell, isNew
-        for _, d in ipairs(LocalPlayer.PlayerGui:GetDescendants()) do
+        local root = (statsPopupGui and statsPopupGui.Parent) and statsPopupGui or LocalPlayer.PlayerGui
+        for _, d in ipairs(root:GetDescendants()) do
             if d:IsA("TextLabel") and isShown(d) then
                 if d.Text:find("ขายได้", 1, true) and d.Text:find("เหรียญ", 1, true) then
                     sell = d
@@ -1142,6 +1048,7 @@ end)
         -- หาป้ายระดับความหายากในหน้าต่างเดียวกัน
         local rarity
         if sell then
+            statsPopupGui = sell:FindFirstAncestorWhichIsA("ScreenGui")
             local root = sell
             while root.Parent and not root.Parent:IsA("ScreenGui") do
                 root = root.Parent
@@ -1327,7 +1234,7 @@ end)
 
             refreshStats()
             refreshTitle()
-            task.wait(0.5)
+            task.wait(1)
         end
     end)
 
@@ -1818,7 +1725,8 @@ end)
     -- เช็คกระเป๋าทุก 10 วิ ถ้าปลาครบจำนวนที่ตั้งไว้ ขายทั้งหมดทีเดียว
     task.spawn(function()
         while ScreenGui.Parent do
-            if not selling then
+            -- ถามเซิร์ฟเวอร์เฉพาะตอนตกปลาอยู่หรือเปิดขายอัตโนมัติ (ไม่ใช้ก็ไม่ต้องถาม)
+            if not selling and (isAutoFishing or settings.autoSell) then
                 local ids, maxFish = getFishIds()
                 if ids then
                     -- ยังไม่บันทึกจุดร้าน = ขายไม่ได้ (เซิร์ฟเวอร์ให้ขายเฉพาะใกล้ร้าน) ไม่ต้องลองให้เสียเวลา
