@@ -979,7 +979,17 @@ trainSection:AddToggle("DFTrain", {
     Title = "ถือของช่อง 1 ชาร์จพลังอัตโนมัติ",
     Description = "ถือไว้ตลอด หลุดมือหยิบให้ใหม่ + กดวงกลม x2 ให้ทันที (พักเองตอนบิน/วางตัวละคร)",
     Default = false,
-}):OnChanged(function(v) settings.autoTrain = v end)
+}):OnChanged(function(v)
+    settings.autoTrain = v
+    if not v then
+        -- ปิด = เก็บของช่อง 1 (เหมือนกด 1 อีกครั้ง) จะได้หยุดชาร์จ
+        local tool = getTrainTool()
+        local hum = getHumanoid()
+        if tool and hum and tool.Parent == LocalPlayer.Character then
+            hum:UnequipTools()
+        end
+    end
+end)
 
 local dashSection = Tabs.main:AddSection("ชาร์จ + บิน")
 
