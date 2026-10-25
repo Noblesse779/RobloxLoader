@@ -655,6 +655,7 @@ end)
 -- =====================================================================
 -- ฟังก์ชันเสริม (แยกจากระบบตกปลา ไม่ได้แก้อะไรในส่วนตกปลา)
 -- 1) กันโดนเตะ AFK  2) นับสถิติ  3) ปุ่มลัด  4) ตั้งเวลาหยุด  5) ย่อหน้าต่าง  6) วิ่งเร็ว/กระโดดสูง
+-- 7) ขายปลา (วาร์ป/เดินไปร้าน)  8) พักเป็นระยะ  9) หยุดเมื่อมีคนใกล้  10) เตือนปลาหายาก
 -- =====================================================================
 do
     local RunService = game:GetService("RunService")
@@ -670,20 +671,32 @@ do
         stopMinutes = 0, -- 0 = ไม่จำกัด
         autoSell = true,
         sellAt = 100,    -- ปลาในกระเป๋าครบกี่ตัวแล้วขายทั้งหมด
+        sellTravel = "walk", -- ไปร้านยังไง: "walk" = เดินไป (เนียนกว่า), "warp" = วาร์ป (เร็วกว่า)
+        breakOn = false, breakEvery = 25, breakSeconds = 30, -- พักทุกประมาณกี่ตัว / พักประมาณกี่วิ (สุ่ม ±30-40%)
+        nearbyOn = false, nearbyRange = 30, -- มีผู้เล่นอื่นเข้ามาใกล้กี่ studs ให้พัก
+        rareAlert = true, rareStop = false, -- เตือน / หยุด เมื่อได้ปลาที่ไม่ใช่ระดับ "ทั่วไป"
     }
 
+    -- ชื่อระดับความหายากที่รู้จัก (ถ้าเกมมีชื่ออื่นเพิ่มเข้าไปได้)
+    local RARITIES = { "ทั่วไป", "พิเศษ", "หายาก", "ยอดเยี่ยม", "มหากาพย์", "ตำนาน", "ในตำนาน", "เทพ", "เทพเจ้า", "ลึกลับ" }
+
     ---------------------------------------------------------------- UI
-    local FULL_HEIGHT = 495
+    local FULL_HEIGHT = 470
 
     MainFrame.Size = UDim2.new(0, 220, 0, FULL_HEIGHT)
     ToggleButton.Size = UDim2.new(1, -10, 0, 45)
     ToggleButton.Position = UDim2.new(0, 5, 0, 25)
     StatusLabel.Position = UDim2.new(0, 5, 0, 72)
 
-    local Extras = Instance.new("Frame")
-    Extras.Size = UDim2.new(1, -10, 1, -98)
+    -- เลื่อนขึ้นลงได้ (ตั้งค่าเยอะ หน้าต่างจะได้ไม่ยาวเกินจอ)
+    local Extras = Instance.new("ScrollingFrame")
+    Extras.Size = UDim2.new(1, -6, 1, -98)
     Extras.Position = UDim2.new(0, 5, 0, 95)
     Extras.BackgroundTransparency = 1
+    Extras.BorderSizePixel = 0
+    Extras.ScrollBarThickness = 4
+    Extras.CanvasSize = UDim2.new()
+    Extras.AutomaticCanvasSize = Enum.AutomaticSize.Y
     Extras.Parent = MainFrame
 
     local layout = Instance.new("UIListLayout")
@@ -699,7 +712,7 @@ do
 
     local function makeLabel(text, height, color)
         local l = Instance.new("TextLabel")
-        l.Size = UDim2.new(1, 0, 0, height or 18)
+        l.Size = UDim2.new(1, -6, 0, height or 18)
         l.BackgroundTransparency = 1
         l.Text = text
         l.TextColor3 = color or Color3.fromRGB(220, 220, 220)
@@ -714,7 +727,7 @@ do
 
     local function makeRow()
         local row = Instance.new("Frame")
-        row.Size = UDim2.new(1, 0, 0, 24)
+        row.Size = UDim2.new(1, -6, 0, 24)
         row.BackgroundTransparency = 1
         row.LayoutOrder = nextOrder()
         row.Parent = Extras
@@ -851,7 +864,57 @@ do
     shopButton.TextSize = 14
     shopButton.Parent = shopRow
 
+    -- วิธีไปร้าน: กดสลับ เดิน <-> วาร์ป
+    local travelRow = makeRow()
+    local travelButton = Instance.new("TextButton")
+    travelButton.Size = UDim2.new(1, 0, 1, 0)
+    travelButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+    travelButton.Font = Enum.Font.SourceSansBold
+    travelButton.TextSize = 14
+    travelButton.Parent = travelRow
+    local function refreshTravel()
+        local walk = settings.sellTravel == "walk"
+        travelButton.Text = "ไปร้านโดย: " .. (walk and "เดิน (เนียน)" or "วาร์ป (เร็ว)")
+        travelButton.BackgroundColor3 = walk and Color3.fromRGB(40, 110, 150) or Color3.fromRGB(150, 70, 40)
+    end
+    travelButton.MouseButton1Click:Connect(function()
+        settings.sellTravel = settings.sellTravel == "walk" and "warp" or "walk"
+        refreshTravel()
+    end)
+    refreshTravel()
+
     local bagLabel = makeLabel("", 18, Color3.fromRGB(255, 220, 120))
+
+    -- 8) พักเป็นระยะ
+    local breakRow = makeRow()
+    makeToggle(breakRow, "พักทุก (ตัว)",
+        function() return settings.breakOn end,
+        function(v) settings.breakOn = v end,
+        UDim2.new(0.65, -2, 1, 0))
+    makeNumberBox(breakRow, settings.breakEvery, function(n) settings.breakEvery = math.max(1, math.floor(n)) end,
+        UDim2.new(0.35, 0, 1, 0), UDim2.new(0.65, 2, 0, 0))
+
+    local breakTimeRow = makeRow()
+    labelInRow(breakTimeRow, "พักนาน (วินาที)", UDim2.new(0.65, -2, 1, 0))
+    makeNumberBox(breakTimeRow, settings.breakSeconds, function(n) settings.breakSeconds = n end,
+        UDim2.new(0.35, 0, 1, 0), UDim2.new(0.65, 2, 0, 0))
+
+    -- 9) หยุดเมื่อมีคนใกล้
+    local nearbyRow = makeRow()
+    makeToggle(nearbyRow, "พักเมื่อมีคนใกล้",
+        function() return settings.nearbyOn end,
+        function(v) settings.nearbyOn = v end,
+        UDim2.new(0.65, -2, 1, 0))
+    makeNumberBox(nearbyRow, settings.nearbyRange, function(n) settings.nearbyRange = n end,
+        UDim2.new(0.35, 0, 1, 0), UDim2.new(0.65, 2, 0, 0))
+
+    -- 10) ปลาหายาก
+    makeToggle(makeRow(), "เตือนเมื่อได้ปลาหายาก",
+        function() return settings.rareAlert end,
+        function(v) settings.rareAlert = v end)
+    makeToggle(makeRow(), "หยุดเมื่อได้ปลาหายาก",
+        function() return settings.rareStop end,
+        function(v) settings.rareStop = v end)
 
     -- 3) บอกปุ่มลัด
     makeLabel(("%s = เปิด/ปิดตกปลา   %s = ซ่อนหน้าต่าง"):format(TOGGLE_KEY.Name, HIDE_KEY.Name),
@@ -897,10 +960,48 @@ do
         end
     end)
 
+    ---------------------------------------------------------------- ระบบพักตกปลาชั่วคราว
+    -- ใช้ร่วมกันหลายอย่าง (ขายปลา / พักเป็นระยะ / มีคนใกล้) ตกปลาจะกลับมาเองเมื่อทุกเหตุผลหมดไป
+    -- กดเปิด/ปิดเองเมื่อไหร่ ถือว่าผู้เล่นสั่งเอง ล้างการพักทั้งหมด
+    local pause = { reasons = {}, resume = false, autoResuming = false }
+
+    local function pauseFishing(reason)
+        if pause.reasons[reason] then return end
+        pause.reasons[reason] = true
+        if isAutoFishing then
+            pause.resume = true
+            setEnabled(false)
+        end
+    end
+
+    local function resumeFishing(reason)
+        if not pause.reasons[reason] then return end
+        pause.reasons[reason] = nil
+        if next(pause.reasons) == nil and pause.resume then
+            pause.resume = false
+            if not isAutoFishing then
+                pause.autoResuming = true
+                setEnabled(true)
+            end
+        end
+    end
+
+    local function isPaused(reason)
+        return pause.reasons[reason] ~= nil
+    end
+
+    local function clearPauses()
+        pause.reasons = {}
+        pause.resume = false
+    end
+
+    ToggleButton.MouseButton1Click:Connect(clearPauses)
+
     ---------------------------------------------------------------- 3) ปุ่มลัด
     connections[#connections + 1] = UserInputService.InputBegan:Connect(function(input, gameProcessed)
         if gameProcessed then return end -- กำลังพิมพ์แชท/ช่องตัวเลขอยู่
         if input.KeyCode == TOGGLE_KEY then
+            clearPauses()
             setEnabled(not isAutoFishing)
         elseif input.KeyCode == HIDE_KEY then
             ScreenGui.Enabled = not ScreenGui.Enabled
@@ -964,6 +1065,11 @@ do
     local lastSeenCatch = env.AutoFishLastCatch or 0
     local lastPopupText
 
+    local isRarity = {}
+    for _, r in ipairs(RARITIES) do
+        isRarity[r] = true
+    end
+
     local function findPopupLabels()
         local sell, isNew
         for _, d in ipairs(LocalPlayer.PlayerGui:GetDescendants()) do
@@ -975,13 +1081,62 @@ do
                 end
             end
         end
-        return sell, isNew
+        -- หาป้ายระดับความหายากในหน้าต่างเดียวกัน
+        local rarity
+        if sell then
+            local root = sell
+            while root.Parent and not root.Parent:IsA("ScreenGui") do
+                root = root.Parent
+            end
+            for _, d in ipairs(root:GetDescendants()) do
+                if d:IsA("TextLabel") then
+                    local t = d.Text:gsub("^%s+", ""):gsub("%s+$", "")
+                    if isRarity[t] then
+                        rarity = t
+                        break
+                    end
+                end
+            end
+        end
+        return sell, isNew, rarity
     end
 
+    local StarterGui = game:GetService("StarterGui")
+    local function notify(title, text)
+        pcall(function()
+            StarterGui:SetCore("SendNotification", { Title = title, Text = text, Duration = 10 })
+        end)
+        -- กระพริบแถบหัวหน้าต่าง
+        task.spawn(function()
+            for _ = 1, 6 do
+                TitleBar.BackgroundColor3 = Color3.fromRGB(200, 150, 0)
+                task.wait(0.25)
+                TitleBar.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+                task.wait(0.25)
+            end
+        end)
+    end
+
+    local breakState = { sinceBreak = 0, nextAt = nil, resumeAt = 0 }
+
     -- นับปลาจากหน้าต่างโชว์ปลา (ได้ปลาจริงเท่านั้น)
-    local function countCatch(sell, isNew)
+    local function countCatch(sell, isNew, rarity)
         stats.fish += 1
         session.fish += 1
+        breakState.sinceBreak += 1
+        if rarity and rarity ~= "ทั่วไป" then
+            stats.rare = (stats.rare or 0) + 1
+            if settings.rareAlert then
+                notify("ได้ปลาหายาก!", "ระดับ: " .. rarity)
+            end
+            if settings.rareStop and isAutoFishing then
+                clearPauses()
+                setEnabled(false)
+                setStatus("หยุดแล้ว: ได้ปลาระดับ " .. rarity)
+            end
+        elseif isNew and settings.rareAlert then
+            notify("ปลาชนิดใหม่!", "เพิ่มเข้าสมุดสะสมแล้ว")
+        end
         local coins = sell.Text:match("ขายได้%s*([%d,]+)")
         if coins then
             stats.coins += tonumber((coins:gsub(",", ""))) or 0
@@ -998,8 +1153,8 @@ do
 
     local function refreshStats()
         local perHour = stats.runTime > 60 and math.floor(stats.coins / stats.runTime * 3600) or 0
-        statsLabel.Text = ("ปลา: %d ตัว   ชนิดใหม่: %d\nเหรียญ: %d   (%d / ชม.)\nเวลาที่เปิด: %s\nในกระเป๋า: %s / %s ตัว")
-            :format(stats.fish, stats.newSpecies, stats.coins, perHour, formatTime(stats.runTime),
+        statsLabel.Text = ("ปลา: %d ตัว   ชนิดใหม่: %d   หายาก: %d\nเหรียญ: %d   (%d / ชม.)\nเวลาที่เปิด: %s\nในกระเป๋า: %s / %s ตัว")
+            :format(stats.fish, stats.newSpecies, stats.rare or 0, stats.coins, perHour, formatTime(stats.runTime),
                 tostring(bag.count or "-"), tostring(bag.max or "-"))
     end
 
@@ -1020,8 +1175,15 @@ do
             lastTick = now
 
             -- เริ่มรอบใหม่ทุกครั้งที่กด ON
+            -- (ไม่นับตอนสคริปต์กลับมาตกเองหลังพัก/ขายปลา)
             if isAutoFishing and not wasOn then
-                session = { fish = 0, time = 0 }
+                if pause.autoResuming then
+                    pause.autoResuming = false
+                else
+                    session = { fish = 0, time = 0 }
+                    breakState.sinceBreak = 0
+                    breakState.nextAt = nil
+                end
             end
             wasOn = isAutoFishing
 
@@ -1039,9 +1201,9 @@ do
                     task.spawn(function()
                         local started = os.clock()
                         while os.clock() - started < 3 do
-                            local sell, isNew = findPopupLabels()
+                            local sell, isNew, rarity = findPopupLabels()
                             if sell then
-                                countCatch(sell, isNew)
+                                countCatch(sell, isNew, rarity)
                                 break
                             end
                             task.wait(0.2)
@@ -1051,10 +1213,10 @@ do
                 end
             elseif isAutoFishing then
                 -- executor ไม่มี hook: ดูหน้าต่างโชว์ปลาที่เพิ่งเด้งขึ้น
-                local sell, isNew = findPopupLabels()
+                local sell, isNew, rarity = findPopupLabels()
                 local text = sell and sell.Text
                 if sell and text ~= lastPopupText then
-                    countCatch(sell, isNew)
+                    countCatch(sell, isNew, rarity)
                 end
                 lastPopupText = text
             end
@@ -1062,12 +1224,57 @@ do
             -- 4) ครบเงื่อนไขแล้วหยุดเอง
             if isAutoFishing then
                 if settings.stopFish > 0 and session.fish >= settings.stopFish then
+                    clearPauses()
                     setEnabled(false)
                     setStatus(("หยุดแล้ว: ได้ปลาครบ %d ตัว"):format(settings.stopFish))
                 elseif settings.stopMinutes > 0 and session.time >= settings.stopMinutes * 60 then
+                    clearPauses()
                     setEnabled(false)
                     setStatus(("หยุดแล้ว: ครบ %g นาที"):format(settings.stopMinutes))
                 end
+            end
+
+            -- 8) พักเป็นระยะ (สุ่มจำนวนตัวและเวลาพัก ไม่ให้เป็นจังหวะเดิมทุกครั้ง)
+            if not breakState.nextAt then
+                breakState.nextAt = math.max(1, math.floor(settings.breakEvery * (0.7 + math.random() * 0.6)))
+            end
+            if isPaused("break") then
+                if not settings.breakOn or now >= breakState.resumeAt then
+                    resumeFishing("break")
+                else
+                    setStatus(("พักสั้นๆ อีก %d วิ"):format(math.ceil(breakState.resumeAt - now)))
+                end
+            elseif settings.breakOn and isAutoFishing and breakState.sinceBreak >= breakState.nextAt then
+                breakState.sinceBreak = 0
+                breakState.nextAt = nil
+                breakState.resumeAt = now + settings.breakSeconds * (0.6 + math.random() * 0.8)
+                pauseFishing("break")
+            end
+
+            -- 9) มีผู้เล่นอื่นเข้ามาใกล้ -> พัก จนไม่มีใครอยู่ใกล้ครบ 5 วิ
+            local myRoot = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+            local nearest
+            if settings.nearbyOn and myRoot then
+                for _, plr in ipairs(Players:GetPlayers()) do
+                    local root = plr ~= LocalPlayer and plr.Character and plr.Character:FindFirstChild("HumanoidRootPart")
+                    if root then
+                        local d = (root.Position - myRoot.Position).Magnitude
+                        if not nearest or d < nearest then
+                            nearest = d
+                        end
+                    end
+                end
+            end
+            if nearest and nearest <= settings.nearbyRange then
+                breakState.lastNearby = now
+                if isAutoFishing then
+                    pauseFishing("nearby")
+                end
+                if isPaused("nearby") then
+                    setStatus(("พัก: มีคนอยู่ใกล้ (%d studs)"):format(math.floor(nearest)))
+                end
+            elseif isPaused("nearby") and (not settings.nearbyOn or now - (breakState.lastNearby or 0) > 5) then
+                resumeFishing("nearby")
             end
 
             refreshStats()
@@ -1125,6 +1332,50 @@ do
         return char and char:FindFirstChild("HumanoidRootPart")
     end
 
+    -- เดินไปจุดหมายด้วยระบบหาทางของ Roblox (ข้ามสิ่งกีดขวาง/กระโดดได้)
+    local PathfindingService = game:GetService("PathfindingService")
+    local WALK_TIMEOUT = 60 -- เดินนานสุดกี่วินาทีต่อเที่ยว
+
+    local function walkTo(target, timeout)
+        local char = LocalPlayer.Character
+        local hum = char and char:FindFirstChildOfClass("Humanoid")
+        local hrp = char and char:FindFirstChild("HumanoidRootPart")
+        if not (hum and hrp) then return false end
+
+        local path = PathfindingService:CreatePath({ AgentRadius = 2, AgentHeight = 5, AgentCanJump = true })
+        local ok = pcall(function()
+            path:ComputeAsync(hrp.Position, target)
+        end)
+        local waypoints
+        if ok and path.Status == Enum.PathStatus.Success then
+            waypoints = path:GetWaypoints()
+        else
+            -- หาทางไม่เจอ: เดินตรงไปเลย
+            waypoints = { { Position = target, Action = Enum.PathWaypointAction.Walk } }
+        end
+
+        local deadline = os.clock() + timeout
+        for _, wp in ipairs(waypoints) do
+            if wp.Action == Enum.PathWaypointAction.Jump then
+                hum.Jump = true
+            end
+            local started = os.clock()
+            local lastMove = 0
+            while true do
+                local flat = (hrp.Position - wp.Position) * Vector3.new(1, 0, 1)
+                if flat.Magnitude < 3 then break end
+                if os.clock() > deadline then return false end
+                if os.clock() - started > 8 then break end -- ติดอยู่จุดนี้ ข้ามไปจุดถัดไป
+                if os.clock() - lastMove > 1 then
+                    hum:MoveTo(wp.Position)
+                    lastMove = os.clock()
+                end
+                task.wait(0.1)
+            end
+        end
+        return ((hrp.Position - target) * Vector3.new(1, 0, 1)).Magnitude <= SHOP_RANGE
+    end
+
     local function sellRequest(ids)
         local before = LocalPlayer:GetAttribute("Coins")
         local ok, res = pcall(function()
@@ -1154,28 +1405,43 @@ do
             local shop = env.AutoFishShopCFrame
             local hrp = getRoot()
             if shop and hrp and (hrp.Position - shop.Position).Magnitude > SHOP_RANGE then
-                -- พักตกปลา -> วาร์ปไปร้าน -> ขาย -> วาร์ปกลับ -> ตกปลาต่อ
-                local wasFishing = isAutoFishing
-                if wasFishing then
-                    setEnabled(false)
+                -- พักตกปลา -> ไปร้าน (เดิน/วาร์ป) -> ขาย -> กลับจุดเดิม -> ตกปลาต่อ
+                local hadFishing = isAutoFishing
+                pauseFishing("sell")
+                if hadFishing then
                     task.wait(1)
                 end
                 hrp = getRoot()
                 if hrp then
                     local back = hrp.CFrame
-                    bagLabel.Text = "วาร์ปไปขายที่ร้าน..."
-                    hrp.CFrame = shop
-                    task.wait(0.8)
-                    sellRequest(ids)
-                    hrp = getRoot()
-                    if hrp then
-                        hrp.CFrame = back -- กลับจุดเดิม หันหน้าเข้าน้ำเหมือนเดิม
+                    if settings.sellTravel == "warp" then
+                        bagLabel.Text = "วาร์ปไปขายที่ร้าน..."
+                        hrp.CFrame = shop
+                        task.wait(0.8)
+                        sellRequest(ids)
+                        hrp = getRoot()
+                        if hrp then
+                            hrp.CFrame = back -- กลับจุดเดิม หันหน้าเข้าน้ำเหมือนเดิม
+                        end
+                        task.wait(0.8)
+                    else
+                        bagLabel.Text = "เดินไปขายที่ร้าน..."
+                        if walkTo(shop.Position, WALK_TIMEOUT) then
+                            task.wait(0.5)
+                            sellRequest(ids)
+                        else
+                            bagLabel.Text = "เดินไปร้านไม่ถึง (ทางตัน?) ลองใช้วาร์ป"
+                        end
+                        walkTo(back.Position, WALK_TIMEOUT)
+                        hrp = getRoot()
+                        if hrp then
+                            -- หันหน้ากลับทางเดิม (หมุนตัวอยู่กับที่ ไม่ได้วาร์ป)
+                            hrp.CFrame = CFrame.new(hrp.Position) * back.Rotation
+                        end
+                        task.wait(0.5)
                     end
-                    task.wait(0.8)
                 end
-                if wasFishing and not isAutoFishing then
-                    setEnabled(true)
-                end
+                resumeFishing("sell")
             elseif not sellRequest(ids) and not shop then
                 bagLabel.Text = "ต้องอยู่ใกล้ร้าน: ไปยืนที่ร้านแล้วกด บันทึกจุดร้าน"
             end
