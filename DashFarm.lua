@@ -1,7 +1,8 @@
 -- ฟาร์มแมพชาร์จพลังแล้วบิน (Dash) แบบเล่นตามกติกา
 -- 1) วางตัวละครที่แข็งแกร่งสุดบนแท่นในฐานอัตโนมัติ
 -- 2) ชาร์จ (กด SHIFT ค้างจนเต็ม) -> บิน -> กลับแท่นชาร์จ -> วนใหม่
--- 3) กันโดนเตะ AFK
+-- 3) รีเบิร์ธอัตโนมัติ
+-- 4) กันโดนเตะ AFK
 -- ทุกฟังก์ชันปิดไว้ตอนรัน
 
 local Players = game:GetService("Players")
@@ -19,6 +20,8 @@ local settings = {
     autoDash = false,
     autoPlace = false,
     antiAfk = false,
+    autoRebirth = false,
+    rebirthEvery = 30,  -- กดรีเบิร์ธทุกกี่วิ (เงินไม่พอ เซิร์ฟเวอร์จะไม่ให้รีเบิร์ธเอง)
     chargeTimeout = 20, -- ชาร์จนานสุดกี่วิ (ถ้าอ่าน % ไม่ได้ จะปล่อยตอนครบเวลานี้)
     placeEvery = 30,    -- เช็คแท่นว่าง/ตัวใหม่ทุกกี่วิ
 }
@@ -279,6 +282,30 @@ local function placeStrongest()
     return placed
 end
 
+---------------------------------------------------------------- รีเบิร์ธ
+-- ReplicatedStorage.RemoteGUI.URebirth:FireServer() (ดักจาก Remote Spy ตอนกดรีเบิร์ธ)
+local rebirthCount = 0
+local function rebirth()
+    local folder = game:GetService("ReplicatedStorage"):FindFirstChild("RemoteGUI")
+    local remote = folder and folder:FindFirstChild("URebirth")
+    if not remote then
+        setStatus("หา RemoteGUI.URebirth ไม่เจอ")
+        return false
+    end
+    remote:FireServer()
+    rebirthCount += 1
+    return true
+end
+
+task.spawn(function()
+    while alive() do
+        if settings.autoRebirth then
+            rebirth()
+        end
+        task.wait(math.max(5, settings.rebirthEvery))
+    end
+end)
+
 ---------------------------------------------------------------- ลูปหลัก
 local lastPlace = 0
 task.spawn(function()
@@ -392,6 +419,28 @@ dashSection:AddButton({
     end,
 })
 
+local rebirthSection = Tabs.main:AddSection("รีเบิร์ธ")
+rebirthSection:AddToggle("DFRebirth", {
+    Title = "รีเบิร์ธอัตโนมัติ",
+    Description = "กดรีเบิร์ธให้เป็นระยะ (เงินไม่ถึง เกมจะไม่ให้รีเบิร์ธเอง)",
+    Default = false,
+}):OnChanged(function(v) settings.autoRebirth = v end)
+rebirthSection:AddInput("DFRebirthEvery", {
+    Title = "กดทุก (วินาที)",
+    Default = tostring(settings.rebirthEvery),
+    Numeric = true,
+    Finished = true,
+    Callback = function(v) settings.rebirthEvery = tonumber(v) or settings.rebirthEvery end,
+})
+rebirthSection:AddButton({
+    Title = "รีเบิร์ธตอนนี้",
+    Callback = function()
+        if rebirth() then
+            Fluent:Notify({ Title = "รีเบิร์ธ", Content = "ส่งคำสั่งรีเบิร์ธแล้ว", Duration = 4 })
+        end
+    end,
+})
+
 -- ตัวละคร
 local charSection = Tabs.chars:AddSection("วางตัวที่แข็งแกร่งสุด")
 charSection:AddToggle("DFPlace", {
@@ -425,7 +474,8 @@ Window:SelectTab(1)
 task.spawn(function()
     while alive() and not Fluent.Unloaded do
         pcall(function()
-            statusPara:SetDesc(("%s\nบินแล้ว %d รอบ  •  วางตัวละครแล้ว %d ตัว"):format(status, dashCount, placedCount))
+            statusPara:SetDesc(("%s\nบินแล้ว %d รอบ  •  วางตัวละครแล้ว %d ตัว  •  กดรีเบิร์ธ %d ครั้ง")
+                :format(status, dashCount, placedCount, rebirthCount))
         end)
         local lines = {}
         for i, t in ipairs(getCharacterTools()) do
