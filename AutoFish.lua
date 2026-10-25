@@ -30,9 +30,6 @@ local MIN_BITE_WAIT = 1.5 -- โยนแล้วอย่างน้อยก
 local BITE_TEXT = "กดเลย"   -- ข้อความบนปุ่มตอนปลากินเหยื่อ
 local HOOK_REACTION = 0.3 -- (โหมด remote) ปลากินแล้วรอกี่วินาทีก่อนส่ง "Hook" (ให้ดูเหมือนคนกด)
 local HOOK_COOLDOWN = 1   -- ยิง "Hook" ซ้ำได้ทุกกี่วินาที ตอนป้าย Bang ยังขึ้นอยู่
-local POPUP_TEXT = "ขายได้" -- ข้อความในหน้าต่างโชว์ปลาที่ได้
-local POPUP_AUTO_CLOSE = 2 -- รอหน้าต่างปิดเองกี่วินาที ก่อนคลิกปิด
-local POPUP_TIMEOUT = 10   -- พยายามปิดหน้าต่างนานสุดกี่วินาที
 local READY_TIMEOUT = 5   -- หลังได้ปลา รอปุ่มกลับเป็น "เหวี่ยง" นานสุดกี่วินาที ก่อนลองเหวี่ยงต่อเลย
 local CAST_DELAY = 0.5    -- ก่อนเหวี่ยงแต่ละครั้งรออีกกี่วินาที
 local RECAST_RIGHT_AWAY = true -- ได้ปลาแล้วโยนต่อเลยโดยไม่รอปุ่มกลับเป็น "เหวี่ยง" (false = รอปุ่มก่อน)
@@ -382,7 +379,7 @@ local function castMouse(myId)
         local x, y = getPressPoint()
         VirtualInputManager:SendMouseButtonEvent(x, y, 0, false, game, 1)
     end
-    return appeared
+    return true
 end
 
 -- ดึงปลา: ประคอง Zone ให้อยู่ตรงปลา
@@ -476,53 +473,9 @@ local function remoteRound(myId)
     setStatus("ได้ปลาแล้ว โยนต่อ")
 end
 
--- หน้าต่างโชว์ปลาที่ได้ (มีข้อความ "ขายได้ ... เหรียญ") ถ้ายังขึ้นอยู่จะบังปุ่ม เหวี่ยง
-local function findCatchPopup()
-    for _, d in ipairs(LocalPlayer.PlayerGui:GetDescendants()) do
-        if d:IsA("TextLabel") and isShown(d)
-            and (d.Text:find(POPUP_TEXT, 1, true) or d.Text:find("สมุดสะสม", 1, true)) then
-            -- ไล่ขึ้นไปหากรอบนอกสุดของหน้าต่าง (ลูกตรงของ ScreenGui)
-            local frame = d
-            while frame.Parent and not frame.Parent:IsA("ScreenGui") do
-                frame = frame.Parent
-            end
-            return frame
-        end
-    end
-    return nil
-end
-
-local function clickAt(gui)
-    local c = gui.AbsolutePosition + gui.AbsoluteSize / 2
-    local sg = gui:FindFirstAncestorWhichIsA("ScreenGui")
-    if sg and not sg.IgnoreGuiInset then
-        c += GuiService:GetGuiInset()
-    end
-    VirtualInputManager:SendMouseButtonEvent(c.X, c.Y, 0, true, game, 1)
-    task.wait(0.05)
-    VirtualInputManager:SendMouseButtonEvent(c.X, c.Y, 0, false, game, 1)
-end
-
--- รอให้หน้าต่างโชว์ปลาปิด ถ้าไม่ปิดเองก็คลิกปิดให้
-local function closeCatchPopup(myId)
-    local started = os.clock()
-    while isActive(myId) and os.clock() - started < POPUP_TIMEOUT do
-        local popup = findCatchPopup()
-        if not popup then return end
-        setStatus("ได้ปลา! รอปิดหน้าต่าง")
-        if os.clock() - started > POPUP_AUTO_CLOSE then
-            clickAt(popup)
-        end
-        task.wait(0.5)
-    end
-end
-
 -- โหมด play: เล่นเหมือนคนกดปุ่มเอง
 -- เหวี่ยง (กดค้างชาร์จถึงจุดเหลือง) -> รอปุ่ม "กดเลย!" -> กดตวัด -> เล่นมินิเกมจนจบ
 local function playRound(myId)
-    -- เริ่มทุกรอบเหมือนกด ON ใหม่: ปิดหน้าต่างโชว์ปลาก่อน แล้วรอปุ่ม เหวี่ยง
-    closeCatchPopup(myId)
-    if not isActive(myId) then return end
     setStatus("รอปุ่ม เหวี่ยง พร้อม")
     if not waitFor(myId, READY_TIMEOUT, actionReady) then
         if not isActive(myId) then return end
@@ -541,14 +494,7 @@ local function playRound(myId)
     if not isActive(myId) then return end
 
     -- 1) เหวี่ยง
-    if not castMouse(myId) then
-        -- กดแล้วหลอดแรงเหวี่ยงไม่ขึ้น = เบ็ดไม่ออก ไม่ต้องรอปลา เริ่มรอบใหม่เลย
-        if isActive(myId) then
-            setStatus("เหวี่ยงไม่ออก ลองใหม่")
-            task.wait(0.5)
-        end
-        return
-    end
+    castMouse(myId)
     if not isActive(myId) then return end
 
     -- 2) รอปลากิน
@@ -578,8 +524,6 @@ local function playRound(myId)
         setMouse(false)
     end
     setStatus("จบรอบ")
-    task.wait(0.5)
-    closeCatchPopup(myId)
 end
 
 -- ลูปการทำงานหลัก
