@@ -226,11 +226,8 @@ local function getEmptyStands()
     local empty = {}
     for _, d in ipairs(plot:GetDescendants()) do
         if d:IsA("Model") and d.Name:match("^ModelStand") and not used[d:GetFullName()] then
-            -- ปุ่ม "สถานที่" (E) จะเปิดเฉพาะตอนถือตัวละครอยู่ เลยไม่เช็ค Enabled ตรงนี้
-            local prompt = d:FindFirstChildWhichIsA("ProximityPrompt", true)
-            if prompt then
-                table.insert(empty, { stand = d, prompt = prompt })
-            end
+            -- ปุ่ม "สถานที่" (E) เกมสร้าง/เปิดตอนถือตัวละครอยู่ เลยไม่หาปุ่มตรงนี้
+            table.insert(empty, { stand = d })
         end
     end
     return empty
@@ -267,6 +264,18 @@ local function triggerPrompt(prompt, tool)
     return waitFor(0.8, placed)
 end
 
+-- ปุ่มที่ "ขึ้นบนจอ" ตอนนี้ (ตัวเดียวกับที่ผู้เล่นเห็นแล้วกด E)
+local ProximityPromptService = game:GetService("ProximityPromptService")
+local shownPrompt
+ProximityPromptService.PromptShown:Connect(function(prompt)
+    shownPrompt = prompt
+end)
+ProximityPromptService.PromptHidden:Connect(function(prompt)
+    if shownPrompt == prompt then
+        shownPrompt = nil
+    end
+end)
+
 local placedCount = 0
 local function placeStrongest()
     local tools = getCharacterTools()
@@ -291,10 +300,13 @@ local function placeStrongest()
         task.wait(0.3)
         hrp = getRoot()
         if not hrp then break end
+        shownPrompt = nil
         hrp.CFrame = slot.stand:GetPivot() + Vector3.new(0, 3, 0)
-        -- รอปุ่ม "สถานที่" ขึ้น (ขึ้นเมื่อถือตัวละครและยืนใกล้แท่น)
-        if waitFor(2, function() return slot.prompt.Parent ~= nil and slot.prompt.Enabled end) then
-            if triggerPrompt(slot.prompt, tool) then
+        -- รอปุ่ม "สถานที่" ขึ้นบนจอ แล้วกดปุ่มตัวนั้นเลย
+        setStatus("รอปุ่มสถานที่ขึ้น: " .. slot.stand.Name)
+        if waitFor(2, function() return shownPrompt ~= nil end) then
+            setStatus(("กดปุ่ม \"%s\""):format(shownPrompt.ActionText))
+            if triggerPrompt(shownPrompt, tool) then
                 placed += 1
             else
                 setStatus("ปุ่มขึ้นแต่วางไม่ได้ที่ " .. slot.stand.Name)
