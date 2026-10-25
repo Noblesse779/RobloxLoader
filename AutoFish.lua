@@ -685,77 +685,236 @@ do
     local RARITIES = { "ทั่วไป", "พิเศษ", "หายาก", "ยอดเยี่ยม", "มหากาพย์", "ตำนาน", "ในตำนาน", "เทพ", "เทพเจ้า", "ลึกลับ" }
 
     ---------------------------------------------------------------- UI
-    -- หน้าต่างแนวนอน: ซ้าย = ปุ่มเปิด/ปิด + สถานะ + แถบหมวด, ขวา = หน้าของหมวดที่เลือก
-    -- ลากมุมขวาล่างเพื่อปรับขนาด, ปุ่ม – ย่อเหลือแถบเดียว
-    local SIDEBAR_WIDTH = 140
-    local MIN_SIZE = Vector2.new(380, 230)
-    local windowSize = Vector2.new(470, 300)
+    -- หน้าต่างธีมมืด: ซ้าย = ปุ่มเปิด/ปิด + สถานะ + เมนูหมวด, ขวา = การ์ดตั้งค่าของหมวดที่เลือก
+    -- ลากมุมขวาล่างเพื่อปรับขนาด, ปุ่ม – ย่อเหลือแถบหัว
+    local THEME = {
+        bg = Color3.fromRGB(17, 17, 20),
+        panel = Color3.fromRGB(23, 23, 27),
+        card = Color3.fromRGB(29, 29, 34),
+        input = Color3.fromRGB(21, 21, 25),
+        stroke = Color3.fromRGB(48, 48, 56),
+        accent = Color3.fromRGB(255, 140, 50),
+        text = Color3.fromRGB(235, 235, 240),
+        sub = Color3.fromRGB(150, 150, 162),
+        off = Color3.fromRGB(42, 42, 48),
+    }
+    local FONT = Enum.Font.GothamMedium
+    local FONT_BOLD = Enum.Font.GothamBold
+
+    local function corner(gui, r)
+        local c = Instance.new("UICorner")
+        c.CornerRadius = UDim.new(0, r or 8)
+        c.Parent = gui
+        return c
+    end
+    local function stroke(gui, color)
+        local st = Instance.new("UIStroke")
+        st.Color = color or THEME.stroke
+        st.Thickness = 1
+        st.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+        st.Parent = gui
+        return st
+    end
+
+    local SIDEBAR_WIDTH = 175
+    local HEADER_HEIGHT = 46
+    local MIN_SIZE = Vector2.new(520, 320)
+    local windowSize = Vector2.new(660, 410)
 
     MainFrame.Size = UDim2.fromOffset(windowSize.X, windowSize.Y)
-    MainFrame.Position = UDim2.new(0.5, -windowSize.X / 2, 0.1, 0)
-    TitleBar.Size = UDim2.new(1, 0, 0, 22)
-    ToggleButton.Size = UDim2.fromOffset(SIDEBAR_WIDTH, 40)
-    ToggleButton.Position = UDim2.fromOffset(5, 27)
-    StatusLabel.Size = UDim2.fromOffset(SIDEBAR_WIDTH, 34)
-    StatusLabel.Position = UDim2.fromOffset(5, 70)
+    MainFrame.Position = UDim2.new(0.5, -windowSize.X / 2, 0.08, 0)
+    MainFrame.BackgroundColor3 = THEME.bg
+    MainFrame.BorderSizePixel = 0
+    MainFrame.ClipsDescendants = true
+    corner(MainFrame, 12)
+    stroke(MainFrame)
 
-    -- แถบหมวด (ซ้าย)
+    -- แถบหัว: โลโก้ + ชื่อ + เวอร์ชัน (ลากหน้าต่างจากตรงนี้)
+    TitleBar.Size = UDim2.new(1, 0, 0, HEADER_HEIGHT)
+    TitleBar.BackgroundTransparency = 1
+    TitleBar.Text = ""
+    TitleBar.ZIndex = 3
+
+    local Logo = Instance.new("TextLabel")
+    Logo.Size = UDim2.fromOffset(34, 34)
+    Logo.Position = UDim2.fromOffset(12, 6)
+    Logo.BackgroundColor3 = THEME.accent
+    Logo.Text = "🎣"
+    Logo.TextSize = 20
+    Logo.ZIndex = 3
+    Logo.Parent = TitleBar
+    corner(Logo, 9)
+
+    local TitleText = Instance.new("TextLabel")
+    TitleText.Size = UDim2.fromOffset(200, 20)
+    TitleText.Position = UDim2.fromOffset(54, 5)
+    TitleText.BackgroundTransparency = 1
+    TitleText.Text = "ตกปลาอัตโนมัติ"
+    TitleText.TextColor3 = THEME.text
+    TitleText.Font = FONT_BOLD
+    TitleText.TextSize = 17
+    TitleText.TextXAlignment = Enum.TextXAlignment.Left
+    TitleText.ZIndex = 3
+    TitleText.Parent = TitleBar
+
+    local VersionText = Instance.new("TextLabel")
+    VersionText.Size = UDim2.fromOffset(200, 14)
+    VersionText.Position = UDim2.fromOffset(54, 25)
+    VersionText.BackgroundTransparency = 1
+    VersionText.Text = "เวอร์ชัน 2.0  •  Auto Fish"
+    VersionText.TextColor3 = THEME.sub
+    VersionText.Font = FONT
+    VersionText.TextSize = 12
+    VersionText.TextXAlignment = Enum.TextXAlignment.Left
+    VersionText.ZIndex = 3
+    VersionText.Parent = TitleBar
+
+    -- พื้นหลังแถบซ้าย
+    local SidebarBg = Instance.new("Frame")
+    SidebarBg.Size = UDim2.new(0, SIDEBAR_WIDTH, 1, 0)
+    SidebarBg.BackgroundColor3 = THEME.panel
+    SidebarBg.BorderSizePixel = 0
+    SidebarBg.ZIndex = 1
+    SidebarBg.Parent = MainFrame
+
+    local HeaderLine = Instance.new("Frame")
+    HeaderLine.Size = UDim2.new(1, 0, 0, 1)
+    HeaderLine.Position = UDim2.fromOffset(0, HEADER_HEIGHT)
+    HeaderLine.BackgroundColor3 = THEME.stroke
+    HeaderLine.BorderSizePixel = 0
+    HeaderLine.ZIndex = 2
+    HeaderLine.Parent = MainFrame
+
+    -- ปุ่มเปิด/ปิดตกปลา + สถานะ (อยู่บนสุดของแถบซ้าย)
+    ToggleButton.Size = UDim2.fromOffset(SIDEBAR_WIDTH - 24, 38)
+    ToggleButton.Position = UDim2.fromOffset(12, HEADER_HEIGHT + 12)
+    ToggleButton.Font = FONT_BOLD
+    ToggleButton.TextSize = 15
+    ToggleButton.ZIndex = 3
+    corner(ToggleButton, 8)
+
+    StatusLabel.Size = UDim2.fromOffset(SIDEBAR_WIDTH - 24, 34)
+    StatusLabel.Position = UDim2.fromOffset(12, HEADER_HEIGHT + 54)
+    StatusLabel.TextScaled = false
+    StatusLabel.TextWrapped = true
+    StatusLabel.Font = FONT
+    StatusLabel.TextSize = 12
+    StatusLabel.TextColor3 = THEME.accent
+    StatusLabel.TextXAlignment = Enum.TextXAlignment.Left
+    StatusLabel.TextYAlignment = Enum.TextYAlignment.Top
+    StatusLabel.ZIndex = 3
+
+    local NavTitle = Instance.new("TextLabel")
+    NavTitle.Size = UDim2.fromOffset(SIDEBAR_WIDTH - 24, 16)
+    NavTitle.Position = UDim2.fromOffset(14, HEADER_HEIGHT + 94)
+    NavTitle.BackgroundTransparency = 1
+    NavTitle.Text = "เมนู"
+    NavTitle.TextColor3 = THEME.sub
+    NavTitle.Font = FONT
+    NavTitle.TextSize = 12
+    NavTitle.TextXAlignment = Enum.TextXAlignment.Left
+    NavTitle.ZIndex = 3
+    NavTitle.Parent = MainFrame
+
+    -- เมนูหมวด
     local Sidebar = Instance.new("Frame")
-    Sidebar.Size = UDim2.new(0, SIDEBAR_WIDTH, 1, -112)
-    Sidebar.Position = UDim2.fromOffset(5, 108)
+    Sidebar.Size = UDim2.new(0, SIDEBAR_WIDTH - 16, 1, -(HEADER_HEIGHT + 120))
+    Sidebar.Position = UDim2.fromOffset(8, HEADER_HEIGHT + 114)
     Sidebar.BackgroundTransparency = 1
+    Sidebar.ZIndex = 3
     Sidebar.Parent = MainFrame
     local sidebarLayout = Instance.new("UIListLayout")
-    sidebarLayout.Padding = UDim.new(0, 3)
+    sidebarLayout.Padding = UDim.new(0, 2)
     sidebarLayout.SortOrder = Enum.SortOrder.LayoutOrder
     sidebarLayout.Parent = Sidebar
 
-    -- พื้นที่หน้า (ขวา)
+    -- หัวข้อหน้าที่เปิดอยู่ (ขวาบน)
+    local PageTitle = Instance.new("TextLabel")
+    PageTitle.Size = UDim2.new(1, -(SIDEBAR_WIDTH + 24), 0, 26)
+    PageTitle.Position = UDim2.fromOffset(SIDEBAR_WIDTH + 16, HEADER_HEIGHT + 8)
+    PageTitle.BackgroundTransparency = 1
+    PageTitle.TextColor3 = THEME.text
+    PageTitle.Font = FONT_BOLD
+    PageTitle.TextSize = 19
+    PageTitle.TextXAlignment = Enum.TextXAlignment.Left
+    PageTitle.ZIndex = 2
+    PageTitle.Parent = MainFrame
+
+    -- พื้นที่การ์ด (ขวา)
     local PageArea = Instance.new("Frame")
-    PageArea.Size = UDim2.new(1, -(SIDEBAR_WIDTH + 15), 1, -32)
-    PageArea.Position = UDim2.fromOffset(SIDEBAR_WIDTH + 10, 27)
-    PageArea.BackgroundColor3 = Color3.fromRGB(28, 28, 28)
-    PageArea.BorderSizePixel = 0
+    PageArea.Size = UDim2.new(1, -(SIDEBAR_WIDTH + 20), 1, -(HEADER_HEIGHT + 46))
+    PageArea.Position = UDim2.fromOffset(SIDEBAR_WIDTH + 12, HEADER_HEIGHT + 40)
+    PageArea.BackgroundTransparency = 1
+    PageArea.ZIndex = 2
     PageArea.Parent = MainFrame
 
     local pages, tabButtons = {}, {}
     local currentPage -- หน้าที่กำลังใส่ของ (ตอนสร้าง UI)
+    local currentCard -- การ์ดที่กำลังใส่ของ
 
     local function showPage(name)
         for n, page in pairs(pages) do
-            page.Visible = n == name
-            tabButtons[n].BackgroundColor3 = n == name and Color3.fromRGB(40, 110, 150) or Color3.fromRGB(50, 50, 50)
+            local on = n == name
+            page.Visible = on
+            local tab = tabButtons[n]
+            tab.BackgroundTransparency = on and 0 or 1
+            tab.TextColor3 = on and THEME.accent or THEME.sub
+            tab:FindFirstChild("Bar").Visible = on
         end
+        PageTitle.Text = name
     end
 
     local tabCount = 0
     local function addPage(name)
         tabCount += 1
         local page = Instance.new("ScrollingFrame")
-        page.Size = UDim2.new(1, -8, 1, -8)
-        page.Position = UDim2.fromOffset(6, 4)
+        page.Size = UDim2.new(1, 0, 1, 0)
         page.BackgroundTransparency = 1
         page.BorderSizePixel = 0
-        page.ScrollBarThickness = 4
+        page.ScrollBarThickness = 3
+        page.ScrollBarImageColor3 = THEME.stroke
         page.CanvasSize = UDim2.new()
         page.AutomaticCanvasSize = Enum.AutomaticSize.Y
         page.Visible = false
+        page.ZIndex = 2
         page.Parent = PageArea
         local l = Instance.new("UIListLayout")
-        l.Padding = UDim.new(0, 4)
+        l.Padding = UDim.new(0, 8)
         l.SortOrder = Enum.SortOrder.LayoutOrder
         l.Parent = page
+        local pad = Instance.new("UIPadding")
+        pad.PaddingRight = UDim.new(0, 8)
+        pad.PaddingBottom = UDim.new(0, 8)
+        pad.Parent = page
         pages[name] = page
 
         local tab = Instance.new("TextButton")
-        tab.Size = UDim2.new(1, 0, 0, 24)
-        tab.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
-        tab.TextColor3 = Color3.fromRGB(255, 255, 255)
-        tab.Font = Enum.Font.SourceSansBold
+        tab.Size = UDim2.new(1, 0, 0, 32)
+        tab.BackgroundColor3 = Color3.fromRGB(34, 34, 40)
+        tab.BackgroundTransparency = 1
+        tab.AutoButtonColor = false
+        tab.TextColor3 = THEME.sub
+        tab.Font = FONT
         tab.TextSize = 14
         tab.Text = name
+        tab.TextXAlignment = Enum.TextXAlignment.Left
         tab.LayoutOrder = tabCount
+        tab.ZIndex = 3
         tab.Parent = Sidebar
+        corner(tab, 7)
+        local tabPad = Instance.new("UIPadding")
+        tabPad.PaddingLeft = UDim.new(0, 14)
+        tabPad.Parent = tab
+        local bar = Instance.new("Frame") -- แถบสีส้มข้างเมนูที่เลือก
+        bar.Name = "Bar"
+        bar.Size = UDim2.fromOffset(3, 18)
+        bar.Position = UDim2.new(0, -12, 0.5, -9)
+        bar.BackgroundColor3 = THEME.accent
+        bar.BorderSizePixel = 0
+        bar.Visible = false
+        bar.ZIndex = 4
+        bar.Parent = tab
+        corner(bar, 2)
         tab.MouseButton1Click:Connect(function()
             showPage(name)
         end)
@@ -763,29 +922,31 @@ do
         return page
     end
 
-    local PAGE_MAIN = "📊 หลัก"
-    local PAGE_SELL = "💰 ขายปลา"
-    local PAGE_WALK = "🚶 เดิน/เส้นทาง"
-    local PAGE_SAFE = "🛡️ ความปลอดภัย"
-    local PAGE_CHAR = "🏃 ตัวละคร"
-    local PAGE_ALERT = "🔔 แจ้งเตือน"
+    local PAGE_MAIN = "📊  หลัก"
+    local PAGE_SELL = "💰  ขายปลา"
+    local PAGE_WALK = "🚶  เดิน / เส้นทาง"
+    local PAGE_SAFE = "🛡️  ความปลอดภัย"
+    local PAGE_CHAR = "🏃  ตัวละคร"
+    local PAGE_ALERT = "🔔  แจ้งเตือน"
     for _, n in ipairs({ PAGE_MAIN, PAGE_SELL, PAGE_WALK, PAGE_SAFE, PAGE_CHAR, PAGE_ALERT }) do
         addPage(n)
     end
     local function setPage(name)
         currentPage = pages[name]
+        currentCard = nil
     end
     setPage(PAGE_MAIN)
 
     ---- ปรับขนาดหน้าต่าง: ลากมุมขวาล่าง
     local ResizeHandle = Instance.new("TextButton")
-    ResizeHandle.Size = UDim2.fromOffset(16, 16)
-    ResizeHandle.Position = UDim2.new(1, -16, 1, -16)
+    ResizeHandle.Size = UDim2.fromOffset(18, 18)
+    ResizeHandle.Position = UDim2.new(1, -18, 1, -18)
     ResizeHandle.BackgroundTransparency = 1
+    ResizeHandle.AutoButtonColor = false
     ResizeHandle.Text = "◢"
-    ResizeHandle.TextColor3 = Color3.fromRGB(150, 150, 150)
+    ResizeHandle.TextColor3 = THEME.sub
     ResizeHandle.TextSize = 14
-    ResizeHandle.ZIndex = 5
+    ResizeHandle.ZIndex = 6
     ResizeHandle.Parent = MainFrame
     do
         local resizing, startMouse, startSize
@@ -822,56 +983,123 @@ do
         return order
     end
 
-    -- หัวข้อย่อยในหน้า
+    -- การ์ด: กล่องมุมโค้งมีหัวข้อ ของที่สร้างต่อจากนี้จะอยู่ในการ์ดนี้ จนกว่าจะเปิดการ์ด/หน้าใหม่
     local function makeHeader(text)
-        local h = Instance.new("TextLabel")
-        h.Size = UDim2.new(1, -6, 0, 18)
-        h.BackgroundTransparency = 1
-        h.Text = text
-        h.TextColor3 = Color3.fromRGB(255, 200, 90)
-        h.Font = Enum.Font.SourceSansBold
-        h.TextSize = 15
-        h.TextXAlignment = Enum.TextXAlignment.Left
-        h.LayoutOrder = nextOrder()
-        h.Parent = currentPage
-        return h
+        local card = Instance.new("Frame")
+        card.Size = UDim2.new(1, 0, 0, 0)
+        card.AutomaticSize = Enum.AutomaticSize.Y
+        card.BackgroundColor3 = THEME.card
+        card.BorderSizePixel = 0
+        card.LayoutOrder = nextOrder()
+        card.ZIndex = 2
+        card.Parent = currentPage
+        corner(card, 9)
+        stroke(card)
+        local pad = Instance.new("UIPadding")
+        pad.PaddingTop = UDim.new(0, 10)
+        pad.PaddingBottom = UDim.new(0, 12)
+        pad.PaddingLeft = UDim.new(0, 12)
+        pad.PaddingRight = UDim.new(0, 12)
+        pad.Parent = card
+        local l = Instance.new("UIListLayout")
+        l.Padding = UDim.new(0, 6)
+        l.SortOrder = Enum.SortOrder.LayoutOrder
+        l.Parent = card
+
+        local title = Instance.new("TextLabel")
+        title.Size = UDim2.new(1, 0, 0, 22)
+        title.BackgroundTransparency = 1
+        title.RichText = true
+        title.Text = ('<font color="#FF8C32">●</font>  %s'):format(text)
+        title.TextColor3 = THEME.text
+        title.Font = FONT_BOLD
+        title.TextSize = 15
+        title.TextXAlignment = Enum.TextXAlignment.Left
+        title.LayoutOrder = 0
+        title.ZIndex = 2
+        title.Parent = card
+
+        local line = Instance.new("Frame")
+        line.Size = UDim2.new(1, 0, 0, 1)
+        line.BackgroundColor3 = THEME.stroke
+        line.BorderSizePixel = 0
+        line.LayoutOrder = 1
+        line.ZIndex = 2
+        line.Parent = card
+
+        currentCard = card
+        return card
     end
 
     local function makeLabel(text, height, color)
         local l = Instance.new("TextLabel")
-        l.Size = UDim2.new(1, -6, 0, height or 18)
+        l.Size = UDim2.new(1, 0, 0, height or 18)
         l.BackgroundTransparency = 1
         l.Text = text
-        l.TextColor3 = color or Color3.fromRGB(220, 220, 220)
-        l.Font = Enum.Font.SourceSans
-        l.TextSize = 14
+        l.TextColor3 = color or THEME.sub
+        l.Font = FONT
+        l.TextSize = 13
+        l.TextWrapped = true
         l.TextXAlignment = Enum.TextXAlignment.Left
         l.TextYAlignment = Enum.TextYAlignment.Top
         l.LayoutOrder = nextOrder()
-        l.Parent = currentPage
+        l.ZIndex = 2
+        l.Parent = currentCard or currentPage
         return l
     end
 
     local function makeRow()
         local row = Instance.new("Frame")
-        row.Size = UDim2.new(1, -6, 0, 24)
+        row.Size = UDim2.new(1, 0, 0, 30)
         row.BackgroundTransparency = 1
         row.LayoutOrder = nextOrder()
-        row.Parent = currentPage
+        row.ZIndex = 2
+        row.Parent = currentCard or currentPage
         return row
     end
 
-    -- ปุ่มเปิด/ปิด: เขียว = เปิด, เทา = ปิด
+    -- ตัวเลือกเปิด/ปิด: ข้อความซ้าย + ช่องติ๊กขวา (ส้ม = เปิด)
     local function makeToggle(parent, text, get, set, width)
         local b = Instance.new("TextButton")
         b.Size = width or UDim2.new(1, 0, 1, 0)
-        b.Font = Enum.Font.SourceSansBold
+        b.BackgroundTransparency = 1
+        b.AutoButtonColor = false
+        b.Font = FONT
         b.TextSize = 14
-        b.TextColor3 = Color3.fromRGB(255, 255, 255)
+        b.TextColor3 = THEME.text
+        b.Text = text
+        b.TextXAlignment = Enum.TextXAlignment.Left
+        b.ZIndex = 2
+        b:SetAttribute("AF_Toggle", true)
         b.Parent = parent
+        local pad = Instance.new("UIPadding")
+        pad.PaddingRight = UDim.new(0, 30)
+        pad.Parent = b
+
+        local box = Instance.new("Frame")
+        box.Size = UDim2.fromOffset(20, 20)
+        box.AnchorPoint = Vector2.new(1, 0.5)
+        box.Position = UDim2.new(1, 26, 0.5, 0)
+        box.BorderSizePixel = 0
+        box.ZIndex = 3
+        box.Parent = b
+        corner(box, 5)
+        local boxStroke = stroke(box)
+        local check = Instance.new("TextLabel")
+        check.Size = UDim2.fromScale(1, 1)
+        check.BackgroundTransparency = 1
+        check.Text = "✓"
+        check.TextColor3 = Color3.fromRGB(20, 20, 20)
+        check.Font = FONT_BOLD
+        check.TextSize = 15
+        check.ZIndex = 4
+        check.Parent = box
+
         local function refresh()
-            b.Text = text .. ": " .. (get() and "เปิด" or "ปิด")
-            b.BackgroundColor3 = get() and Color3.fromRGB(40, 150, 60) or Color3.fromRGB(70, 70, 70)
+            local on = get()
+            box.BackgroundColor3 = on and THEME.accent or THEME.off
+            boxStroke.Color = on and THEME.accent or THEME.stroke
+            check.Visible = on
         end
         b.MouseButton1Click:Connect(function()
             set(not get())
@@ -886,10 +1114,13 @@ do
         local box = Instance.new("TextBox")
         box.Size = size
         box.Position = position or UDim2.new()
-        box.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
-        box.TextColor3 = Color3.fromRGB(255, 255, 255)
-        box.Font = Enum.Font.SourceSans
+        box.BackgroundColor3 = THEME.input
+        box.TextColor3 = THEME.text
+        box.Font = FONT
         box.TextSize = 14
+        box.ZIndex = 2
+        corner(box, 6)
+        stroke(box)
         box.Text = tostring(value)
         box.ClearTextOnFocus = false
         box.Parent = parent
@@ -909,9 +1140,10 @@ do
         l.Size = width
         l.BackgroundTransparency = 1
         l.Text = text
-        l.TextColor3 = Color3.fromRGB(220, 220, 220)
-        l.Font = Enum.Font.SourceSans
+        l.TextColor3 = THEME.text
+        l.Font = FONT
         l.TextSize = 14
+        l.ZIndex = 2
         l.TextXAlignment = Enum.TextXAlignment.Left
         l.Parent = row
         return l
@@ -976,7 +1208,7 @@ do
 
     -- ===== หน้า ขายปลา =====
     setPage(PAGE_SELL)
-    makeHeader("ขายอัตโนมัติ")
+    local sellCard = makeHeader("ขายอัตโนมัติ")
     -- 7) ขายปลาอัตโนมัติ
     local sellRow = makeRow()
     makeToggle(sellRow, "ขายเมื่อครบ",
@@ -1027,17 +1259,6 @@ do
     end)
     refreshTravel()
 
-    local routeHeader = makeHeader("เส้นทาง (บันทึกจากจุดตกปลา -> ร้าน)")
-    -- บันทึกเส้นทางเดิน: กดเริ่มที่จุดตกปลา เดินไปร้านเอง แล้วกดหยุดที่ร้าน
-    local routeRow = makeRow()
-    local routeButton = Instance.new("TextButton")
-    routeButton.Size = UDim2.new(1, 0, 1, 0)
-    routeButton.BackgroundColor3 = Color3.fromRGB(60, 60, 90)
-    routeButton.TextColor3 = Color3.fromRGB(255, 255, 255)
-    routeButton.Font = Enum.Font.SourceSansBold
-    routeButton.TextSize = 14
-    routeButton.Parent = routeRow
-
     -- ขายเสร็จแล้วกลับยังไง: กดสลับ เดิน -> วาร์ป -> ไม่กลับ
     local RETURN_LABELS = { walk = "เดินกลับ", warp = "วาร์ปกลับ", stay = "ไม่กลับ (หยุดตกที่ร้าน)" }
     local RETURN_NEXT = { walk = "warp", warp = "stay", stay = "walk" }
@@ -1063,9 +1284,20 @@ do
     end)
     refreshReturn()
 
-    -- จัดลำดับ: หัวข้อเส้นทาง + ปุ่มบันทึก ให้อยู่ใต้ปุ่ม "ขายเสร็จแล้ว"
-    routeHeader.LayoutOrder = nextOrder()
-    routeRow.LayoutOrder = nextOrder()
+    makeToggle(makeRow(), "เดินติดให้วาร์ปแทน",
+        function() return settings.walkFallbackWarp end,
+        function(v) settings.walkFallbackWarp = v end)
+
+    makeHeader("เส้นทาง (บันทึกจากจุดตกปลา → ร้าน)")
+    -- บันทึกเส้นทางเดิน: กดเริ่มที่จุดตกปลา เดินไปร้านเอง แล้วกดหยุดที่ร้าน
+    local routeRow = makeRow()
+    local routeButton = Instance.new("TextButton")
+    routeButton.Size = UDim2.new(1, 0, 1, 0)
+    routeButton.BackgroundColor3 = Color3.fromRGB(60, 60, 90)
+    routeButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+    routeButton.Font = Enum.Font.SourceSansBold
+    routeButton.TextSize = 14
+    routeButton.Parent = routeRow
 
     -- ล้างเส้นทาง (ย้ายไปตกจุดใหม่)
     local resetRouteRow = makeRow()
@@ -1109,11 +1341,8 @@ do
             drawRoute()
         end)
 
-    makeToggle(makeRow(), "เดินติดให้วาร์ปแทน",
-        function() return settings.walkFallbackWarp end,
-        function(v) settings.walkFallbackWarp = v end)
-
     setPage(PAGE_SELL)
+    currentCard = sellCard
     local bagLabel = makeLabel("", 18, Color3.fromRGB(255, 220, 120))
 
     setPage(PAGE_SAFE)
@@ -1159,6 +1388,18 @@ do
     makeLabel(("%s = เปิด/ปิดตกปลา   %s = ซ่อนหน้าต่าง"):format(TOGGLE_KEY.Name, HIDE_KEY.Name),
         16, Color3.fromRGB(160, 160, 160))
 
+    -- ปุ่มกดทั่วไปในการ์ด (ไม่ใช่ตัวเลือกติ๊ก): มุมโค้ง + ฟอนต์ธีม
+    for _, d in ipairs(PageArea:GetDescendants()) do
+        if d:IsA("TextButton") and not d:GetAttribute("AF_Toggle") then
+            d.Font = FONT_BOLD
+            d.TextSize = 13
+            d.ZIndex = 2
+            if not d:FindFirstChildOfClass("UICorner") then
+                corner(d, 7)
+            end
+        end
+    end
+
     ---------------------------------------------------------------- 5) ย่อหน้าต่าง
     local minimized = false
     local MinButton = Instance.new("TextButton")
@@ -1172,22 +1413,26 @@ do
     MinButton.Parent = TitleBar
 
     local function refreshTitle()
-        if minimized then
-            TitleBar.Text = "Auto Fish " .. (isAutoFishing and "(ON)" or "(OFF)")
-        else
-            TitleBar.Text = "Auto Fish"
-        end
+        TitleText.Text = minimized and ("ตกปลาอัตโนมัติ " .. (isAutoFishing and "(เปิด)" or "(ปิด)")) or "ตกปลาอัตโนมัติ"
     end
 
-    MinButton.Size = UDim2.fromOffset(22, 22)
-    MinButton.Position = UDim2.new(1, -22, 0, 0)
+    MinButton.Size = UDim2.fromOffset(28, 28)
+    MinButton.Position = UDim2.new(1, -40, 0, 9)
+    MinButton.BackgroundColor3 = THEME.off
+    MinButton.TextColor3 = THEME.text
+    MinButton.Font = FONT_BOLD
+    MinButton.ZIndex = 4
+    corner(MinButton, 14)
     MinButton.MouseButton1Click:Connect(function()
         minimized = not minimized
-        for _, gui in ipairs({ ToggleButton, StatusLabel, Sidebar, PageArea, ResizeHandle }) do
-            gui.Visible = not minimized
+        -- ซ่อน/แสดงทุกอย่างยกเว้นแถบหัว
+        for _, gui in ipairs(MainFrame:GetChildren()) do
+            if gui:IsA("GuiObject") and gui ~= TitleBar then
+                gui.Visible = not minimized
+            end
         end
-        -- ย่อเหลือแถบหัว (กว้าง 220) / ขยายกลับขนาดเดิมที่ปรับไว้
-        MainFrame.Size = minimized and UDim2.fromOffset(220, 22) or UDim2.fromOffset(windowSize.X, windowSize.Y)
+        -- ย่อเหลือแถบหัว / ขยายกลับขนาดเดิมที่ปรับไว้
+        MainFrame.Size = minimized and UDim2.fromOffset(280, HEADER_HEIGHT) or UDim2.fromOffset(windowSize.X, windowSize.Y)
         MinButton.Text = minimized and "+" or "–"
         refreshTitle()
     end)
