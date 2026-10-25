@@ -19,8 +19,6 @@ end
 local settings = {
     autoDash = false,
     autoTrain = false,   -- ถือของช่อง 1 ไว้ตลอด (ถือแล้วชาร์จพลังเอง ไม่ต้องคลิก)
-    clickX2 = true,      -- เจอปุ่ม x2 เด้งบนจอ กดให้ (ตอนเปิดฝึกพลังหรือชาร์จอัตโนมัติ)
-    clickPopups = true,  -- ของที่เด้งให้กดตอนบิน (ทองคำ เพชร ฯลฯ) กดให้ทุกอัน
     autoPlace = false,
     antiAfk = false,
     autoRebirth = false,
@@ -783,7 +781,8 @@ end
 -- ปุ่ม x2: เช็คทุก 0.3 วิ ตอนเปิดฝึกพลังหรือชาร์จอัตโนมัติ
 task.spawn(function()
     while alive() do
-        if settings.clickX2 and (settings.autoTrain or settings.autoDash) then
+        -- รวมอยู่กับ "ถือของช่อง 1 ชาร์จพลัง": เปิดอันนั้น = กด x2 ให้ด้วย
+        if settings.autoTrain then
             local button = findX2Button()
             if button then
                 clickGui(button)
@@ -807,7 +806,8 @@ end)
 
 task.spawn(function()
     while alive() do
-        if settings.clickPopups and (settings.autoDash or settings.autoTrain) then
+        -- รวมอยู่กับ "ชาร์จและบินอัตโนมัติ": เปิดอันนั้น = กดของเด้งตอนบินให้ด้วย
+        if settings.autoDash then
             for button, at in pairs(newButtons) do
                 if not button.Parent or os.clock() - at > 20 then
                     newButtons[button] = nil
@@ -947,25 +947,19 @@ local Tabs = {
 
 -- หลัก
 local trainSection = Tabs.main:AddSection("ฝึกพลัง (ของช่อง 1)")
--- (ตัวเลือกกดของเด้งตอนบิน อยู่ในกลุ่ม ชาร์จ + บิน)
 trainSection:AddToggle("DFTrain", {
     Title = "ถือของช่อง 1 ชาร์จพลังอัตโนมัติ",
-    Description = "ถือไว้ตลอด หลุดมือหยิบให้ใหม่ (พักเองตอนบิน/วางตัวละคร)",
+    Description = "ถือไว้ตลอด หลุดมือหยิบให้ใหม่ + กดวงกลม x2 ให้ทันที (พักเองตอนบิน/วางตัวละคร)",
     Default = false,
 }):OnChanged(function(v) settings.autoTrain = v end)
-trainSection:AddToggle("DFX2", {
-    Title = "กดปุ่ม x2 ให้อัตโนมัติ",
-    Description = "วงกลม x2 เด้งกลางจอตอนฝึก/ชาร์จ จะกดให้ทันที",
-    Default = settings.clickX2,
-}):OnChanged(function(v) settings.clickX2 = v end)
 
 local dashSection = Tabs.main:AddSection("ชาร์จ + บิน")
-dashSection:AddToggle("DFPopups", {
-    Title = "กดของที่เด้งตอนบินให้ทุกอัน",
-    Description = "ทองคำ เพชร ฯลฯ ที่โผล่ในวงกลมบนจอ (ทำงานตอนเปิดชาร์จ+บิน หรือถือของช่อง 1)",
-    Default = settings.clickPopups,
-}):OnChanged(function(v) settings.clickPopups = v end)
-dashSection:AddToggle("DFDash", { Title = "ชาร์จและบินอัตโนมัติ", Default = false })
+
+dashSection:AddToggle("DFDash", {
+    Title = "ชาร์จและบินอัตโนมัติ",
+    Description = "ชาร์จ -> บิน -> กดของที่เด้งตอนบินให้ทุกอัน (ทองคำ เพชร ฯลฯ) -> กลับมาใหม่",
+    Default = false,
+})
     :OnChanged(function(v) settings.autoDash = v end)
 local statusPara = dashSection:AddParagraph({ Title = "สถานะ", Content = status })
 dashSection:AddInput("DFChargeTimeout", {
