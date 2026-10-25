@@ -919,13 +919,36 @@ local function pressButton(button)
     return false
 end
 
+-- หน้าต่างร้าน: มีหัวข้อ "ร้านออร่า" หรือมีการ์ด "พลัง/วินาที" หลายใบ
 local function findAuraShop()
+    local count = {}
     for _, d in ipairs(LocalPlayer.PlayerGui:GetDescendants()) do
-        if d:IsA("TextLabel") and d.Text:find("ร้านออร่า", 1, true) then
-            return d:FindFirstAncestorWhichIsA("ScreenGui")
+        if d:IsA("TextLabel") then
+            local sg = d:FindFirstAncestorWhichIsA("ScreenGui")
+            if sg and d.Text:find("ร้านออร่า", 1, true) then
+                return sg
+            elseif sg and d.Text:find("พลัง/วินาที", 1, true) then
+                count[sg] = (count[sg] or 0) + 1
+                if count[sg] >= 2 then return sg end
+            end
         end
     end
 end
+
+-- ร้านเปิดด้วยการเดินไปเหยียบพื้นแดงหน้าร้าน (หน้าต่างถูกสร้างตอนเปิด ปิดแล้วหายไป)
+-- จำจุดที่ยืนตอนร้านเปิดครั้งแรกไว้ ครั้งต่อไปวาร์ปไปเหยียบเองได้
+task.spawn(function()
+    while alive() do
+        if settings.autoAura and not env.DashAuraPad then
+            local shop = findAuraShop()
+            local hrp = getRoot()
+            if shop and isShown(shop:FindFirstChildWhichIsA("GuiObject", true) or shop) and hrp then
+                env.DashAuraPad = hrp.CFrame
+            end
+        end
+        task.wait(1)
+    end
+end)
 
 -- การ์ดออร่า: { power, buy = ปุ่ม, price, equip = ปุ่ม, equipped = bool }
 local function readAuraCards()
@@ -965,10 +988,36 @@ local function readAuraCards()
 end
 
 local auraInfo = "-"
+local auraCheckInner
 local function auraCheck()
+    if findAuraShop() then
+        return auraCheckInner()
+    end
+    if not env.DashAuraPad then
+        auraInfo = "ยังไม่รู้ว่าร้านอยู่ไหน: เดินไปเหยียบพื้นแดงหน้าร้านออร่าเองหนึ่งครั้ง"
+        return
+    end
+    -- วาร์ปไปเหยียบพื้นหน้าร้าน -> รอหน้าต่างเปิด -> ซื้อ/ใส่ -> กลับที่เดิม
+    local hrp = getRoot()
+    if not hrp then return end
+    busy += 1
+    local back = hrp.CFrame
+    hrp.CFrame = env.DashAuraPad
+    if waitFor(4, function() return findAuraShop() ~= nil end) then
+        task.wait(0.5)
+        pcall(auraCheckInner)
+    else
+        auraInfo = "เหยียบพื้นหน้าร้านแล้วแต่ร้านไม่เปิด"
+    end
+    hrp = getRoot()
+    if hrp then hrp.CFrame = back end
+    busy -= 1
+end
+
+auraCheckInner = function()
     local cards = readAuraCards()
-    if not cards then
-        auraInfo = "หาร้านออร่าไม่เจอ: เปิดร้านออร่าสักครั้ง"
+    if not cards or #cards == 0 then
+        auraInfo = "เปิดร้านแล้วแต่อ่านการ์ดออร่าไม่ได้"
         return
     end
     local equippedPower = 0
@@ -1012,7 +1061,9 @@ task.spawn(function()
         if settings.autoAura then
             local r = rebirthNow()
             -- รีเบิร์ธเปลี่ยน = อาจปลดล็อกออร่าใหม่ เช็คทันที
-            if r ~= lastRebirth or os.clock() - lastCheck > 10 then
+            -- ร้านเปิดอยู่: เช็คทุก 10 วิ / ต้องวาร์ปไปเปิด: เช็คทุก 60 วิ (ไม่ให้วาร์ปบ่อย)
+            local every = findAuraShop() and 10 or 60
+            if r ~= lastRebirth or os.clock() - lastCheck > every then
                 lastRebirth, lastCheck = r, os.clock()
                 pcall(auraCheck)
             end
@@ -1119,7 +1170,7 @@ local Tabs = {
 local auraSection = Tabs.main:AddSection("ร้านออร่า")
 auraSection:AddToggle("DFAura", {
     Title = "ซื้อ + ใส่ออร่าที่ดีที่สุดอัตโนมัติ",
-    Description = "เช็คทันทีที่รีเบิร์ธเปลี่ยน และทุก 10 วิ ซื้อด้วยเงินเท่านั้น (ไม่แตะปุ่ม Robux)",
+    Description = "เช็คทันทีที่รีเบิร์ธเปลี่ยน และทุก 60 วิ (วาร์ปไปเหยียบหน้าร้านให้เอง) ซื้อด้วยเงินเท่านั้น ไม่แตะปุ่ม Robux",
     Default = false,
 }):OnChanged(function(v) settings.autoAura = v end)
 local auraPara = auraSection:AddParagraph({ Title = "ออร่า", Content = "-" })
