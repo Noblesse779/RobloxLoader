@@ -19,6 +19,7 @@ end
 local settings = {
     autoDash = false,
     autoTrain = false,   -- ถือของช่อง 1 ไว้ตลอด (ถือแล้วชาร์จพลังเอง ไม่ต้องคลิก)
+    autoAura = false,    -- ซื้อ + ใส่ออร่าที่ดีที่สุดที่ซื้อได้ (เช็คตอนรีเบิร์ธเปลี่ยน และทุก 10 วิ)
     autoPlace = false,
     antiAfk = false,
     autoRebirth = false,
@@ -879,6 +880,147 @@ task.spawn(function()
     end
 end)
 
+---------------------------------------------------------------- ร้านออร่า
+-- ปุ่มซื้อในร้านเป็นปุ่ม GUI (ดัก remote ไม่เจอ) เลยกดปุ่มในหน้าต่างร้านให้แทน
+-- การ์ดแต่ละใบ: "+100 พลัง/วินาที", ปุ่ม "$50K" (ซื้อด้วยเงิน), "สวมใส่" / "สวมใส่แล้ว",
+-- หรือ "การเกิดใหม่ 3" (ต้องรีเบิร์ธถึงก่อน) ปุ่ม Robux ไม่แตะ
+local function leaderValue(name)
+    local ls = LocalPlayer:FindFirstChild("leaderstats")
+    local v = ls and ls:FindFirstChild(name)
+    return v and tonumber(v.Value)
+end
+
+local function rebirthNow()
+    local v = LocalPlayer:FindFirstChild("RebirthCount")
+    return v and tonumber(v.Value)
+end
+
+local function pressButton(button)
+    local fired = false
+    for _, signal in ipairs({ "MouseButton1Click", "Activated", "MouseButton1Down" }) do
+        local ok = pcall(function()
+            local sig = button[signal]
+            if typeof(firesignal) == "function" then
+                firesignal(sig)
+                fired = true
+            elseif typeof(getconnections) == "function" then
+                for _, c in ipairs(getconnections(sig)) do
+                    c:Fire()
+                    fired = true
+                end
+            end
+        end)
+        if ok and fired then return true end
+    end
+    if isShown(button) then
+        clickGui(button)
+        return true
+    end
+    return false
+end
+
+local function findAuraShop()
+    for _, d in ipairs(LocalPlayer.PlayerGui:GetDescendants()) do
+        if d:IsA("TextLabel") and d.Text:find("ร้านออร่า", 1, true) then
+            return d:FindFirstAncestorWhichIsA("ScreenGui")
+        end
+    end
+end
+
+-- การ์ดออร่า: { power, buy = ปุ่ม, price, equip = ปุ่ม, equipped = bool }
+local function readAuraCards()
+    local shop = findAuraShop()
+    if not shop then return nil end
+    local cards, seen = {}, {}
+    for _, label in ipairs(shop:GetDescendants()) do
+        if label:IsA("TextLabel") and label.Text:find("พลัง/วินาที", 1, true) and not seen[label.Parent] then
+            seen[label.Parent] = true
+            -- ไล่ขึ้นไปหากรอบการ์ดที่มีปุ่มอยู่ข้างใน
+            local card = label.Parent
+            while card and card ~= shop and not card:FindFirstChildWhichIsA("GuiButton", true) do
+                card = card.Parent
+            end
+            if card and card ~= shop then
+                local info = { power = parseNumber(label.Text:gsub("<[^>]->", ""):match("([%d%.,]+%s*%a*)")) or 0 }
+                for _, d in ipairs(card:GetDescendants()) do
+                    if d:IsA("TextLabel") or d:IsA("TextButton") then
+                        local t = d.Text:gsub("<[^>]->", "")
+                        local button = d:IsA("GuiButton") and d or d:FindFirstAncestorWhichIsA("GuiButton")
+                        if t:find("สวมใส่แล้ว", 1, true) then
+                            info.equipped = true
+                        elseif t:find("สวมใส่", 1, true) and button then
+                            info.equip = button
+                        elseif t:match("^%s*%$") and button then
+                            info.buy = button
+                            info.price = parseNumber(t:match("%$%s*([%d%.,]+%s*%a*)"))
+                        end
+                    end
+                end
+                table.insert(cards, info)
+            end
+        end
+    end
+    table.sort(cards, function(a, b) return a.power > b.power end)
+    return cards
+end
+
+local auraInfo = "-"
+local function auraCheck()
+    local cards = readAuraCards()
+    if not cards then
+        auraInfo = "หาร้านออร่าไม่เจอ: เปิดร้านออร่าสักครั้ง"
+        return
+    end
+    local equippedPower = 0
+    for _, c in ipairs(cards) do
+        if c.equipped then equippedPower = math.max(equippedPower, c.power) end
+    end
+    local money = leaderValue("Money") or 0
+    for _, c in ipairs(cards) do
+        if c.power <= equippedPower then
+            auraInfo = ("ใส่ออร่าดีสุดแล้ว (+%s พลัง/วิ)  •  รีเบิร์ธ %s"):format(shortNumber(equippedPower),
+                tostring(rebirthNow() or "?"))
+            return
+        end
+        if c.equip then
+            pressButton(c.equip)
+            auraInfo = ("ใส่ออร่า +%s พลัง/วิ"):format(shortNumber(c.power))
+            return
+        end
+        if c.buy and c.price and money >= c.price then
+            pressButton(c.buy)
+            task.wait(1)
+            -- ซื้อแล้วกดใส่ให้ด้วย
+            local after = readAuraCards() or {}
+            for _, a in ipairs(after) do
+                if a.power == c.power and a.equip then
+                    pressButton(a.equip)
+                end
+            end
+            auraInfo = ("ซื้อออร่า +%s พลัง/วิ ($%s)"):format(shortNumber(c.power), shortNumber(c.price))
+            return
+        end
+        -- ตัวนี้ยังซื้อไม่ได้ (เงินไม่พอ / ต้องรีเบิร์ธก่อน / Robux) ลองตัวที่ถูกกว่าถัดไป
+    end
+    auraInfo = "ยังไม่มีออร่าที่ดีกว่าที่ซื้อได้"
+end
+
+task.spawn(function()
+    local lastRebirth = rebirthNow()
+    local lastCheck = 0
+    while alive() do
+        if settings.autoAura then
+            local r = rebirthNow()
+            -- รีเบิร์ธเปลี่ยน = อาจปลดล็อกออร่าใหม่ เช็คทันที
+            if r ~= lastRebirth or os.clock() - lastCheck > 10 then
+                lastRebirth, lastCheck = r, os.clock()
+                pcall(auraCheck)
+            end
+        end
+        task.wait(1)
+    end
+end)
+
 ---------------------------------------------------------------- ลูปหลัก
 local lastPlace = 0
 task.spawn(function()
@@ -974,6 +1116,14 @@ local Tabs = {
 }
 
 -- หลัก
+local auraSection = Tabs.main:AddSection("ร้านออร่า")
+auraSection:AddToggle("DFAura", {
+    Title = "ซื้อ + ใส่ออร่าที่ดีที่สุดอัตโนมัติ",
+    Description = "เช็คทันทีที่รีเบิร์ธเปลี่ยน และทุก 10 วิ ซื้อด้วยเงินเท่านั้น (ไม่แตะปุ่ม Robux)",
+    Default = false,
+}):OnChanged(function(v) settings.autoAura = v end)
+local auraPara = auraSection:AddParagraph({ Title = "ออร่า", Content = "-" })
+
 local trainSection = Tabs.main:AddSection("ฝึกพลัง (ของช่อง 1)")
 trainSection:AddToggle("DFTrain", {
     Title = "ถือของช่อง 1 ชาร์จพลังอัตโนมัติ",
@@ -1143,6 +1293,7 @@ task.spawn(function()
                 :format(status, dashCount, placedCount, rebirthCount, x2Count, popupCount, rebirthInfo))
         end)
         pcall(function() placePara:SetDesc(placeInfo) end)
+        pcall(function() auraPara:SetDesc(auraInfo) end)
         local lines = {}
         for i, t in ipairs(getCharacterTools()) do
             if i > 8 then break end
