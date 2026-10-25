@@ -23,6 +23,8 @@ end
 local CAST_TARGET = 0.9   -- ใช้เมื่อหา PerfectZone ไม่เจอ: ชาร์จหลอดถึง 90%
 local PERFECT_AIM = 0.5   -- ปล่อยเมื่อปลายแถบถึงตำแหน่งไหนของ PerfectZone (0 = ขอบซ้าย, 0.5 = กลาง)
 local CAST_TIMEOUT = 5    -- กดค้างนานสุดกี่วินาที กันลูปค้าง
+local POWER_APPEAR_TIMEOUT = 1.5 -- กดแล้วรอหลอด Power ขึ้นกี่วินาที
+local BITE_TIMEOUT = 30   -- โยนแล้วรอปลากินนานสุดกี่วินาที ก่อนโยนใหม่
 local REEL_HOLD = false   -- false = คลิกทีละครั้ง, true = กดค้างตอน Zone ต้องเลื่อนหาปลา (ลองสลับถ้าแบบแรกไม่ได้ผล)
 local REEL_INVERT = false -- true ถ้าคลิกแล้ว Zone เลื่อนไปทางตรงข้ามกับที่ควร
 
@@ -136,64 +138,108 @@ local function castReady(track)
     return fill.Size.X.Scale >= CAST_TARGET
 end
 
+-- เช็คว่า UI แสดงบนจอจริงไหม (ไล่ดู Visible ทุกชั้นขึ้นไปจนถึง ScreenGui.Enabled)
+local function isShown(gui)
+    while gui do
+        if gui:IsA("ScreenGui") then
+            return gui.Enabled
+        elseif gui:IsA("GuiObject") and not gui.Visible then
+            return false
+        end
+        gui = gui.Parent
+    end
+    return false
+end
+
+local function isReeling()
+    local catchUI = getCatchUI()
+    return catchUI ~= nil and isShown(catchUI)
+end
+
+-- รอจนกว่าเงื่อนไขจะเป็นจริง หรือหมดเวลา / ถูกปิด
+local function waitFor(myId, timeout, check)
+    local elapsed = 0
+    while isActive(myId) and elapsed < timeout do
+        if check() then return true end
+        elapsed += task.wait()
+    end
+    return false
+end
+
+-- โยนเบ็ด: กดค้างเอง -> รอหลอด Power ขึ้น -> ปล่อยตอนเข้า PerfectZone
+local function cast(myId)
+    setMouse(true)
+
+    local track
+    local appeared = waitFor(myId, POWER_APPEAR_TIMEOUT, function()
+        local castUI = getCastUI()
+        track = castUI and castUI:FindFirstChild("Track")
+        return track ~= nil and track:FindFirstChild("Fill") ~= nil and isShown(castUI)
+    end)
+
+    if appeared then
+        waitFor(myId, CAST_TIMEOUT, function()
+            return not isShown(track) or castReady(track)
+        end)
+    end
+    setMouse(false) -- ปล่อยเสมอ ไม่ให้เมาส์ค้าง
+    return appeared
+end
+
+-- ดึงปลา: ประคอง Zone ให้อยู่ตรงปลา
+local function reelStep()
+    local water = getCatchUI():FindFirstChild("Water")
+    local fish = water and water:FindFirstChild("Fish")
+    local zone = water and water:FindFirstChild("Zone")
+    if not (fish and zone) then return end
+
+    local fishPos = center(fish)
+    local zonePos = center(zone)
+
+    -- แนวตั้ง: คลิกแล้ว Zone ขึ้น -> คลิกเมื่อ Zone อยู่ต่ำกว่าปลา (Y มากกว่า)
+    -- แนวนอน: คลิกแล้ว Zone ไปขวา -> คลิกเมื่อ Zone อยู่ซ้ายของปลา
+    local needPush
+    if water.AbsoluteSize.Y > water.AbsoluteSize.X then
+        needPush = zonePos.Y > fishPos.Y
+    else
+        needPush = zonePos.X < fishPos.X
+    end
+    if REEL_INVERT then
+        needPush = not needPush
+    end
+
+    if REEL_HOLD then
+        if needPush ~= mouseHeld then
+            setMouse(needPush)
+        end
+    elseif needPush then
+        clickMouse()
+    end
+end
+
 -- ลูปการทำงานหลัก
 local function autoFishLoop(myId)
     while isActive(myId) do
-        local castUI = getCastUI()
-        local catchUI = getCatchUI()
-
-        local track = castUI and castUI:FindFirstChild("Track")
-        local water = catchUI and catchUI:FindFirstChild("Water")
-        local reeling = catchUI ~= nil and catchUI.Visible
-
-        -- เงื่อนไขที่ 1: ชาร์จหลอดแล้วปล่อยตอนปลายแถบเข้า PerfectZone
-        -- (ไม่ชาร์จถ้ากำลังดึงปลาอยู่)
-        if not reeling and track and castUI.Visible and track:FindFirstChild("Fill") then
-            setMouse(true) -- กดค้าง
-            local elapsed = 0
-            repeat
-                elapsed += task.wait() -- เช็คทุกเฟรม ปล่อยได้แม่นกว่า
-            until not isActive(myId)
-                or not castUI.Visible
-                or castReady(track)
-                or elapsed > CAST_TIMEOUT
-            setMouse(false) -- ปล่อยเสมอ ไม่ให้เมาส์ค้าง
-            if isActive(myId) then
-                task.wait(2) -- รอเหยื่อตกน้ำ
+        if isReeling() then
+            reelStep()
+            task.wait(0.05)
+        else
+            if mouseHeld then
+                setMouse(false) -- จบช่วงดึงปลาแล้ว ปล่อยเมาส์
+                task.wait(0.5)
             end
 
-        -- เงื่อนไขที่ 2: ประคอง Zone ให้อยู่ตรงปลา
-        elseif reeling and water
-            and water:FindFirstChild("Fish") and water:FindFirstChild("Zone") then
-            local fishPos = center(water.Fish)
-            local zonePos = center(water.Zone)
-
-            -- ดูว่า Water เป็นแนวตั้งหรือแนวนอน
-            -- แนวตั้ง: คลิกแล้ว Zone ขึ้น -> คลิกเมื่อ Zone อยู่ต่ำกว่าปลา (Y มากกว่า)
-            -- แนวนอน: คลิกแล้ว Zone ไปขวา -> คลิกเมื่อ Zone อยู่ซ้ายของปลา
-            local needPush
-            if water.AbsoluteSize.Y > water.AbsoluteSize.X then
-                needPush = zonePos.Y > fishPos.Y
+            if cast(myId) then
+                -- รอปลากินเบ็ด (หน้าจอ Reel ขึ้น) ระหว่างนี้ห้ามคลิก ไม่งั้นจะดึงเบ็ดกลับ
+                waitFor(myId, BITE_TIMEOUT, isReeling)
             else
-                needPush = zonePos.X < fishPos.X
+                -- กดแล้วหลอด Power ไม่ขึ้น (ยังไม่ได้ถือเบ็ด?) รอแล้วลองใหม่
+                task.wait(1)
             end
-            if REEL_INVERT then
-                needPush = not needPush
-            end
-
-            if REEL_HOLD then
-                if needPush ~= mouseHeld then
-                    setMouse(needPush)
-                end
-            elseif needPush then
-                clickMouse()
-            end
-
-        elseif mouseHeld then
-            setMouse(false) -- จบช่วงดึงปลาแล้ว ปล่อยเมาส์
         end
-
-        task.wait(0.05)
+    end
+    if mouseHeld then
+        setMouse(false)
     end
 end
 
