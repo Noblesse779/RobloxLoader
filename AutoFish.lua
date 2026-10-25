@@ -25,6 +25,7 @@ local PERFECT_AIM = 0.5   -- ปล่อยเมื่อปลายแถบ
 local CAST_TIMEOUT = 5    -- กดค้างนานสุดกี่วินาที กันลูปค้าง
 local POWER_APPEAR_TIMEOUT = 1.5 -- กดแล้วรอหลอด Power ขึ้นกี่วินาที
 local BITE_TIMEOUT = 30   -- โยนแล้วรอปลากินนานสุดกี่วินาที ก่อนโยนใหม่
+local USE_EXECUTOR_MOUSE = true -- false = บังคับใช้ VirtualInputManager แทน mouse1press
 local REEL_HOLD = false   -- false = คลิกทีละครั้ง, true = กดค้างตอน Zone ต้องเลื่อนหาปลา (ลองสลับถ้าแบบแรกไม่ได้ผล)
 local REEL_INVERT = false -- true ถ้าคลิกแล้ว Zone เลื่อนไปทางตรงข้ามกับที่ควร
 
@@ -39,7 +40,7 @@ ScreenGui.ResetOnSpawn = false
 ScreenGui.Parent = CoreGui
 
 local MainFrame = Instance.new("Frame")
-MainFrame.Size = UDim2.new(0, 150, 0, 80)
+MainFrame.Size = UDim2.new(0, 170, 0, 100)
 MainFrame.Position = UDim2.new(0.5, -75, 0.1, 0)
 MainFrame.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
 MainFrame.Active = true
@@ -57,7 +58,7 @@ TitleBar.Active = true
 TitleBar.Parent = MainFrame
 
 local ToggleButton = Instance.new("TextButton")
-ToggleButton.Size = UDim2.new(1, -10, 1, -30)
+ToggleButton.Size = UDim2.new(1, -10, 1, -50)
 ToggleButton.Position = UDim2.new(0, 5, 0, 25)
 ToggleButton.Text = "เริ่มตกปลา (OFF)"
 ToggleButton.BackgroundColor3 = Color3.fromRGB(180, 40, 40)
@@ -65,6 +66,22 @@ ToggleButton.TextColor3 = Color3.fromRGB(255, 255, 255)
 ToggleButton.Font = Enum.Font.SourceSansBold
 ToggleButton.TextSize = 16
 ToggleButton.Parent = MainFrame
+
+-- บรรทัดสถานะ บอกว่าสคริปต์กำลังทำอะไร (ช่วยหาว่าติดตรงไหน)
+local StatusLabel = Instance.new("TextLabel")
+StatusLabel.Size = UDim2.new(1, -10, 0, 20)
+StatusLabel.Position = UDim2.new(0, 5, 1, -22)
+StatusLabel.BackgroundTransparency = 1
+StatusLabel.Text = "สถานะ: ปิดอยู่"
+StatusLabel.TextColor3 = Color3.fromRGB(255, 220, 120)
+StatusLabel.Font = Enum.Font.SourceSans
+StatusLabel.TextSize = 13
+StatusLabel.TextScaled = true
+StatusLabel.Parent = MainFrame
+
+local function setStatus(text)
+    StatusLabel.Text = "สถานะ: " .. text
+end
 
 -- ระบบลาก UI (แทน Draggable ที่ deprecated แล้ว)
 do
@@ -104,9 +121,22 @@ local function screenCenter()
     return size.X / 2, size.Y / 2
 end
 
+-- ใช้ mouse1press/mouse1release ของ executor ถ้ามี (เกมส่วนใหญ่รับ)
+-- ถ้าไม่มีค่อยใช้ VirtualInputManager
+local hasMouse1 = typeof(mouse1press) == "function" and typeof(mouse1release) == "function"
+local hasMoveAbs = typeof(mousemoveabs) == "function"
+
 local function setMouse(down)
     local x, y = screenCenter()
-    VirtualInputManager:SendMouseButtonEvent(x, y, 0, down, game, 0)
+    if USE_EXECUTOR_MOUSE and hasMouse1 then
+        -- ย้ายเมาส์ไปกลางจอก่อน ไม่งั้นจะไปกดโดนปุ่ม ON/OFF ของเราเอง
+        if down and hasMoveAbs then
+            mousemoveabs(x, y)
+        end
+        if down then mouse1press() else mouse1release() end
+    else
+        VirtualInputManager:SendMouseButtonEvent(x, y, 0, down, game, 1)
+    end
     mouseHeld = down
 end
 
@@ -168,6 +198,7 @@ end
 
 -- โยนเบ็ด: กดค้างเอง -> รอหลอด Power ขึ้น -> ปล่อยตอนเข้า PerfectZone
 local function cast(myId)
+    setStatus("กดค้างเพื่อเหวี่ยง...")
     setMouse(true)
 
     local track
@@ -178,6 +209,7 @@ local function cast(myId)
     end)
 
     if appeared then
+        setStatus("ชาร์จ รอเข้า PerfectZone")
         waitFor(myId, CAST_TIMEOUT, function()
             return not isShown(track) or castReady(track)
         end)
@@ -221,6 +253,7 @@ end
 local function autoFishLoop(myId)
     while isActive(myId) do
         if isReeling() then
+            setStatus("กำลังดึงปลา")
             reelStep()
             task.wait(0.05)
         else
@@ -230,10 +263,12 @@ local function autoFishLoop(myId)
             end
 
             if cast(myId) then
+                setStatus("เหวี่ยงแล้ว รอปลากิน")
                 -- รอปลากินเบ็ด (หน้าจอ Reel ขึ้น) ระหว่างนี้ห้ามคลิก ไม่งั้นจะดึงเบ็ดกลับ
                 waitFor(myId, BITE_TIMEOUT, isReeling)
             else
-                -- กดแล้วหลอด Power ไม่ขึ้น (ยังไม่ได้ถือเบ็ด?) รอแล้วลองใหม่
+                -- กดแล้วหลอด Power ไม่ขึ้น (ยังไม่ได้ถือเบ็ด? หรือเกมไม่รับคลิก)
+                setStatus(getCastUI() and "กดแล้ว Power ไม่ขึ้น" or "หา FishingHud.Root.Power ไม่เจอ")
                 task.wait(1)
             end
         end
@@ -249,10 +284,19 @@ local function setEnabled(on)
     if on then
         ToggleButton.Text = "กำลังตกปลา (ON)"
         ToggleButton.BackgroundColor3 = Color3.fromRGB(40, 180, 40)
-        task.spawn(autoFishLoop, runId)
+        local myId = runId
+        task.spawn(function()
+            local ok, err = pcall(autoFishLoop, myId)
+            if not ok then
+                warn("[AutoFish] " .. tostring(err))
+                setStatus("error: " .. tostring(err))
+                if mouseHeld then setMouse(false) end
+            end
+        end)
     else
         ToggleButton.Text = "เริ่มตกปลา (OFF)"
         ToggleButton.BackgroundColor3 = Color3.fromRGB(180, 40, 40)
+        setStatus("ปิดอยู่")
         if mouseHeld then
             setMouse(false)
         end
