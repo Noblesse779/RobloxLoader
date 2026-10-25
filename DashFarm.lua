@@ -426,6 +426,33 @@ local function findUpgradeTargets()
     end
     local plot = getMyPlot()
     if not plot then return nil, "หาฐานของเราไม่เจอ" end
+
+    -- ทางตรง: Plots.Base_<id>.ModelStands(_Floor2...).ModelStandN.Upgrade.ClickDetector
+    local direct = {}
+    for _, group in ipairs(plot:GetChildren()) do
+        if group.Name:match("^ModelStands") then
+            for _, stand in ipairs(group:GetChildren()) do
+                local up = stand:FindFirstChild("Upgrade")
+                local cd = up and up:FindFirstChildWhichIsA("ClickDetector", true)
+                if cd then
+                    local text = guiText(up)
+                    table.insert(direct, {
+                        kind = "click", target = cd,
+                        part = cd.Parent:IsA("BasePart") and cd.Parent or up:FindFirstChildWhichIsA("BasePart", true),
+                        cost = costOf(text), text = text,
+                    })
+                end
+            end
+        end
+    end
+    if #direct > 0 then
+        table.sort(direct, function(x, y) return x.cost < y.cost end)
+        upgradeDebug = ("ป้ายอัพเกรด %d แท่น (ModelStand.Upgrade)"):format(#direct)
+        upgradeCache, upgradeCacheAt = direct, os.clock()
+        return direct
+    end
+
+    -- สำรอง: ค้นรอบฐาน
     local center = plot:GetPivot().Position
     local radius = plot:GetExtentsSize().Magnitude / 2 + 25
     local function near(part)
