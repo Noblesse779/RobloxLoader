@@ -887,7 +887,8 @@ end)
 local function leaderValue(name)
     local ls = LocalPlayer:FindFirstChild("leaderstats")
     local v = ls and ls:FindFirstChild(name)
-    return v and tonumber(v.Value)
+    if not v then return nil end
+    return tonumber(v.Value) or parseNumber(tostring(v.Value):gsub("%$", ""))
 end
 
 local function rebirthNow()
@@ -1062,7 +1063,10 @@ local function auraCheck()
     busy -= 1
 end
 
+-- ผลการเช็ค: changed = ซื้อ/ใส่ไปแล้ว, nextPrice = ราคาออร่าที่ดีกว่าตัวถัดไปที่ซื้อด้วยเงินได้ (แต่เงินยังไม่พอ)
+local auraResult = {}
 auraCheckInner = function()
+    auraResult = {}
     local cards = readAuraCards()
     if not cards or #cards == 0 then
         auraInfo = "เปิดร้านแล้วแต่อ่านการ์ดออร่าไม่ได้"
@@ -1073,50 +1077,80 @@ auraCheckInner = function()
         if c.equipped then equippedPower = math.max(equippedPower, c.power) end
     end
     local money = leaderValue("Money") or 0
+    local nextPrice
     for _, c in ipairs(cards) do
-        if c.power <= equippedPower then
-            auraInfo = ("ใส่ออร่าดีสุดแล้ว (+%s พลัง/วิ)  •  รีเบิร์ธ %s"):format(shortNumber(equippedPower),
-                tostring(rebirthNow() or "?"))
-            return
-        end
+        if c.power <= equippedPower then break end
         if c.equip then
             pressButton(c.equip)
             auraInfo = ("ใส่ออร่า +%s พลัง/วิ"):format(shortNumber(c.power))
+            auraResult.changed = true
             return
         end
-        if c.buy and c.price and money >= c.price then
-            pressButton(c.buy)
-            task.wait(1)
-            -- ซื้อแล้วกดใส่ให้ด้วย
-            local after = readAuraCards() or {}
-            for _, a in ipairs(after) do
-                if a.power == c.power and a.equip then
-                    pressButton(a.equip)
+        if c.buy and c.price then
+            if money >= c.price then
+                pressButton(c.buy)
+                task.wait(1)
+                -- ซื้อแล้วกดใส่ให้ด้วย
+                for _, a in ipairs(readAuraCards() or {}) do
+                    if a.power == c.power and a.equip then
+                        pressButton(a.equip)
+                    end
                 end
+                auraInfo = ("ซื้อออร่า +%s พลัง/วิ ($%s)"):format(shortNumber(c.power), shortNumber(c.price))
+                auraResult.changed = true
+                return
             end
-            auraInfo = ("ซื้อออร่า +%s พลัง/วิ ($%s)"):format(shortNumber(c.power), shortNumber(c.price))
-            return
+            nextPrice = math.min(nextPrice or math.huge, c.price)
         end
-        -- ตัวนี้ยังซื้อไม่ได้ (เงินไม่พอ / ต้องรีเบิร์ธก่อน / Robux) ลองตัวที่ถูกกว่าถัดไป
+        -- ตัวที่ติด "การเกิดใหม่ X" / Robux ข้ามไป
     end
-    auraInfo = "ยังไม่มีออร่าที่ดีกว่าที่ซื้อได้"
+    auraResult.nextPrice = nextPrice
+    if nextPrice then
+        auraInfo = ("รอเงินถึง $%s แล้วค่อยไปซื้อ  •  รีเบิร์ธ %s"):format(shortNumber(nextPrice),
+            tostring(rebirthNow() or "?"))
+    else
+        auraInfo = ("ใส่ออร่าดีสุดที่ซื้อได้แล้ว รอรีเบิร์ธครั้งหน้า  •  รีเบิร์ธ %s"):format(tostring(rebirthNow() or "?"))
+    end
+end
+
+-- ไม่วาร์ปวนทุกนาที:
+-- รีเบิร์ธ (หรือเพิ่งเปิดสวิตช์) -> ไปดูร้าน 1 ครั้ง -> ซื้อได้ซื้อ / จำราคาตัวถัดไปไว้
+-- -> รอจนเงินถึงราคานั้นค่อยไปอีกครั้ง -> ไม่มีอะไรให้ซื้อแล้ว = รอรีเบิร์ธครั้งหน้า
+local auraState = { pending = false, checked = false, nextPrice = nil }
+local function auraReset()
+    auraState.pending, auraState.checked, auraState.nextPrice = true, false, nil
 end
 
 task.spawn(function()
     local lastRebirth = rebirthNow()
-    local lastCheck = 0
+    local wasOn = false
     while alive() do
         if settings.autoAura then
             local r = rebirthNow()
-            -- รีเบิร์ธเปลี่ยน = อาจปลดล็อกออร่าใหม่ เช็คทันที
-            -- ร้านเปิดอยู่: เช็คทุก 10 วิ / ต้องวาร์ปไปเปิด: เช็คทุก 60 วิ (ไม่ให้วาร์ปบ่อย)
-            local every = findAuraShop() and 10 or 60
-            if r ~= lastRebirth or os.clock() - lastCheck > every then
-                lastRebirth, lastCheck = r, os.clock()
-                pcall(auraCheck)
+            if not wasOn or r ~= lastRebirth then
+                lastRebirth = r
+                auraReset()
+            end
+            if auraState.pending then
+                local money = leaderValue("Money") or 0
+                local due = not auraState.checked
+                    or (auraState.nextPrice and money >= auraState.nextPrice)
+                if due then
+                    pcall(auraCheck)
+                    auraState.checked = true
+                    if auraResult.changed then
+                        auraState.checked = false -- ซื้อไปแล้ว อาจมีตัวที่ดีกว่าอีก เช็คอีกรอบ
+                        task.wait(2)
+                    elseif auraResult.nextPrice then
+                        auraState.nextPrice = auraResult.nextPrice
+                    else
+                        auraState.pending = false -- ไม่มีอะไรให้ซื้อจนกว่าจะรีเบิร์ธ
+                    end
+                end
             end
         end
-        task.wait(1)
+        wasOn = settings.autoAura
+        task.wait(2)
     end
 end)
 
@@ -1218,7 +1252,7 @@ local Tabs = {
 local auraSection = Tabs.main:AddSection("ร้านออร่า")
 auraSection:AddToggle("DFAura", {
     Title = "ซื้อ + ใส่ออร่าที่ดีที่สุดอัตโนมัติ",
-    Description = "เช็คทันทีที่รีเบิร์ธเปลี่ยน และทุก 60 วิ (วาร์ปไปเหยียบหน้าร้านให้เอง) ซื้อด้วยเงินเท่านั้น ไม่แตะปุ่ม Robux",
+    Description = "ไปดูร้านเฉพาะตอนรีเบิร์ธ แล้วรอเงินถึงราคาค่อยไปซื้อ (ไม่วาร์ปวน) ซื้อด้วยเงินเท่านั้น ไม่แตะปุ่ม Robux",
     Default = false,
 }):OnChanged(function(v) settings.autoAura = v end)
 auraSection:AddButton({
