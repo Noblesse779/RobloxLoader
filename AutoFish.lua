@@ -24,8 +24,17 @@ local CAST_TARGET = 0.9   -- ใช้เมื่อหา PerfectZone ไม�
 local PERFECT_AIM = 0.5   -- ปล่อยเมื่อปลายแถบถึงตำแหน่งไหนของ PerfectZone (0 = ขอบซ้าย, 0.5 = กลาง)
 local CAST_TIMEOUT = 5    -- กดค้างนานสุดกี่วินาที กันลูปค้าง
 local POWER_APPEAR_TIMEOUT = 1.5 -- กดแล้วรอหลอด Power ขึ้นกี่วินาที
+local HOOK_REACTION = 0.3 -- (โหมด remote) ปลากินแล้วรอกี่วินาทีก่อนส่ง "Hook" (ให้ดูเหมือนคนกด)
+local HOOK_COOLDOWN = 1   -- ยิง "Hook" ซ้ำได้ทุกกี่วินาที ตอนป้าย Bang ยังขึ้นอยู่
 local BITE_TIMEOUT = 30   -- โยนแล้วรอปลากินนานสุดกี่วินาที ก่อนโยนใหม่
-local USE_EXECUTOR_MOUSE = true -- false = บังคับใช้ VirtualInputManager แทน mouse1press
+-- วิธีสั่งงาน: "remote" = ยิง Remotes.Fishing.Action ตรงๆ ("Cast" / "Hook" / "Reel") ไม่ต้องพึ่งเมาส์
+--             "mouse"  = จำลองคลิกเมาส์ (mouse1press หรือ VirtualInputManager)
+local INPUT_MODE = "remote"
+local CAST_DISTANCE = 20  -- (โหมด remote) ให้เบ็ดตกห่างจากตัวกี่ studs ข้างหน้า
+local CAST_PERFECT = true -- (โหมด remote) ค่าตัวที่ 3 ของ "Cast" ที่เกมส่งตอนเหวี่ยงเข้า PerfectZone
+local REEL_FINISH_DELAY = 3 -- (โหมด remote) หลัง Hook รอกี่วินาทีแล้วส่ง "Reel", true (ดึงสำเร็จ)
+                            -- ส่งเร็วเกินไปเซิร์ฟเวอร์อาจจับได้ว่าผิดปกติ
+local USE_EXECUTOR_MOUSE = true -- (โหมด mouse) false = บังคับใช้ VirtualInputManager แทน mouse1press
 local REEL_HOLD = false   -- false = คลิกทีละครั้ง, true = กดค้างตอน Zone ต้องเลื่อนหาปลา (ลองสลับถ้าแบบแรกไม่ได้ผล)
 local REEL_INVERT = false -- true ถ้าคลิกแล้ว Zone เลื่อนไปทางตรงข้ามกับที่ควร
 
@@ -126,6 +135,16 @@ end
 local hasMouse1 = typeof(mouse1press) == "function" and typeof(mouse1release) == "function"
 local hasMoveAbs = typeof(mousemoveabs) == "function"
 
+local actionRemote
+local function getActionRemote()
+    if not actionRemote then
+        local remotes = game:GetService("ReplicatedStorage"):FindFirstChild("Remotes")
+        local fishing = remotes and remotes:FindFirstChild("Fishing")
+        actionRemote = fishing and fishing:FindFirstChild("Action")
+    end
+    return actionRemote
+end
+
 local function setMouse(down)
     local x, y = screenCenter()
     if USE_EXECUTOR_MOUSE and hasMouse1 then
@@ -196,8 +215,36 @@ local function waitFor(myId, timeout, check)
     return false
 end
 
--- โยนเบ็ด: กดค้างเอง -> รอหลอด Power ขึ้น -> ปล่อยตอนเข้า PerfectZone
-local function cast(myId)
+-- จุดที่จะให้เบ็ดตก: ข้างหน้าตัวละคร CAST_DISTANCE studs แล้วยิง ray ลงหาผิวน้ำ/พื้น
+local function getCastTarget()
+    local char = LocalPlayer.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return nil end
+
+    local ahead = hrp.Position + hrp.CFrame.LookVector * CAST_DISTANCE
+    local params = RaycastParams.new()
+    params.FilterType = Enum.RaycastFilterType.Exclude
+    params.FilterDescendantsInstances = { char }
+    params.IgnoreWater = false
+    local hit = workspace:Raycast(ahead + Vector3.new(0, 50, 0), Vector3.new(0, -200, 0), params)
+    if hit then
+        return hit.Position
+    end
+    return Vector3.new(ahead.X, hrp.Position.Y - 3, ahead.Z)
+end
+
+-- โยนเบ็ดแบบ remote: ยิง "Cast", ตำแหน่ง, true ตรงๆ (เหมือนที่เกมส่งตอนปล่อยเข้า PerfectZone)
+local function castRemote()
+    local remote = getActionRemote()
+    local target = getCastTarget()
+    if not (remote and target) then return false end
+    setStatus("เหวี่ยง (remote)")
+    remote:FireServer("Cast", target, CAST_PERFECT)
+    return true
+end
+
+-- โยนเบ็ดแบบเมาส์: กดค้างเอง -> รอหลอด Power ขึ้น -> ปล่อยตอนเข้า PerfectZone
+local function castMouse(myId)
     setStatus("กดค้างเพื่อเหวี่ยง...")
     setMouse(true)
 
@@ -216,6 +263,30 @@ local function cast(myId)
     end
     setMouse(false) -- ปล่อยเสมอ ไม่ให้เมาส์ค้าง
     return appeared
+end
+
+local function cast(myId)
+    if INPUT_MODE == "remote" and getActionRemote() then
+        return castRemote()
+    end
+    return castMouse(myId)
+end
+-- ปลากินเบ็ด: ถ้าป้าย Bang (!) ขึ้น ให้ยิง "Hook" ตามที่เกมส่งตอนกดตวัดเบ็ด
+local lastHook = 0
+local function tryHook()
+    local catchUI = getCatchUI()
+    local bang = catchUI and catchUI:FindFirstChild("Bang")
+    if bang and isShown(bang) and os.clock() - lastHook > HOOK_COOLDOWN then
+        lastHook = os.clock()
+        local remote = getActionRemote()
+        if remote then
+            remote:FireServer("Hook")
+        else
+            clickMouse()
+        end
+        return true
+    end
+    return false
 end
 
 -- ดึงปลา: ประคอง Zone ให้อยู่ตรงปลา
@@ -249,12 +320,52 @@ local function reelStep()
     end
 end
 
+-- โหมด remote: Cast -> รอปลากิน -> Hook -> รอ -> Reel true (ตามลำดับที่ดักได้จาก Remote Spy)
+local function remoteRound(myId)
+    local remote = getActionRemote()
+    if not castRemote() then
+        setStatus("หา HumanoidRootPart ไม่เจอ")
+        task.wait(1)
+        return
+    end
+
+    setStatus("เหวี่ยงแล้ว รอปลากิน")
+    if not waitFor(myId, BITE_TIMEOUT, isReeling) then
+        return -- ไม่มีปลากิน โยนใหม่
+    end
+
+    setStatus("ปลากิน! Hook")
+    task.wait(HOOK_REACTION)
+    if not isActive(myId) then return end
+    remote:FireServer("Hook")
+
+    setStatus(("ดึงปลา รอ %.1f วิ"):format(REEL_FINISH_DELAY))
+    waitFor(myId, REEL_FINISH_DELAY, function() return false end)
+    if not isActive(myId) then return end
+    remote:FireServer("Reel", true)
+
+    setStatus("ได้ปลาแล้ว")
+    waitFor(myId, 5, function() return not isReeling() end)
+    task.wait(1)
+end
+
 -- ลูปการทำงานหลัก
 local function autoFishLoop(myId)
+    if INPUT_MODE == "remote" and getActionRemote() then
+        while isActive(myId) do
+            remoteRound(myId)
+        end
+        return
+    end
+
     while isActive(myId) do
         if isReeling() then
-            setStatus("กำลังดึงปลา")
-            reelStep()
+            if tryHook() then
+                setStatus("ปลากิน! ตวัดเบ็ด (Hook)")
+            else
+                setStatus("กำลังดึงปลา")
+                reelStep()
+            end
             task.wait(0.05)
         else
             if mouseHeld then
