@@ -23,8 +23,8 @@ end
 local CAST_TARGET = 0.9   -- ใช้เมื่อหา PerfectZone ไม่เจอ: ชาร์จหลอดถึง 90%
 local PERFECT_AIM = 0.5   -- ปล่อยเมื่อปลายแถบถึงตำแหน่งไหนของ PerfectZone (0 = ขอบซ้าย, 0.5 = กลาง)
 local CAST_TIMEOUT = 5    -- กดค้างนานสุดกี่วินาที กันลูปค้าง
-local POWER_APPEAR_TIMEOUT = 1.5 -- กดแล้วรอหลอด Power ขึ้นกี่วินาที
-local CHARGE_TIME = 1.0   -- (โหมด remote) กดค้างชาร์จกี่วินาทีก่อนส่ง Cast
+local POWER_APPEAR_TIMEOUT = 0.5 -- กดแล้วรอหลอด Power ขึ้นกี่วินาที
+local CHARGE_TIME = 1.0   -- ถ้าไม่เห็นหลอด Power: กดค้างชาร์จกี่วินาทีแล้วปล่อย
 local MIN_BITE_WAIT = 1.5 -- โยนแล้วอย่างน้อยกี่วินาทีถึงเริ่มเช็คว่าปลากิน
 local BITE_TEXT = "กดเลย"   -- ข้อความบนปุ่มตอนปลากินเหยื่อ
 local HOOK_REACTION = 0.3 -- (โหมด remote) ปลากินแล้วรอกี่วินาทีก่อนส่ง "Hook" (ให้ดูเหมือนคนกด)
@@ -33,15 +33,16 @@ local READY_TIMEOUT = 10  -- หลังได้ปลา รอปุ่ม�
 local CAST_DELAY = 0.5    -- ก่อนเหวี่ยงแต่ละครั้งรออีกกี่วินาที
 local RECAST_RIGHT_AWAY = true -- ได้ปลาแล้วโยนต่อเลยโดยไม่รอปุ่มกลับเป็น "เหวี่ยง" (false = รอปุ่มก่อน)
 local BITE_TIMEOUT = 30   -- โยนแล้วรอปลากินนานสุดกี่วินาที ก่อนโยนใหม่
--- วิธีสั่งงาน: "remote" = ยิง Remotes.Fishing.Action ตรงๆ ("Cast" / "Hook" / "Reel") ไม่ต้องพึ่งเมาส์
---             "mouse"  = จำลองคลิกเมาส์ (mouse1press หรือ VirtualInputManager)
-local INPUT_MODE = "remote"
+-- วิธีสั่งงาน: "play"   = กดปุ่ม เหวี่ยง ของเกมเหมือนคนเล่น (ชาร์จ, ตวัด, เล่นมินิเกม) <- แนะนำ
+--             "remote" = ยิง Remotes.Fishing.Action ตรงๆ ข้ามการชาร์จและมินิเกม (เซิร์ฟเวอร์อาจไม่ให้ปลา)
+local INPUT_MODE = "play"
+local REEL_TIMEOUT = 40   -- (โหมด play) เล่นมินิเกมนานสุดกี่วินาที
 local CAST_DISTANCE = 20  -- (โหมด remote) ให้เบ็ดตกห่างจากตัวกี่ studs ข้างหน้า
 local CAST_PERFECT = true -- (โหมด remote) ค่าตัวที่ 3 ของ "Cast" ที่เกมส่งตอนเหวี่ยงเข้า PerfectZone
 local REEL_FINISH_DELAY = 0 -- (โหมด remote) หลัง Hook รอกี่วินาทีแล้วส่ง "Reel", true (ข้ามมินิเกม ได้ปลาเลย)
                             -- ถ้าเซิร์ฟเวอร์ไม่ให้ปลา ให้เพิ่มเป็น 0.5 / 1 / 2
-local USE_EXECUTOR_MOUSE = true -- (โหมด mouse) false = บังคับใช้ VirtualInputManager แทน mouse1press
-local REEL_HOLD = false   -- false = คลิกทีละครั้ง, true = กดค้างตอน Zone ต้องเลื่อนหาปลา (ลองสลับถ้าแบบแรกไม่ได้ผล)
+local USE_EXECUTOR_MOUSE = false -- true = ใช้ mouse1press ของ executor แทน VirtualInputManager
+local REEL_HOLD = true    -- true = กดค้างตอน Zone ต้องเลื่อนหาปลา, false = คลิกทีละครั้ง (ลองสลับถ้าแบบแรกไม่ได้ผล)
 local REEL_INVERT = false -- true ถ้าคลิกแล้ว Zone เลื่อนไปทางตรงข้ามกับที่ควร
 
 -- ลบ UI เก่าถ้ารันสคริปต์ซ้ำ
@@ -130,7 +131,9 @@ local isAutoFishing = false
 local runId = 0 -- กันลูปซ้อนเวลากดเปิด-ปิดเร็วๆ
 local mouseHeld = false
 
--- คลิกกลางจอแทนมุม (0,0) ที่เป็น topbar
+local GuiService = game:GetService("GuiService")
+local getPressPoint -- กำหนดทีหลัง (ต้องใช้ฟังก์ชันหาปุ่ม)
+
 local function screenCenter()
     local size = workspace.CurrentCamera.ViewportSize
     return size.X / 2, size.Y / 2
@@ -151,10 +154,15 @@ local function getActionRemote()
     return actionRemote
 end
 
+local pressX, pressY
 local function setMouse(down)
-    local x, y = screenCenter()
+    -- กดที่ปุ่ม เหวี่ยง ของเกม (ถ้าหาไม่เจอค่อยกดกลางจอ) จุดเดิมทั้งตอนกดและปล่อย
+    if down or not pressX then
+        pressX, pressY = getPressPoint()
+    end
+    local x, y = pressX, pressY
     if USE_EXECUTOR_MOUSE and hasMouse1 then
-        -- ย้ายเมาส์ไปกลางจอก่อน ไม่งั้นจะไปกดโดนปุ่ม ON/OFF ของเราเอง
+        -- ย้ายเมาส์ไปที่ปุ่มก่อน ไม่งั้นจะไปกดโดนปุ่ม ON/OFF ของเราเอง
         if down and hasMoveAbs then
             mousemoveabs(x, y)
         end
@@ -244,6 +252,30 @@ local function getActionLabel()
     return actionLabel
 end
 
+-- ตัวปุ่มที่ต้องกด: GuiButton ที่ครอบข้อความ ถ้าไม่มีก็ใช้กรอบที่ครอบข้อความ
+local function getActionButton()
+    local label = getActionLabel()
+    if not label then return nil end
+    if label:IsA("GuiButton") then return label end
+    return label:FindFirstAncestorWhichIsA("GuiButton")
+        or (label.Parent and label.Parent:IsA("GuiObject") and label.Parent)
+        or label
+end
+
+getPressPoint = function()
+    local button = getActionButton()
+    if not button then
+        return screenCenter()
+    end
+    local c = button.AbsolutePosition + button.AbsoluteSize / 2
+    local sg = button:FindFirstAncestorWhichIsA("ScreenGui")
+    if sg and not sg.IgnoreGuiInset then
+        -- AbsolutePosition ไม่นับแถบ topbar แต่การคลิกนับ เลยต้องบวกเพิ่ม
+        c += GuiService:GetGuiInset()
+    end
+    return c.X, c.Y
+end
+
 local function actionSaysBite()
     local label = getActionLabel()
     return label ~= nil and label.Text:find(BITE_TEXT, 1, true) ~= nil and isShown(label)
@@ -309,37 +341,17 @@ local function castMouse(myId)
     end)
 
     if appeared then
-        setStatus("ชาร์จ รอเข้า PerfectZone")
+        setStatus("ชาร์จ รอเข้าจุดเหลือง")
         waitFor(myId, CAST_TIMEOUT, function()
             return not isShown(track) or castReady(track)
         end)
+    else
+        -- ไม่เห็นหลอด: กดค้างตามเวลาแทน
+        setStatus(("ชาร์จ %.1f วิ (ไม่เห็นหลอด)"):format(CHARGE_TIME))
+        waitFor(myId, math.max(0, CHARGE_TIME - POWER_APPEAR_TIMEOUT), function() return false end)
     end
     setMouse(false) -- ปล่อยเสมอ ไม่ให้เมาส์ค้าง
-    return appeared
-end
-
-local function cast(myId)
-    if INPUT_MODE == "remote" and getActionRemote() then
-        return castRemote()
-    end
-    return castMouse(myId)
-end
--- ปลากินเบ็ด: ถ้าป้าย Bang (!) ขึ้น ให้ยิง "Hook" ตามที่เกมส่งตอนกดตวัดเบ็ด
-local lastHook = 0
-local function tryHook()
-    local catchUI = getCatchUI()
-    local bang = catchUI and catchUI:FindFirstChild("Bang")
-    if bang and isShown(bang) and os.clock() - lastHook > HOOK_COOLDOWN then
-        lastHook = os.clock()
-        local remote = getActionRemote()
-        if remote then
-            remote:FireServer("Hook")
-        else
-            clickMouse()
-        end
-        return true
-    end
-    return false
+    return true
 end
 
 -- ดึงปลา: ประคอง Zone ให้อยู่ตรงปลา
@@ -433,6 +445,52 @@ local function remoteRound(myId)
     setStatus("ได้ปลาแล้ว โยนต่อ")
 end
 
+-- โหมด play: เล่นเหมือนคนกดปุ่มเอง
+-- เหวี่ยง (กดค้างชาร์จถึงจุดเหลือง) -> รอปุ่ม "กดเลย!" -> กดตวัด -> เล่นมินิเกมจนจบ
+local function playRound(myId)
+    setStatus("รอปุ่ม เหวี่ยง พร้อม")
+    if not waitFor(myId, READY_TIMEOUT, actionReady) then
+        if not isActive(myId) then return end
+        setStatus(getActionLabel() and ("ปุ่มขึ้นว่า: " .. getActionLabel().Text) or "หาปุ่ม เหวี่ยง ไม่เจอ")
+        task.wait(1)
+        return
+    end
+    task.wait(CAST_DELAY)
+    if not isActive(myId) then return end
+
+    -- 1) เหวี่ยง
+    castMouse(myId)
+    if not isActive(myId) then return end
+
+    -- 2) รอปลากิน
+    setStatus("เหวี่ยงแล้ว รอปลากิน")
+    waitFor(myId, MIN_BITE_WAIT, function() return false end)
+    if not waitFor(myId, BITE_TIMEOUT, actionSaysBite) then
+        return -- ไม่มีปลากิน (หรือเบ็ดไม่ออก) ลองใหม่
+    end
+
+    -- 3) ตวัดเบ็ด
+    setStatus("ปลากิน! ตวัด")
+    task.wait(HOOK_REACTION)
+    if not isActive(myId) then return end
+    clickMouse()
+
+    -- 4) มินิเกม: ประคอง Zone ให้อยู่ตรงปลา จนปุ่มกลับเป็น "เหวี่ยง"
+    setStatus("เล่นมินิเกม")
+    waitFor(myId, 1, function() return not actionSaysBite() end)
+    waitFor(myId, REEL_TIMEOUT, function()
+        if actionReady() then return true end
+        if isReeling() then
+            reelStep()
+        end
+        return false
+    end)
+    if mouseHeld then
+        setMouse(false)
+    end
+    setStatus("จบรอบ")
+end
+
 -- ลูปการทำงานหลัก
 local function autoFishLoop(myId)
     if INPUT_MODE == "remote" and getActionRemote() then
@@ -443,30 +501,7 @@ local function autoFishLoop(myId)
     end
 
     while isActive(myId) do
-        if isReeling() then
-            if tryHook() then
-                setStatus("ปลากิน! ตวัดเบ็ด (Hook)")
-            else
-                setStatus("กำลังดึงปลา")
-                reelStep()
-            end
-            task.wait(0.05)
-        else
-            if mouseHeld then
-                setMouse(false) -- จบช่วงดึงปลาแล้ว ปล่อยเมาส์
-                task.wait(0.5)
-            end
-
-            if cast(myId) then
-                setStatus("เหวี่ยงแล้ว รอปลากิน")
-                -- รอปลากินเบ็ด (หน้าจอ Reel ขึ้น) ระหว่างนี้ห้ามคลิก ไม่งั้นจะดึงเบ็ดกลับ
-                waitFor(myId, BITE_TIMEOUT, isReeling)
-            else
-                -- กดแล้วหลอด Power ไม่ขึ้น (ยังไม่ได้ถือเบ็ด? หรือเกมไม่รับคลิก)
-                setStatus(getCastUI() and "กดแล้ว Power ไม่ขึ้น" or "หา FishingHud.Root.Power ไม่เจอ")
-                task.wait(1)
-            end
-        end
+        playRound(myId)
     end
     if mouseHeld then
         setMouse(false)
