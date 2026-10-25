@@ -20,6 +20,7 @@ local settings = {
     autoDash = false,
     autoTrain = false,   -- ถือของช่อง 1 ไว้ตลอด (ถือแล้วชาร์จพลังเอง ไม่ต้องคลิก)
     clickX2 = true,      -- เจอปุ่ม x2 เด้งบนจอ กดให้ (ตอนเปิดฝึกพลังหรือชาร์จอัตโนมัติ)
+    clickPopups = true,  -- ของที่เด้งให้กดตอนบิน (ทองคำ เพชร ฯลฯ) กดให้ทุกอัน
     autoPlace = false,
     antiAfk = false,
     autoRebirth = false,
@@ -794,6 +795,40 @@ task.spawn(function()
     end
 end)
 
+-- ของเด้งให้กดตอนบิน (ทองคำ / เพชร ในวงกลม): ปุ่มที่ "เพิ่งโผล่" ใน PlayerGui
+-- จำปุ่มใหม่ทุกอันที่เกมสร้างขึ้น แล้วกดถ้ามันขึ้นบนจอ (ไม่ไปกดปุ่มเมนูที่มีอยู่แล้ว)
+local popupCount = 0
+local newButtons = {}
+LocalPlayer.PlayerGui.DescendantAdded:Connect(function(d)
+    if d:IsA("GuiButton") then
+        newButtons[d] = os.clock()
+    end
+end)
+
+task.spawn(function()
+    while alive() do
+        if settings.clickPopups and (settings.autoDash or settings.autoTrain) then
+            for button, at in pairs(newButtons) do
+                if not button.Parent or os.clock() - at > 20 then
+                    newButtons[button] = nil
+                elseif isShown(button) then
+                    local size = button.AbsoluteSize
+                    -- ขนาดประมาณวงกลมในรูป ไม่เอาปุ่มเล็กจิ๋วหรือหน้าต่างใหญ่ทั้งจอ
+                    if size.X >= 30 and size.X <= 450 and size.Y >= 30 and size.Y <= 450 then
+                        clickGui(button)
+                        popupCount += 1
+                        newButtons[button] = nil
+                        task.wait(0.05)
+                    end
+                end
+            end
+        else
+            table.clear(newButtons)
+        end
+        task.wait(0.1)
+    end
+end)
+
 -- ถือของช่อง 1 ไว้ตลอด ถ้าหลุดมือ (ตาย / บิน / วางตัวละคร) หยิบกลับมาให้
 task.spawn(function()
     while alive() do
@@ -912,6 +947,7 @@ local Tabs = {
 
 -- หลัก
 local trainSection = Tabs.main:AddSection("ฝึกพลัง (ของช่อง 1)")
+-- (ตัวเลือกกดของเด้งตอนบิน อยู่ในกลุ่ม ชาร์จ + บิน)
 trainSection:AddToggle("DFTrain", {
     Title = "ถือของช่อง 1 ชาร์จพลังอัตโนมัติ",
     Description = "ถือไว้ตลอด หลุดมือหยิบให้ใหม่ (พักเองตอนบิน/วางตัวละคร)",
@@ -924,6 +960,11 @@ trainSection:AddToggle("DFX2", {
 }):OnChanged(function(v) settings.clickX2 = v end)
 
 local dashSection = Tabs.main:AddSection("ชาร์จ + บิน")
+dashSection:AddToggle("DFPopups", {
+    Title = "กดของที่เด้งตอนบินให้ทุกอัน",
+    Description = "ทองคำ เพชร ฯลฯ ที่โผล่ในวงกลมบนจอ (ทำงานตอนเปิดชาร์จ+บิน หรือถือของช่อง 1)",
+    Default = settings.clickPopups,
+}):OnChanged(function(v) settings.clickPopups = v end)
 dashSection:AddToggle("DFDash", { Title = "ชาร์จและบินอัตโนมัติ", Default = false })
     :OnChanged(function(v) settings.autoDash = v end)
 local statusPara = dashSection:AddParagraph({ Title = "สถานะ", Content = status })
@@ -1093,8 +1134,8 @@ Window:SelectTab(1)
 task.spawn(function()
     while alive() and not Fluent.Unloaded do
         pcall(function()
-            statusPara:SetDesc(("%s\nบินแล้ว %d รอบ  •  วางตัวละครแล้ว %d ตัว  •  รีเบิร์ธ %d ครั้ง  •  เจอตัวไล่ %d ครั้ง\nกด x2 ไป %d ครั้ง\nรีเบิร์ธ: %s")
-                :format(status, dashCount, placedCount, rebirthCount, chaseEscapes, x2Count, rebirthInfo))
+            statusPara:SetDesc(("%s\nบินแล้ว %d รอบ  •  วางตัวละครแล้ว %d ตัว  •  รีเบิร์ธ %d ครั้ง  •  เจอตัวไล่ %d ครั้ง\nกด x2 ไป %d ครั้ง  •  กดของเด้งไป %d ครั้ง\nรีเบิร์ธ: %s")
+                :format(status, dashCount, placedCount, rebirthCount, chaseEscapes, x2Count, popupCount, rebirthInfo))
         end)
         local lines = {}
         for i, t in ipairs(getCharacterTools()) do
