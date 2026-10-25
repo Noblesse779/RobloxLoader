@@ -205,6 +205,26 @@ local function isReeling()
     return catchUI ~= nil and isShown(catchUI)
 end
 
+-- เครื่องหมาย ! บนหัวตัวละคร (BillboardGui) = ปลากินเหยื่อ
+local function bangOverHead()
+    local char = LocalPlayer.Character
+    if not char then return false end
+    for _, d in ipairs(char:GetDescendants()) do
+        if d:IsA("TextLabel") and d.Visible and d.Text:match("^%s*!+%s*$") then
+            local bb = d:FindFirstAncestorWhichIsA("BillboardGui")
+            if bb and bb.Enabled then
+                return true
+            end
+        end
+    end
+    return false
+end
+
+-- ปลากินเหยื่อหรือยัง: มี ! บนหัว หรือหน้าจอ Reel ขึ้นแล้ว
+local function isBite()
+    return bangOverHead() or isReeling()
+end
+
 -- รอจนกว่าเงื่อนไขจะเป็นจริง หรือหมดเวลา / ถูกปิด
 local function waitFor(myId, timeout, check)
     local elapsed = 0
@@ -330,7 +350,7 @@ local function remoteRound(myId)
     end
 
     setStatus("เหวี่ยงแล้ว รอปลากิน")
-    if not waitFor(myId, BITE_TIMEOUT, isReeling) then
+    if not waitFor(myId, BITE_TIMEOUT, isBite) then
         return -- ไม่มีปลากิน โยนใหม่
     end
 
