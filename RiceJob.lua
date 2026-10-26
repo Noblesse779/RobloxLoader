@@ -327,6 +327,29 @@ local function plantSpot()
     end
 end
 
+-- เกมล็อกตัวไว้ระหว่างท่า (RiceActionBusy) ทั้งที่ได้ผลแล้ว: ปลดล็อกฝั่งเราแล้วไปต่อเลย
+local actionDone = false -- ทำต้นล่าสุดเสร็จแล้ว (ได้ต้น/ได้เงิน) ไม่ต้องรอท่าจบ
+local function unfreeze()
+    local hrp = getRoot()
+    local hum = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+    if hrp then hrp.Anchored = false end
+    if hum then
+        hum.PlatformStand = false
+        if hum.WalkSpeed < 16 then hum.WalkSpeed = 16 end
+        if hum.UseJumpPower and hum.JumpPower <= 0 then hum.JumpPower = 50 end
+    end
+end
+
+-- ส่งคำสั่งแบบไม่รอคำตอบ (คำตอบกลับมาตอนท่าจบ) แล้วดูผลจากของในแมพแทน
+local function fire(action, arg)
+    local box = { done = false, res = nil }
+    task.spawn(function()
+        box.res = request(action, arg)
+        box.done = true
+    end)
+    return box
+end
+
 local function plantOne()
     local tool = riceTools()[1]
     if not tool then return false end
@@ -342,15 +365,20 @@ local function plantOne()
         hum:EquipTool(tool)
         task.wait(0.3)
     end
-    local before = #riceTools()
+    local before = #myCrops()
     status = "ปลูกข้าว..."
-    local res = request("UseRice")
-    -- รอท่าปลูกจบ (ห้ามขยับระหว่างนี้)
-    waitFor(Config.AnimationTimeout or 12, function() return not busy() end)
-    if not res.ok and #riceTools() >= before then
-        status = "ปลูกไม่สำเร็จ: " .. tostring(res.message)
+    actionDone = false
+    local box = fire("UseRice")
+    -- ต้นใหม่โผล่ในแปลง = ปลูกสำเร็จ ไปต่อเลยไม่ต้องรอท่าจบ
+    waitFor(Config.AnimationTimeout or 12, function()
+        return #myCrops() > before or (box.done and (not box.res.ok or not busy()))
+    end)
+    if #myCrops() <= before then
+        status = "ปลูกไม่สำเร็จ: " .. tostring(box.res and box.res.message or "หมดเวลา")
         return false
     end
+    actionDone = true
+    unfreeze()
     auto.planted += 1
     status = "ปลูกแล้ว เหลือข้าว " .. #riceTools() .. " ต้น"
     return true
@@ -365,16 +393,22 @@ local function harvest(crop)
     end
     status = "เก็บข้าว..."
     local startedAt = os.clock()
-    local res = request("UseRice", crop.model)
-    -- ไม่ต้องรอท่าจบ: ต้นหายไป หรือเกมแจ้งว่าเก็บสำเร็จ ก็ไปต้นต่อไปเลย
+    actionDone = false
+    local box = fire("UseRice", crop.model)
+    -- ได้เงินแล้ว (แจ้งเตือน "เก็บข้าวสำเร็จ") หรือต้นหายไป = เสร็จ ไปต้นต่อไปเลย
+    local function got()
+        return not crop.model.Parent
+            or (notify.at >= startedAt and notify.text:find("สำเร็จ", 1, true) ~= nil)
+    end
     waitFor(Config.AnimationTimeout or 12, function()
-        return not busy() or not crop.model.Parent
-            or (notify.at >= startedAt and notify.text:find("เก็บ", 1, true) ~= nil)
+        return got() or (box.done and (not box.res.ok or not busy()))
     end)
-    if not res.ok and crop.model.Parent then
-        status = "เก็บไม่สำเร็จ: " .. tostring(res.message)
+    if not got() then
+        status = "เก็บไม่สำเร็จ: " .. tostring(box.res and box.res.message or "หมดเวลา")
         return false
     end
+    actionDone = true
+    unfreeze()
     auto.harvested += 1
     status = "เก็บแล้ว"
     return true
@@ -409,8 +443,8 @@ end)
 ---------------------------------------------------------------- วนอัตโนมัติ
 local function autoLoop()
     while alive() and auto.on do
-        if busy() then
-            task.wait(0.3)
+        if busy() and not actionDone then
+            task.wait(0.2)
         else
             local crops = myCrops()
             local ready
