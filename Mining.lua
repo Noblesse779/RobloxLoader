@@ -51,6 +51,8 @@ local auto = {
     smelt = true, -- แปรรูปแร่ที่โต๊ะคราฟ
     sell = "เมื่อกระเป๋าเต็ม", -- ไม่ขาย / เมื่อกระเป๋าเต็ม / ทันทีที่มีของขาย
     sellNow = false,
+    dist = 2.5, -- วาร์ปขุด: ยืนห่างผิวหินกี่ studs
+    side = "ข้าง", -- วาร์ปขุด: ยืนตรงไหนของหิน ข้าง / บน / ล่าง
     mined = 0, crafted = 0, sold = 0,
 }
 
@@ -304,6 +306,34 @@ local function rockRadius(rock)
     return ok and math.clamp(math.min(size.X, size.Z) / 2, 0, 12) or 0
 end
 
+-- วาร์ปขุด: จุดยืนรอบก้อนหิน (ข้าง = ฝั่งที่เราอยู่, บน = เหนือยอดหิน, ล่าง = ใต้ก้นหิน มุดดิน)
+local function rockStand(rock, from)
+    local pos = rock:GetPivot().Position
+    local ok, size = pcall(function() return rock:GetExtentsSize() end)
+    size = ok and size or Vector3.new(4, 4, 4)
+    local d = math.clamp(auto.dist, 0.5, MiningConfig.Reach - 1)
+    if auto.side == "บน" then return pos + Vector3.new(0, size.Y / 2 + d + 1.5, 0), true end
+    if auto.side == "ล่าง" then return pos - Vector3.new(0, size.Y / 2 + d + 1.5, 0), true end
+    local away = Vector3.new(from.X - pos.X, 0, from.Z - pos.Z)
+    away = away.Magnitude > 0.1 and away.Unit or Vector3.new(0, 0, 1)
+    return pos + away * (math.min(size.X, size.Z) / 2 + d), false
+end
+
+-- ยืนบน/ใต้หินต้องทะลุหิน/พื้น: ปิดชนฝั่งเราทุกเฟรมระหว่างขุด (เลิกแล้วกลับปกติเอง)
+local noclip = false
+local noclipConn = RunService.Stepped:Connect(function()
+    if not noclip then return end
+    local char = LocalPlayer.Character
+    if not char then return end
+    for _, part in ipairs(char:GetDescendants()) do
+        if part:IsA("BasePart") then part.CanCollide = false end
+    end
+end)
+task.spawn(function()
+    while alive() do task.wait(1) end
+    noclipConn:Disconnect()
+end)
+
 local function mineRock(rock, pick)
     local tier = tierOf(pick.Name)
     local pos = rock:GetPivot().Position
@@ -320,12 +350,21 @@ local function mineRock(rock, pick)
         if pick.Parent ~= LocalPlayer.Character and not equip(pick) then return false end
         local hrp = getRoot()
         if not hrp then return false end
-        if (Vector3.new(pos.X, hrp.Position.Y, pos.Z) - hrp.Position).Magnitude > within + 2 then
+        if auto.walk and (Vector3.new(pos.X, hrp.Position.Y, pos.Z) - hrp.Position).Magnitude > within + 2 then
             if not goNear(pos, within, not auto.walk) then return false end
         end
         local hum = getHum()
         if hum then hum:MoveTo(hrp.Position) end -- หยุดเดิน (เกมไม่ให้ขุดตอนตัวล็อก/กำลังเดินชน)
-        face(pos)
+        if auto.walk then
+            noclip = false
+            face(pos)
+        else
+            -- วาร์ปขุด: ยืนตามระยะ/ด้านที่เลือก หันหน้า (ก้ม/เงย) เข้าหาหิน
+            local stand, vertical = rockStand(rock, hrp.Position)
+            noclip = vertical
+            hrp.CFrame = CFrame.lookAt(stand, vertical and pos or Vector3.new(pos.X, stand.Y, pos.Z))
+            hrp.AssemblyLinearVelocity = Vector3.zero
+        end
         if not direct then
             pick:Activate() -- เกมส่ง Mine / SwingEnded เองตามจังหวะ (ดีเล 0.75)
             task.wait(MiningConfig.SwingCooldown + 0.1)
@@ -340,8 +379,9 @@ local function mineRock(rock, pick)
             MiningRemotes.SwingEnded:FireServer(id)
             task.wait(math.max(0.1, MiningConfig.SwingCooldown - MiningConfig.HitDelay - 0.15))
         end
-        if os.clock() - started > 40 then return false end -- ขุดไม่แตกใน 40 วิ ไปก้อนอื่น
+        if os.clock() - started > 40 then noclip = false return false end -- ขุดไม่แตกใน 40 วิ ไปก้อนอื่น
     end
+    noclip = false
     auto.mined += 1
     return true
 end
@@ -666,6 +706,25 @@ section:AddDropdown("MineMove", {
     Default = 1,
 }):OnChanged(function(v)
     auto.walk = v ~= "วาร์ป"
+end)
+section:AddSlider("MineDist", {
+    Title = "วาร์ปขุด: ระยะห่างจากหิน",
+    Description = "ใช้ตอนเลือกวาร์ป • ห่างจากผิวหิน (ระยะขุดของเกม 7)",
+    Default = 2.5,
+    Min = 0.5,
+    Max = 6,
+    Rounding = 1,
+}):OnChanged(function(v)
+    auto.dist = v
+end)
+section:AddDropdown("MineSide", {
+    Title = "วาร์ปขุด: ยืนตรงไหน",
+    Description = "ข้าง = ข้างก้อนหิน • บน = ลอยเหนือหิน • ล่าง = มุดใต้หิน",
+    Values = { "ข้าง", "บน", "ล่าง" },
+    Multi = false,
+    Default = 1,
+}):OnChanged(function(v)
+    auto.side = v
 end)
 section:AddToggle("MineSmelt", {
     Title = "แปรรูปแร่ที่โต๊ะคราฟ",
