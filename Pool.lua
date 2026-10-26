@@ -21,8 +21,25 @@ local RAIL_X, RAIL_Y = 7.0455, 3.1555
 local POCKETS = {
     Vector2.new(-7.373, -3.481), Vector2.new(7.373, -3.481),
     Vector2.new(-7.373, 3.481), Vector2.new(7.373, 3.481),
-    Vector2.new(0, -3.45), Vector2.new(0, 3.45), -- หลุมกลาง (กะเอา)
+    Vector2.new(0, -3.481), Vector2.new(0, 3.481), -- หลุมกลาง
 }
+-- ปากหลุม: ปลายขอบยางสองข้างของแต่ละหลุม (วัดจากภาพโต๊ะ) ลูกต้องผ่านระหว่างสองจุดนี้
+-- ไม่งั้นชนปากหลุมเด้งออก (ลูกที่อยู่ใกล้หลุมแต่มุมเฉียง)
+local CORNER_JAW, SIDE_JAW = 0.58, 0.55
+local JAWS = {}
+for i, p in ipairs(POCKETS) do
+    local sx, sy = math.sign(p.X), math.sign(p.Y)
+    if i <= 4 then
+        JAWS[i] = { Vector2.new(sx * (RAIL_X - CORNER_JAW), sy * RAIL_Y), Vector2.new(sx * RAIL_X, sy * (RAIL_Y - CORNER_JAW)) }
+    else
+        JAWS[i] = { Vector2.new(-SIDE_JAW, sy * RAIL_Y), Vector2.new(SIDE_JAW, sy * RAIL_Y) }
+    end
+end
+-- จุดเล็งในหลุม: กลางหลุม หรือเยื้องไปทางปากข้างใดข้างหนึ่ง (ให้เลี่ยงปากหลุมได้)
+local function pocketTargets(i)
+    local c, j = POCKETS[i], JAWS[i]
+    return { c, c + (j[1] - c) * 0.3, c + (j[2] - c) * 0.3 }
+end
 
 local settings = {
     auto = false,
@@ -33,6 +50,7 @@ local settings = {
     bounce = 0.85, -- ขอบเด้งกลับกี่ส่วน (แรงตั้งฉากกับขอบ)
     spinX = 0, -- สปินซ้าย/ขวา
     spinY = 0, -- สปินบน (ตาม) / ล่าง (ดึงกลับ)
+    breakSpin = 0.7, -- สปินบนตอนเปิดเกม
 }
 local status = "-"
 local lastPlan = "-"
@@ -219,7 +237,9 @@ local function planShot()
         end
         if nearest then
             local d = nearest.p - cue.p
-            return { angle = math.atan2(d.Y, d.X), power = 1 }, "เปิดเกม"
+            -- สูตรเปิด: ชนลูกหัวกองเต็มๆ แรงสุด + สปินบน (ลูกขาวตามเข้ากองต่อ กระจายดี ลูกลงบ่อย)
+            return { angle = math.atan2(d.Y, d.X), power = 1, spin = Vector2.new(0, settings.breakSpin) },
+                "เปิดเกม (ชนหัวกอง สปินบน)"
         end
     end
 
@@ -228,12 +248,19 @@ local function planShot()
     for _, b in ipairs(balls) do
         if legal[b.id] then
             local skip = { [0] = true, [b.id] = true }
-            for pi, pocket in ipairs(POCKETS) do
+            for pi = 1, #POCKETS do
+              for _, pocket in ipairs(pocketTargets(pi)) do
                 for _, ballRoute in ipairs(routes(b.p, pocket, settings.banks)) do
                     local dir = ballRoute.first.Unit
-                    local lastDir = ballRoute.last.Unit
-                    -- หลุมกลางเข้าได้แค่มุมไม่เฉียงเกิน
-                    local okSide = pi <= 4 or math.abs(lastDir.Y) > 0.6
+                    -- เส้นสุดท้ายเข้าหลุมต้องไม่เฉียดปากหลุม
+                    local lastSeg = ballRoute.segs[#ballRoute.segs]
+                    -- ลูกจ่อปากหลุมอยู่แล้ว ไม่ต้องเช็ค
+                    local okSide = true
+                    if (b.p - POCKETS[pi]).Magnitude > 0.7 then
+                    for _, jaw in ipairs(JAWS[pi]) do
+                        if segDist(jaw, lastSeg[1], lastSeg[2]) < BALL_R + 0.04 then okSide = false end
+                    end
+                    end
                     local ghost = b.p - dir * (BALL_R * 2)
                     if okSide and insideTable(ghost) and routeClear(ballRoute, balls, skip) then
                         for _, cueRoute in ipairs(routes(cue.p, ghost, settings.kicks)) do
@@ -263,6 +290,7 @@ local function planShot()
                         end
                     end
                 end
+              end
             end
         end
     end
@@ -295,7 +323,7 @@ local function shoot()
         status = "ยังไม่ได้รับข้อมูลโต๊ะ (นั่งโต๊ะแล้วรอตาเรา)"
         return false
     end
-    if state.hand then
+    if state.hand and not state.breakShot then
         status = "ลูกขาวอยู่ในมือ: วางลูกขาวเองก่อน"
         return false
     end
@@ -307,7 +335,7 @@ local function shoot()
     end
     channel:FireServer("shot", {
         tableId = state.tableId,
-        spin = Vector2.new(settings.spinX, settings.spinY),
+        spin = shot.spin or Vector2.new(settings.spinX, settings.spinY),
         power = shot.power,
         angle = shot.angle,
         round = state.round,
@@ -448,6 +476,16 @@ proSection:AddSlider("PoolSpinY", {
     Rounding = 2,
 }):OnChanged(function(v)
     settings.spinY = v
+end)
+proSection:AddSlider("PoolBreakSpin", {
+    Title = "สปินตอนเปิดเกม",
+    Description = "บวก = สปินบน (ถ้าลูกขาวดึงกลับแทนที่จะตามเข้ากอง ให้ใส่ค่าลบ)",
+    Default = 0.7,
+    Min = -1,
+    Max = 1,
+    Rounding = 2,
+}):OnChanged(function(v)
+    settings.breakSpin = v
 end)
 proSection:AddSlider("PoolSpinX", {
     Title = "สปิน ซ้าย(-)/ขวา(+)",
