@@ -227,6 +227,164 @@ local function dismount()
     return true
 end
 
+---------------------------------------------------------------- ลากซุงอัตโนมัติ
+-- ขี่ช้างอยู่ซุงติดมาแล้ว เดินไปจุดส่ง ("จุดส่งซุง 2") ตามลูกศร ส่งแล้วได้งานต่อทันที
+-- บังคับช้าง: เกมส่ง BuffaloRideNetwork.Input:FireServer(ช้าง, 0, ทิศทาง) ทุกเฟรม
+-- สคริปต์ดักการส่งนั้นแล้ว "เปลี่ยนทิศทาง" เป็นทิศไปจุดส่ง (เหมือนกดเดินไปทางนั้นเอง)
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local PathfindingService = game:GetService("PathfindingService")
+local RunService = game:GetService("RunService")
+
+local auto = { on = false, delivered = 0, dir = nil }
+
+local function inputRemote()
+    local net = ReplicatedStorage:FindFirstChild("BuffaloRideNetwork")
+    return net and net:FindFirstChild("Input")
+end
+
+local function myMount()
+    local char = LocalPlayer.Character
+    local hum = char and char:FindFirstChildOfClass("Humanoid")
+    local seat = hum and hum.SeatPart
+    return seat and (seat:FindFirstAncestorWhichIsA("Model") or seat), seat
+end
+
+-- ติดตั้งตัวดักครั้งเดียว (รันสคริปต์ใหม่ใช้ตัวเดิม อ่านทิศจาก env)
+if not env.ElephantInputHooked and typeof(hookmetamethod) == "function"
+    and typeof(getnamecallmethod) == "function" then
+    env.ElephantInputHooked = true
+    local wrap = typeof(newcclosure) == "function" and newcclosure or function(f) return f end
+    local old
+    old = hookmetamethod(game, "__namecall", wrap(function(self, ...)
+        local dir = env.ElephantAutopilotDir
+        if dir and getnamecallmethod() == "FireServer" and self == inputRemote() then
+            local mount, flag = ...
+            return old(self, mount, flag, dir)
+        end
+        return old(self, ...)
+    end))
+end
+
+-- เป้าหมาย: ป้าย "จุดส่งซุง" ที่ขึ้นอยู่ในแมพ
+local TARGET_WORDS = { "จุดส่ง", "deliver", "drop off", "dropoff" }
+local function findTarget()
+    local hrp = getRoot()
+    local best, bestDist
+    for _, d in ipairs(workspace:GetDescendants()) do
+        if d:IsA("TextLabel") then
+            local t = d.Text:lower()
+            local match = false
+            for _, w in ipairs(TARGET_WORDS) do
+                if t:find(w, 1, true) then match = true break end
+            end
+            if match then
+                local bb = d:FindFirstAncestorWhichIsA("BillboardGui")
+                if not bb or bb.Enabled then
+                    local part = (bb and bb.Adornee) or d:FindFirstAncestorWhichIsA("BasePart")
+                    if part and part:IsA("BasePart") then
+                        local dist = hrp and (part.Position - hrp.Position).Magnitude or 0
+                        if not bestDist or dist < bestDist then
+                            best, bestDist = part, dist
+                        end
+                    end
+                end
+            end
+        end
+    end
+    return best
+end
+
+local function flat(v)
+    return Vector3.new(v.X, 0, v.Z)
+end
+
+-- จุดทางเดิน (หลบสิ่งกีดขวาง) ถ้าหาทางไม่ได้ เดินตรงไปเลย
+local function computePath(from, to)
+    local path = PathfindingService:CreatePath({ AgentRadius = 5, AgentHeight = 10, AgentCanJump = false })
+    local ok = pcall(function() path:ComputeAsync(from, to) end)
+    if ok and path.Status == Enum.PathStatus.Success then
+        local pts = {}
+        for _, wp in ipairs(path:GetWaypoints()) do table.insert(pts, wp.Position) end
+        return pts
+    end
+    return { to }
+end
+
+local function deliveryCount()
+    for _, d in ipairs(LocalPlayer.PlayerGui:GetDescendants()) do
+        if d:IsA("TextLabel") then
+            local a, b = d.Text:match("ส่งซุงสำเร็จ%s*(%d+)%s*/%s*(%d+)")
+            if a then return tonumber(a), tonumber(b) end
+        end
+    end
+end
+
+local function driveTo(target)
+    local mount = myMount()
+    if not mount then return false end
+    local root = mount:IsA("Model") and (mount.PrimaryPart or mount:FindFirstChildWhichIsA("BasePart", true)) or mount
+    local points = computePath(root.Position, target.Position)
+    local i = 1
+    local lastPos, lastMove, started = root.Position, os.clock(), os.clock()
+    local lastCheck = 0
+    while alive() and auto.on and riding() do
+        local pos = root.Position
+        -- เหยียบจุดแล้วป้ายจะย้ายไปจุดถัดไปเอง (ไม่มี remote) = ถึงแล้ว
+        if os.clock() - lastCheck > 0.5 then
+            lastCheck = os.clock()
+            local now = findTarget()
+            if now ~= target then
+                env.ElephantAutopilotDir = nil
+                return true
+            end
+        end
+        -- ถึงจุดทางเดินนี้แล้ว ไปจุดถัดไป
+        while points[i] and flat(points[i] - pos).Magnitude < 6 and i < #points do
+            i += 1
+        end
+        local dir = flat((points[i] or target.Position) - pos)
+        dir = dir.Magnitude > 0.1 and dir.Unit or Vector3.zero
+        env.ElephantAutopilotDir = dir
+        local remote = inputRemote()
+        if remote then remote:FireServer(mount, 0, dir) end
+        -- ติด 4 วิ: คำนวณทางใหม่
+        if (pos - lastPos).Magnitude > 2 then
+            lastPos, lastMove = pos, os.clock()
+        elseif os.clock() - lastMove > 4 then
+            points, i = computePath(pos, target.Position), 1
+            lastMove = os.clock()
+            status = "ช้างติด หาทางใหม่"
+        end
+        if os.clock() - started > 180 then break end -- กันวนไม่จบ
+        task.wait(0.1)
+    end
+    env.ElephantAutopilotDir = nil
+    return false
+end
+
+local function autoLoop()
+    while alive() and auto.on do
+        if not riding() then
+            status = "ยังไม่ได้ขี่ช้าง: ไปรับงาน"
+            if not acceptJob() then task.wait(3) end
+        else
+            local target = findTarget()
+            if not target then
+                status = "ไม่เจอป้ายจุดส่งซุง รอ..."
+                task.wait(1)
+            else
+                status = "เดินช้างไป " .. target.Name
+                if driveTo(target) then
+                    auto.delivered += 1 -- ผ่านจุด (เหยียบแล้วป้ายย้ายไปจุดถัดไป)
+                    status = "ผ่าน " .. target.Name .. " ไปจุดถัดไป"
+                end
+            end
+        end
+        task.wait(0.2)
+    end
+    env.ElephantAutopilotDir = nil
+end
+
 ---------------------------------------------------------------- หน้าต่าง (Fluent)
 local FLUENT_URL = "https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"
 local FLUENT_CACHE = "AutoFish/fluent.lua" -- ใช้ไฟล์เดียวกับตัวตกปลา
@@ -302,6 +460,19 @@ jobSection:AddButton({
         end
     end,
 })
+local autoSection = Tabs.main:AddSection("ลากซุงอัตโนมัติ")
+autoSection:AddToggle("EJAuto", {
+    Title = "ลากซุงอัตโนมัติ",
+    Description = "รับงาน -> บังคับช้างเดินไปจุดส่งซุงทีละจุด (เหยียบแล้วไปจุดต่อ) -> งานต่อ วนไปเรื่อยๆ",
+    Default = false,
+}):OnChanged(function(v)
+    auto.on = v
+    if v then
+        task.spawn(autoLoop)
+    else
+        env.ElephantAutopilotDir = nil
+    end
+end)
 local statusPara = jobSection:AddParagraph({ Title = "สถานะ", Content = status })
 
 Window:SelectTab(1)
@@ -310,9 +481,11 @@ task.spawn(function()
     while alive() and not Fluent.Unloaded do
         local prompt = findJobPrompt()
         pcall(function()
-            statusPara:SetDesc(("%s\nNPC: %s  •  ขี่ช้าง: %s"):format(status,
+            local done, total = deliveryCount()
+            statusPara:SetDesc(("%s\nNPC: %s  •  ขี่ช้าง: %s\nผ่านจุดส่งไปแล้ว %d จุด%s"):format(status,
                 prompt and ("เจอ (" .. prompt.ActionText .. ")") or "ยังหาไม่เจอ",
-                riding() and "ใช่" or "ไม่"))
+                riding() and "ใช่" or "ไม่", auto.delivered,
+                done and ("  •  ในเกม %d/%d"):format(done, total) or ""))
         end)
         task.wait(1)
     end
