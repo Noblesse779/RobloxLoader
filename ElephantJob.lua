@@ -414,56 +414,6 @@ if not env.ElephantHook4 and typeof(hookmetamethod) == "function"
         return old(self, ...)
     end))
 end
--- บางเกมเรียก FireServer แบบไม่ผ่าน namecall (remote.FireServer(remote, ...)) ดักทางนี้ด้วย
-if not env.ElephantHookFn and typeof(hookfunction) == "function" and inputRemote() then
-    env.ElephantHookFn = true
-    local wrap = typeof(newcclosure) == "function" and newcclosure or function(f) return f end
-    local oldFire
-    oldFire = hookfunction(inputRemote().FireServer, wrap(function(self, ...)
-        if self == inputRemote() then
-            local mount, flag = ...
-            if typeof(mount) == "Instance" then env.ElephantMount = mount end
-            if not env.ElephantSelfInput then env.ElephantInputAt = os.clock() end
-            local dir = env.ElephantAutopilotDir
-            if dir then return oldFire(self, mount, flag, dir) end
-        end
-        return oldFire(self, ...)
-    end))
-end
-
--- ทางที่ 2: ป้อนทิศเข้าระบบควบคุมของ Roblox (เหมือนดันจอยเอง)
--- ช้างอาจเดินตามปุ่มเดิน/จอยฝั่งเรา ไม่ใช่ตามค่าใน Input -> แก้ ControlModule ให้คืนทิศเรา
-task.spawn(function()
-    local ok, controls = pcall(function()
-        local pm = LocalPlayer:WaitForChild("PlayerScripts"):WaitForChild("PlayerModule", 10)
-        return require(pm):GetControls()
-    end)
-    if not ok or typeof(controls) ~= "table" or controls.ElephantPatched then return end
-    controls.ElephantPatched = true
-    local function camRelative(dir)
-        local cam = workspace.CurrentCamera
-        local _, yaw = cam.CFrame:ToEulerAnglesYXZ()
-        local rel = CFrame.Angles(0, yaw, 0):VectorToObjectSpace(dir)
-        return Vector3.new(rel.X, 0, rel.Z)
-    end
-    local origGet = controls.GetMoveVector
-    if typeof(origGet) == "function" then
-        controls.GetMoveVector = function(self, ...)
-            local dir = env.ElephantAutopilotDir
-            if dir and dir.Magnitude > 0 then return camRelative(dir) end
-            return origGet(self, ...)
-        end
-    end
-    local origMove = controls.moveFunction
-    if typeof(origMove) == "function" then
-        controls.moveFunction = function(player, vec, cameraRelative, ...)
-            local dir = env.ElephantAutopilotDir
-            if dir and dir.Magnitude > 0 then return origMove(player, dir, false) end
-            return origMove(player, vec, cameraRelative, ...)
-        end
-    end
-end)
-
 -- เป้าหมาย: ป้าย "จุดส่งซุง" ที่ขึ้นอยู่ในแมพ
 local TARGET_WORDS = { "จุดส่ง", "deliver", "drop off", "dropoff" }
 function findTarget()
