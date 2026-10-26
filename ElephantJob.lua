@@ -387,6 +387,12 @@ local function myMount()
     -- ช้างที่เกมส่งไปกับ Input (Remote Spy เห็นเป็น Model ไม่มี Parent ฝั่งเรา ก็ใช้ได้)
     local m = env.ElephantMount
     if typeof(m) == "Instance" then return m end
+    -- ยังไม่เคยดักได้: ใช้โมเดลที่ตัวเราติดอยู่ด้วย (ขี่ = ตัวเชื่อมกับช้าง)
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    local rootPart = hrp and hrp.AssemblyRootPart
+    if rootPart and rootPart ~= hrp and not rootPart:IsDescendantOf(char) then
+        return rootPart:FindFirstAncestorWhichIsA("Model") or rootPart
+    end
 end
 
 -- ติดตั้งตัวดักครั้งเดียว (รันสคริปต์ใหม่ใช้ตัวเดิม อ่านค่าจาก env)
@@ -406,6 +412,22 @@ if not env.ElephantHook4 and typeof(hookmetamethod) == "function"
             if dir then return old(self, mount, flag, dir) end
         end
         return old(self, ...)
+    end))
+end
+-- บางเกมเรียก FireServer แบบไม่ผ่าน namecall (remote.FireServer(remote, ...)) ดักทางนี้ด้วย
+if not env.ElephantHookFn and typeof(hookfunction) == "function" and inputRemote() then
+    env.ElephantHookFn = true
+    local wrap = typeof(newcclosure) == "function" and newcclosure or function(f) return f end
+    local oldFire
+    oldFire = hookfunction(inputRemote().FireServer, wrap(function(self, ...)
+        if self == inputRemote() then
+            local mount, flag = ...
+            if typeof(mount) == "Instance" then env.ElephantMount = mount end
+            if not env.ElephantSelfInput then env.ElephantInputAt = os.clock() end
+            local dir = env.ElephantAutopilotDir
+            if dir then return oldFire(self, mount, flag, dir) end
+        end
+        return oldFire(self, ...)
     end))
 end
 
@@ -514,10 +536,12 @@ local function driveTo(target)
         elseif os.clock() - lastMove > 4 then
             points, i = computePath(pos, target.Position), 1
             lastMove = os.clock()
-            status = "ช้างติด หาทางใหม่"
+            status = ("ช้างไม่ขยับ หาทางใหม่ (ช้าง: %s, เกมส่ง Input ล่าสุด %s)"):format(
+                tostring(mount and mount.Name),
+                env.ElephantInputAt and ("%.0f วิที่แล้ว"):format(os.clock() - env.ElephantInputAt) or "ไม่เคย")
         end
         if os.clock() - started > 180 then break end -- กันวนไม่จบ
-        task.wait(0.1)
+        RunService.Heartbeat:Wait() -- ส่งทุกเฟรมเหมือนเกม
     end
     env.ElephantAutopilotDir = nil
     releaseW()
