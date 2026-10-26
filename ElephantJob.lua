@@ -212,6 +212,61 @@ local function jobActive()
     return riding() or hudActive()
 end
 
+-- รหัสงาน (uuid) ที่ต้องส่งไปกับ Accept: เซิร์ฟเวอร์ส่งมาตอนกดคุย (ดักรีโมทฝั่งเราไม่เจอ)
+-- เลยฟังทุก RemoteEvent ใน ElephantJobSystem + หาในหน้าต่างคุย แล้วจำ uuid ล่าสุดไว้
+local UUID = "%x%x%x%x%x%x%x%x%-%x%x%x%x%-%x%x%x%x%-%x%x%x%x%-%x%x%x%x%x%x%x%x%x%x%x%x"
+local function findUuid(v, depth)
+    depth = depth or 0
+    if typeof(v) == "string" then
+        return v:match(UUID)
+    elseif typeof(v) == "table" and depth < 4 then
+        for k, x in pairs(v) do
+            local id = findUuid(k, depth + 1) or findUuid(x, depth + 1)
+            if id then return id end
+        end
+    elseif typeof(v) == "Instance" and depth < 4 then
+        for _, x in pairs(v:GetAttributes()) do
+            local id = findUuid(x, depth + 1)
+            if id then return id end
+        end
+        if v:IsA("StringValue") then return findUuid(v.Value, depth + 1) end
+    end
+end
+local offer = { id = nil, at = 0, from = "-" }
+local function setOffer(id, from)
+    offer.id, offer.at, offer.from = id, os.clock(), from
+end
+local function watchRemote(r)
+    if r:IsA("RemoteEvent") then
+        r.OnClientEvent:Connect(function(...)
+            local id = findUuid({ ... })
+            if id then setOffer(id, r.Name) end
+        end)
+    end
+end
+task.spawn(function()
+    local sys = game:GetService("ReplicatedStorage"):WaitForChild("ElephantJobSystem", 30)
+    if not sys then return end
+    for _, r in ipairs(sys:GetDescendants()) do watchRemote(r) end
+    sys.DescendantAdded:Connect(watchRemote)
+end)
+-- หาในหน้าต่างคุยที่ขึ้นบนจอ (บางเกมเก็บรหัสงานไว้ใน Attribute/StringValue ของปุ่ม)
+local function uuidFromGui()
+    for _, d in ipairs(LocalPlayer.PlayerGui:GetDescendants()) do
+        local id = findUuid(d)
+        if id then return id end
+    end
+end
+
+local function sendAccept(id)
+    local sys = game:GetService("ReplicatedStorage"):FindFirstChild("ElephantJobSystem")
+    local remotes = sys and sys:FindFirstChild("Remotes")
+    local request = remotes and remotes:FindFirstChild("Request")
+    if not request then return false end
+    local ok, res = pcall(function() return request:InvokeServer("Accept", id) end)
+    return ok, res
+end
+
 local function acceptJob()
     if jobActive() then
         status = "มีงานลากซุงอยู่แล้ว"
@@ -231,6 +286,21 @@ local function acceptJob()
     if hum then hum:UnequipTools() end
     local talked, prompt = goTalk()
     if not talked then return false end
+    -- ทางลัด: กดคุยแล้วได้รหัสงาน -> ส่ง Accept เองเลย ไม่ต้องพึ่งหน้าต่างตัวเลือก
+    local askedAt = os.clock()
+    pressPrompt(prompt, true)
+    local id
+    if waitFor(3, function()
+        id = (offer.at >= askedAt and offer.id) or uuidFromGui()
+        return id ~= nil
+    end) then
+        status = "ได้รหัสงานแล้ว ส่งรับงาน..."
+        sendAccept(id)
+        if waitFor(3, accepted) then
+            status = "รับงานแล้ว"
+            return true
+        end
+    end
     -- กด E จริงก่อน (เหมือนผู้เล่น) ถ้าหน้าต่างตัวเลือกไม่ขึ้นค่อยลอง fireproximityprompt
     local option
     local function dialog()
