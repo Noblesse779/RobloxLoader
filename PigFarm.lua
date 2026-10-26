@@ -139,19 +139,29 @@ local function monsterRoot(m)
     return m:FindFirstChild("HumanoidRootPart") or m.PrimaryPart or m:FindFirstChildWhichIsA("BasePart")
 end
 
-local function nearestPig()
+-- เลือกเป้า: ตัวเก่งสุดก่อน (เลือดเต็มมากสุด = บอส > มินิบอส > ลูกน้อง) ตัวเก่งเท่ากันเอาเลือดเหลือน้อยสุด
+-- maxDist = ระยะไกลสุดที่นับ (Kill Aura ใช้ระยะดาบ)
+local function pickPig(maxDist)
     local hrp = getRoot()
     if not hrp then return nil end
-    local best, bestDist
+    local best, bestMax, bestHp, bestDist
     for _, m in ipairs(ActiveMonsters:GetChildren()) do
         local hum = m:FindFirstChildOfClass("Humanoid")
         local root = monsterRoot(m)
         if hum and hum.Health > 0 and root and wanted(m) then
             local d = (root.Position - hrp.Position).Magnitude
-            if not bestDist or d < bestDist then best, bestDist = m, d end
+            if not maxDist or d <= maxDist then
+                local better = not best
+                    or hum.MaxHealth > bestMax
+                    or (hum.MaxHealth == bestMax and hum.Health < bestHp)
+                    or (hum.MaxHealth == bestMax and hum.Health == bestHp and d < bestDist)
+                if better then
+                    best, bestMax, bestHp, bestDist = m, hum.MaxHealth, hum.Health, d
+                end
+            end
         end
     end
-    return best
+    return best, bestDist
 end
 
 ---------------------------------------------------------------- เดิน / วาร์ป
@@ -205,7 +215,7 @@ local function fight(pig)
     local pigHum = pig:FindFirstChildOfClass("Humanoid")
     local reach = math.max(2.5, math.min(stats.Range - 1.5, 4))
     status = ("ตี %s (%s)"):format(pig.Name, tool.Name)
-    local started = os.clock()
+    local started, lastCheck = os.clock(), os.clock()
     while alive() and auto.on and pig.Parent and pigHum and pigHum.Health > 0 do
         local hrp, hum, root = getRoot(), getHum(), monsterRoot(pig)
         if not (hrp and hum and hum.Health > 0 and root) then break end
@@ -230,6 +240,13 @@ local function fight(pig)
             swing(stats)
         end
         if os.clock() - started > 60 then break end -- ตีไม่ตายใน 1 นาที (ติด/หนี) ไปตัวอื่น
+        -- มีตัวเก่งกว่าโผล่มา (เช่นมินิบอส/บอสเกิด) เปลี่ยนไปตีตัวนั้นก่อน
+        if os.clock() - lastCheck > 1 then
+            lastCheck = os.clock()
+            local top = pickPig()
+            local topHum = top and top:FindFirstChildOfClass("Humanoid")
+            if topHum and topHum.MaxHealth > pigHum.MaxHealth then break end
+        end
         task.wait(0.05)
     end
     if pigHum and pigHum.Health <= 0 then
@@ -248,15 +265,11 @@ local function auraLoop()
             status = "Kill Aura: ไม่มีดาบ / หยิบดาบไม่ได้"
             task.wait(1)
         elseif hrp and hum and hum.Health > 0 and not auto.on then
-            local best, bestDist
-            for _, m in ipairs(ActiveMonsters:GetChildren()) do
-                local h = m:FindFirstChildOfClass("Humanoid")
-                local root = monsterRoot(m)
-                if h and h.Health > 0 and root and wanted(m) then
-                    local d = (root.Position - hrp.Position).Magnitude
-                    if not bestDist or d < bestDist then best, bestDist = root, d end
-                end
-            end
+            local held = weaponTools()[1]
+            local range = held and WeaponConfig.Weapons[held.Name].Range + 1 or 0
+            local pig = pickPig(range)
+            local best = pig and monsterRoot(pig)
+            local bestDist = best and (best.Position - hrp.Position).Magnitude
             local stats = best and WeaponConfig.Weapons[(weaponTools()[1] or {}).Name or ""]
             if best and stats and bestDist <= stats.Range + 1 then
                 local tool
@@ -284,7 +297,7 @@ local function autoLoop()
             status = "ไม่มีดาบ / หยิบดาบไม่ได้ (ซื้อที่ลุงน้อยขายอาวุธ)"
             task.wait(1)
         else
-            local pig = nearestPig()
+            local pig = pickPig()
             if pig then
                 fight(pig)
             else
