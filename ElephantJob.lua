@@ -1,6 +1,6 @@
 -- แมพงานเลี้ยงช้าง / ลากซุง
 -- ขั้นแรก: วาร์ปไปหา NPC "ตาโชคเลี้ยงช้าง" แล้วกดคุย (E) "คุยเรื่องงานลากซุง"
--- รับงานจริงด้วย ReplicatedStorage.ElephantJobSystem.Remotes.Request:InvokeServer("Accept", <รหัสงาน>)
+-- รับงาน: กดคุย -> OpenDialogue ส่ง token มา -> Request:InvokeServer("Accept", token)  ขับช้าง: BuffaloRideNetwork.Input
 
 local Players = game:GetService("Players")
 local ProximityPromptService = game:GetService("ProximityPromptService")
@@ -127,336 +127,138 @@ local function goTalk()
     return true, use
 end
 
----------------------------------------------------------------- เลือก "1.) รับงานลากซุง"
--- คุยแล้วมีตัวเลือก 1.) ["รับงานลากซุง"]  2.) ["ไว้ก่อนครับ"] -> เลือกข้อ 1 แล้วเกมส่ง Accept + รหัสงานเอง
-local function isShown(gui)
-    while gui do
-        if gui:IsA("ScreenGui") then return gui.Enabled end
-        if gui:IsA("GuiObject") and not gui.Visible then return false end
-        gui = gui.Parent
-    end
-    return false
-end
+---------------------------------------------------------------- ข้อมูลงานจากเกม
+-- อ่านจากโค้ดเกม (PlayerGui.ElephantJobUI.Client, PlayerScripts.BuffaloRideClient):
+--   Remotes.State        เซิร์ฟเวอร์ -> เรา { status = "None" / "Active" / ส่งแล้ว, index, cframe, size, road }
+--                        status ไม่ใช่ "Active" = ส่งแล้ว ต้องขี่กลับไปหาตาโชค (cframe = จุดที่ต้องไป)
+--   Remotes.OpenDialogue เซิร์ฟเวอร์ -> เรา ตอนกดคุย { kind = "Question", token, message }
+--   Remotes.Request:InvokeServer("Accept", token) = รับงาน / ("State") = ขอสถานะงาน
+--   LocalPlayer.BuffaloRideMount (ObjectValue) = ช้างที่ขี่อยู่ (ข้างในมี MountRoot)
+--   BuffaloRideNetwork.Input:FireServer(ช้าง, คันเร่ง, ทิศ) คันเร่ง 1 = เดินหน้า 0 = หยุด -1 = ถอย
+--     ทิศ = ทิศที่กล้องหัน (แนวราบ) เซิร์ฟเวอร์เป็นคนเดินช้าง
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+local JobSystem = ReplicatedStorage:WaitForChild("ElephantJobSystem")
+local JobRemotes = JobSystem:WaitForChild("Remotes")
+local RideNet = ReplicatedStorage:WaitForChild("BuffaloRideNetwork")
+local InputRemote = RideNet:WaitForChild("Input")
+local okNav, RoadNavigation = pcall(function() return require(JobSystem:WaitForChild("RoadNavigation")) end)
+if not okNav then RoadNavigation = nil end
 
-local ACCEPT_WORDS = { "รับงานลากซุง", "accept", "take the job" }
--- strict = ต้องมี "1." ด้วย (กันไปเจอป้ายชื่องานที่ตั้งอยู่ในแมพตลอด)
-local function scanAccept(root, needShown, strict)
-    for _, d in ipairs(root:GetDescendants()) do
-        if (d:IsA("TextButton") or d:IsA("TextLabel")) and (not needShown or isShown(d))
-            and (not strict or d.Text:find("1.", 1, true)) then
-            local t = d.Text:lower()
-            for _, w in ipairs(ACCEPT_WORDS) do
-                if t:find(w, 1, true) and not t:find("ไว้ก่อน", 1, true) then
-                    return d:IsA("GuiButton") and d or d:FindFirstAncestorWhichIsA("GuiButton") or d
-                end
-            end
-        end
+local jobState = { status = "None" }
+local offer = { token = nil, at = 0 }
+local conns = {}
+table.insert(conns, JobRemotes:WaitForChild("State").OnClientEvent:Connect(function(s)
+    if type(s) == "table" then jobState = s end
+end))
+table.insert(conns, JobRemotes:WaitForChild("OpenDialogue").OnClientEvent:Connect(function(d)
+    if type(d) == "table" and d.kind == "Question" and d.token then
+        offer.token, offer.at = d.token, os.clock()
     end
-end
--- หน้าต่างตัวเลือกหลังคุย: หาในหน้าจอก่อน ไม่เจอค่อยหาในแมพ/CoreGui (บางเกมทำเป็นป้ายเหนือหัว)
-local function findAcceptOption()
-    local found = scanAccept(LocalPlayer.PlayerGui, true)
-    if found then return found end
-    for _, bb in ipairs(workspace:GetDescendants()) do
-        if (bb:IsA("BillboardGui") or bb:IsA("SurfaceGui")) and bb.Enabled then
-            found = scanAccept(bb, false, true)
-            if found then return found end
-        end
-    end
-    pcall(function() found = scanAccept(game:GetService("CoreGui"), false, true) end)
-    return found
-end
+end))
+task.spawn(function()
+    while alive() do task.wait(1) end
+    for _, c in ipairs(conns) do c:Disconnect() end
+end)
 
-local function clickGui(gui)
-    local c = gui.AbsolutePosition + gui.AbsoluteSize / 2
-    local sg = gui:FindFirstAncestorWhichIsA("ScreenGui")
-    if sg and not sg.IgnoreGuiInset then
-        c += game:GetService("GuiService"):GetGuiInset()
-    end
-    VirtualInputManager:SendMouseButtonEvent(c.X, c.Y, 0, true, game, 1)
-    task.wait(0.05)
-    VirtualInputManager:SendMouseButtonEvent(c.X, c.Y, 0, false, game, 1)
-end
-
-local function pressGuiButton(button)
-    if button:IsA("GuiButton") then
-        for _, signal in ipairs({ "MouseButton1Click", "Activated" }) do
-            local fired = pcall(function()
-                if typeof(firesignal) == "function" then
-                    firesignal(button[signal])
-                elseif typeof(getconnections) == "function" then
-                    for _, c in ipairs(getconnections(button[signal])) do c:Fire() end
-                else
-                    error("no")
-                end
-            end)
-            if fired then return end
-        end
-    end
-    clickGui(button)
-end
-
--- ขี่ช้างอยู่ไหม (นั่งบนที่นั่งของช้าง) ใช้ได้เฉพาะถ้าเกมใช้ Seat
-local function riding()
-    local char = LocalPlayer.Character
-    local hum = char and char:FindFirstChildOfClass("Humanoid")
-    if hum and (hum.SeatPart ~= nil or hum.Sit) then return true end
-    -- แมพนี้ไม่ได้ใช้ที่นั่ง: ขี่อยู่ = เกมส่ง BuffaloRideNetwork.Input มาเมื่อกี้
-    -- หรือตัวผู้เล่นถูกเชื่อมติดกับช้าง (ชิ้นหลักของก้อนไม่ใช่ตัวเราแล้ว)
-    if env.ElephantInputAt and os.clock() - env.ElephantInputAt < 1.5 then return true end
-    local hrp = char and char:FindFirstChild("HumanoidRootPart")
-    return hrp ~= nil and hrp.AssemblyRootPart ~= nil and hrp.AssemblyRootPart ~= hrp
-end
-
--- มีงานลากซุงอยู่ไหม: เพิ่งรับงาน (ดัก Request "Accept" ได้) / ป้ายบนจอ "ลากซุงไปจุด"
--- / ป้าย "จุดส่งซุง" ในแมพ  ถ้ามีงานอยู่ห้ามรับงานซ้ำ และห้ามวาร์ป (วาร์ปตอนขี่ = ช้างจมดิน)
-local findTarget -- ประกาศไว้ก่อน ตัวจริงอยู่ข้างล่าง
-local function hudActive()
-    for _, d in ipairs(LocalPlayer.PlayerGui:GetDescendants()) do
-        if d:IsA("TextLabel") and d.Visible and d.Text:find("ลากซุงไปจุด", 1, true) then
-            return true
-        end
-    end
-    return false
-end
-local function jobActive()
-    -- รับงานแล้วถือว่ามีงานไปยาวๆ (กันรับซ้ำ) จนกว่าจะกด ลงจากช้าง หรือผ่านไป 10 นาทีไม่เห็นป้ายงาน
-    if env.ElephantAcceptAt and os.clock() - env.ElephantAcceptAt < 600 then return true end
-    -- ไม่นับป้าย "จุดส่งซุง" ในแมพ (บางป้ายตั้งอยู่ตลอด ทำให้คิดว่ามีงานทั้งที่ไม่มี)
-    return riding() or hudActive()
-end
-
--- รหัสงาน (uuid) ที่ต้องส่งไปกับ Accept: เซิร์ฟเวอร์ส่งมาตอนกดคุย (ดักรีโมทฝั่งเราไม่เจอ)
--- เลยฟังทุก RemoteEvent ใน ElephantJobSystem + หาในหน้าต่างคุย แล้วจำ uuid ล่าสุดไว้
-local UUID = "%x%x%x%x%x%x%x%x%-%x%x%x%x%-%x%x%x%x%-%x%x%x%x%-%x%x%x%x%x%x%x%x%x%x%x%x"
-local function findUuid(v, depth)
-    depth = depth or 0
-    if typeof(v) == "string" then
-        return v:match(UUID)
-    elseif typeof(v) == "table" and depth < 4 then
-        for k, x in pairs(v) do
-            local id = findUuid(k, depth + 1) or findUuid(x, depth + 1)
-            if id then return id end
-        end
-    elseif typeof(v) == "Instance" and depth < 4 then
-        for _, x in pairs(v:GetAttributes()) do
-            local id = findUuid(x, depth + 1)
-            if id then return id end
-        end
-        if v:IsA("StringValue") then return findUuid(v.Value, depth + 1) end
-    end
-end
-local offer = { id = nil, at = 0, from = "-" }
-local function setOffer(id, from)
-    offer.id, offer.at, offer.from = id, os.clock(), from
-end
-local function watchRemote(r)
-    if r:IsA("RemoteEvent") then
-        r.OnClientEvent:Connect(function(...)
-            local id = findUuid({ ... })
-            if id then setOffer(id, r.Name) end
-        end)
-    end
+local function request(action, arg)
+    local ok, res = pcall(function() return JobRemotes.Request:InvokeServer(action, arg) end)
+    if ok and type(res) == "table" then return res end
+    return { ok = false, message = ok and "-" or tostring(res) }
 end
 task.spawn(function()
-    local sys = game:GetService("ReplicatedStorage"):WaitForChild("ElephantJobSystem", 30)
-    if not sys then return end
-    for _, r in ipairs(sys:GetDescendants()) do watchRemote(r) end
-    sys.DescendantAdded:Connect(watchRemote)
+    local res = request("State")
+    if res.ok and type(res.state) == "table" then jobState = res.state end
 end)
-local function sendAccept(id)
-    local sys = game:GetService("ReplicatedStorage"):FindFirstChild("ElephantJobSystem")
-    local remotes = sys and sys:FindFirstChild("Remotes")
-    local request = remotes and remotes:FindFirstChild("Request")
-    if not request then return false end
-    local ok, res = pcall(function() return request:InvokeServer("Accept", id) end)
-    return ok, res
+
+-- ช้างที่ขี่อยู่ + ชิ้นหลัก (MountRoot)
+local function myMount()
+    local ref = LocalPlayer:FindFirstChild("BuffaloRideMount")
+    local m = ref and ref.Value
+    if m and m:IsDescendantOf(workspace) then
+        local root = m:FindFirstChild("MountRoot")
+        if root then return m, root end
+    end
+end
+local function riding()
+    return myMount() ~= nil
+end
+local function jobActive()
+    return jobState.status ~= nil and jobState.status ~= "None"
 end
 
+---------------------------------------------------------------- รับงาน
+-- กดคุย -> เซิร์ฟเวอร์ส่ง token มาทาง OpenDialogue -> ส่ง Accept + token เอง (ไม่ต้องกดตัวเลือก)
+-- ขี่ช้างอยู่ห้ามวาร์ป (ช้างจม) ต้องขี่ไปใกล้ NPC ก่อน
 local function acceptJob()
-    if jobActive() then
-        status = "มีงานลากซุงอยู่แล้ว"
+    if jobState.status == "Active" then
+        status = "มีงานอยู่แล้ว"
         return true
     end
-    -- รับงานสำเร็จ = ป้าย "ลากซุงไปจุด" ขึ้น หรือได้ขี่ช้าง
-    local function accepted()
-        if hudActive() or riding() then
-            env.ElephantAcceptAt = os.clock()
-            return true
-        end
-        return false
-    end
-    local function pressOne()
-        VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.One, false, game)
-        task.wait(0.1)
-        VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.One, false, game)
-    end
-    -- เก็บของที่ถืออยู่ก่อน (ถือของอยู่จะคุยกับ NPC ไม่ได้ / กด 1 ไปหยิบของ)
     local hum = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
     if hum then hum:UnequipTools() end
-    local talked, prompt = goTalk()
-    if not talked then return false end
-    -- ทางลัด: กดคุยแล้วได้รหัสงาน -> ส่ง Accept เองเลย ไม่ต้องพึ่งหน้าต่างตัวเลือก
-    local askedAt = os.clock()
-    pressPrompt(prompt, true)
-    -- (ไม่เอา uuid จากหน้าจอ: เจอรหัสอื่นที่ไม่ใช่งาน แล้วสคริปต์นึกว่ารับงานแล้ว)
-    local id
-    if waitFor(2, function()
-        id = offer.at >= askedAt and offer.id
-        return id ~= nil and id ~= false
-    end) then
-        status = "ได้รหัสงานแล้ว ส่งรับงาน..."
-        sendAccept(id)
-        -- นับว่าสำเร็จต่อเมื่อขึ้นช้าง/ป้ายงานขึ้นจริง
-        if waitFor(6, accepted) then
-            status = "รับงานแล้ว"
-            return true
+    local prompt
+    if riding() then
+        prompt = findJobPrompt()
+        if not prompt then
+            status = "หา NPC ไม่เจอ"
+            return false
         end
+    else
+        local talked
+        talked, prompt = goTalk()
+        if not talked then return false end
     end
-    -- กด E จริงก่อน (เหมือนผู้เล่น) ถ้าหน้าต่างตัวเลือกไม่ขึ้นค่อยลอง fireproximityprompt
-    local option
-    local function dialog()
-        option = findAcceptOption()
-        return option ~= nil or accepted()
-    end
-    -- กดคุยไปแล้วข้างบน หน้าต่างอาจขึ้นอยู่แล้ว (กด E ซ้ำจะปิดมัน)
-    if not waitFor(1, dialog) then
+    local askedAt = os.clock()
+    local function asked() return offer.at >= askedAt and offer.token ~= nil end
+    pressPrompt(prompt, true)
+    if not waitFor(3, asked) then
         pressPrompt(prompt, false)
-        if not waitFor(3, dialog) then
-            -- ห้ามกด 1 ตอนหน้าต่างไม่ขึ้น (จะไปเปิดกระเป๋า/ช่องของแทน)
-            status = "กดคุยแล้วแต่หน้าต่างตัวเลือกไม่ขึ้น"
+        if not waitFor(3, asked) then
+            status = "กดคุยแล้วแต่ NPC ไม่ถามรับงาน"
             return false
         end
     end
-    if accepted() then
+    local res = request("Accept", offer.token)
+    offer.token = nil
+    if waitFor(6, function() return jobState.status == "Active" end) then
         status = "รับงานแล้ว"
         return true
     end
-    status = "เจอตัวเลือก รับงานลากซุง กำลังเลือก..."
-    -- หน้าต่างขึ้นแล้ว: กดเลข 1 (ผู้เล่นกดเองก็รับงานได้) ไม่ติดค่อยกดที่ตัวเลือก
-    pressOne()
-    if waitFor(6, accepted) then
-        status = "รับงานแล้ว"
-        return true
-    end
-    if option then pressGuiButton(option) end
-    if waitFor(6, accepted) then
-        status = "รับงานแล้ว"
-        return true
-    end
-    status = "เจอตัวเลือกแล้วแต่กดไม่ติด"
+    status = "รับงานไม่สำเร็จ: " .. tostring(res.message or "-")
     return false
 end
 
 -- ลงจากช้าง = เลิกงาน (เหมือนกด Spacebar): BuffaloRideNetwork.Dismount:FireServer()
 local function dismount()
-    local net = game:GetService("ReplicatedStorage"):FindFirstChild("BuffaloRideNetwork")
-    local remote = net and net:FindFirstChild("Dismount")
-    if not remote then
-        status = "หา BuffaloRideNetwork.Dismount ไม่เจอ"
-        return false
-    end
-    remote:FireServer()
-    env.ElephantAcceptAt = nil
-    env.ElephantMount = nil
+    env.ElephantDrive = nil
+    RideNet.Dismount:FireServer()
     status = "ลงจากช้างแล้ว (เลิกงาน)"
     return true
 end
 
 ---------------------------------------------------------------- ลากซุงอัตโนมัติ
--- ขี่ช้างอยู่ซุงติดมาแล้ว เดินไปจุดส่ง ("จุดส่งซุง 2") ตามลูกศร ส่งแล้วได้งานต่อทันที
--- บังคับช้าง: เกมส่ง BuffaloRideNetwork.Input:FireServer(ช้าง, 0, ทิศทาง) ทุกเฟรม
--- สคริปต์ดักการส่งนั้นแล้ว "เปลี่ยนทิศทาง" เป็นทิศไปจุดส่ง (เหมือนกดเดินไปทางนั้นเอง)
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local PathfindingService = game:GetService("PathfindingService")
-local RunService = game:GetService("RunService")
+local auto = { on = false, delivered = 0 }
 
-local auto = { on = false, delivered = 0, dir = nil }
-
-local function inputRemote()
-    local net = ReplicatedStorage:FindFirstChild("BuffaloRideNetwork")
-    return net and net:FindFirstChild("Input")
-end
-
--- ช้างของเรา: จากที่นั่ง หรือจากตัวแรกที่เกมส่งไปกับ Input (ดักได้ใน hook)
-local function myMount()
-    local char = LocalPlayer.Character
-    local hum = char and char:FindFirstChildOfClass("Humanoid")
-    local seat = hum and hum.SeatPart
-    if seat then return seat:FindFirstAncestorWhichIsA("Model") or seat end
-    -- ช้างที่เกมส่งไปกับ Input (Remote Spy เห็นเป็น Model ไม่มี Parent ฝั่งเรา ก็ใช้ได้)
-    local m = env.ElephantMount
-    if typeof(m) == "Instance" then return m end
-    -- ยังไม่เคยดักได้: ใช้โมเดลที่ตัวเราติดอยู่ด้วย (ขี่ = ตัวเชื่อมกับช้าง)
-    local hrp = char and char:FindFirstChild("HumanoidRootPart")
-    local rootPart = hrp and hrp.AssemblyRootPart
-    if rootPart and rootPart ~= hrp and not rootPart:IsDescendantOf(char) then
-        return rootPart:FindFirstAncestorWhichIsA("Model") or rootPart
-    end
-end
-
--- ติดตั้งตัวดักครั้งเดียว (รันสคริปต์ใหม่ใช้ตัวเดิม อ่านค่าจาก env)
--- Input:FireServer(ช้าง, flag, ทิศ) = จำช้างไว้ และเปลี่ยนทิศเป็นทิศไปจุดส่ง
--- ห้ามดัก InvokeServer: executor บางตัวรอผลใน hook ไม่ได้ ทำให้ Accept ของเกมพัง (ช้างไม่ขึ้น)
-if not env.ElephantHook4 and typeof(hookmetamethod) == "function"
+-- เกมส่ง Input เองทุก 0.05-0.1 วิ (คันเร่งจากปุ่ม W/S) ถ้าไม่ดักไว้ มันจะส่ง "หยุด" ทับของเรา
+-- ตอนขับเอง: เปลี่ยนเป็น คันเร่ง/ทิศ ของสคริปต์ (env.ElephantDrive) ไม่ดัก = ส่งตามปกติ
+if not env.ElephantHook5 and typeof(hookmetamethod) == "function"
     and typeof(getnamecallmethod) == "function" then
-    env.ElephantHook4 = true
+    env.ElephantHook5 = true
     local wrap = typeof(newcclosure) == "function" and newcclosure or function(f) return f end
     local old
     old = hookmetamethod(game, "__namecall", wrap(function(self, ...)
-        if getnamecallmethod() == "FireServer" and self == inputRemote() then
-            local mount, flag = ...
-            if typeof(mount) == "Instance" then env.ElephantMount = mount end
-            if not env.ElephantSelfInput then env.ElephantInputAt = os.clock() end
-            local dir = env.ElephantAutopilotDir
-            if dir then return old(self, mount, flag, dir) end
+        local drive = env.ElephantDrive
+        if drive and self == drive.remote and getnamecallmethod() == "FireServer" then
+            local mount = ...
+            return old(self, mount, drive.throttle, drive.dir)
         end
         return old(self, ...)
     end))
 end
--- เป้าหมาย: ป้าย "จุดส่งซุง" ที่ขึ้นอยู่ในแมพ
-local TARGET_WORDS = { "จุดส่ง", "deliver", "drop off", "dropoff" }
-function findTarget()
-    local hrp = getRoot()
-    local best, bestDist
-    for _, d in ipairs(workspace:GetDescendants()) do
-        if d:IsA("TextLabel") then
-            local t = d.Text:lower()
-            local match = false
-            for _, w in ipairs(TARGET_WORDS) do
-                if t:find(w, 1, true) then match = true break end
-            end
-            if match then
-                local bb = d:FindFirstAncestorWhichIsA("BillboardGui")
-                if not bb or bb.Enabled then
-                    local part = (bb and bb.Adornee) or d:FindFirstAncestorWhichIsA("BasePart")
-                    if part and part:IsA("BasePart") then
-                        local dist = hrp and (part.Position - hrp.Position).Magnitude or 0
-                        if not bestDist or dist < bestDist then
-                            best, bestDist = part, dist
-                        end
-                    end
-                end
-            end
-        end
-    end
-    return best
-end
 
 local function flat(v)
     return Vector3.new(v.X, 0, v.Z)
-end
-
--- จุดทางเดิน (หลบสิ่งกีดขวาง) ถ้าหาทางไม่ได้ เดินตรงไปเลย
-local function computePath(from, to)
-    local path = PathfindingService:CreatePath({ AgentRadius = 5, AgentHeight = 10, AgentCanJump = false })
-    local ok = pcall(function() path:ComputeAsync(from, to) end)
-    if ok and path.Status == Enum.PathStatus.Success then
-        local pts = {}
-        for _, wp in ipairs(path:GetWaypoints()) do table.insert(pts, wp.Position) end
-        return pts
-    end
-    return { to }
 end
 
 local function deliveryCount()
@@ -468,99 +270,83 @@ local function deliveryCount()
     end
 end
 
--- บังคับช้างผ่าน BuffaloRideNetwork.Input (เซิร์ฟเวอร์เป็นคนเดินช้าง)
--- เลื่อนช้างฝั่งเราเอง (ลอย/วาร์ป) เซิร์ฟเวอร์ไม่เห็น ถึงจุดแล้วก็ไม่นับ
-local function driveTo(target)
-    if not myMount() then
-        status = "ขยับช้างเองนิดนึงก่อน (กด W) ให้สคริปต์จำช้างได้"
-        return false
+-- เส้นทางตามถนนแบบเดียวกับลูกศรในเกม (RoadNavigation.Build) หาไม่ได้ = เดินตรง
+local function buildPath(from, to)
+    if RoadNavigation and jobState.road then
+        local ok, path = pcall(RoadNavigation.Build, jobState.road, from, to)
+        if ok and type(path) == "table" and #path > 0 then return path end
     end
-    -- ตำแหน่งใช้ตัวผู้เล่น (ขี่อยู่บนช้าง ไปด้วยกัน) ไม่ต้องรู้ว่าช้างคือชิ้นไหน
-    local root = getRoot()
-    if not root then return false end
-    local points = computePath(root.Position, target.Position)
-    local i = 1
-    local lastPos, lastMove, started = root.Position, os.clock(), os.clock()
-    local lastCheck = 0
-    -- ช้างเดินด้วย WASD ตามทิศกล้อง: หมุนกล้องให้หันไปทางจุดส่งทุกเฟรม แล้วกด W ค้าง
-    local RENDER_NAME = "ElephantAutopilotCam"
-    pcall(function() RunService:UnbindFromRenderStep(RENDER_NAME) end)
-    RunService:BindToRenderStep(RENDER_NAME, Enum.RenderPriority.Camera.Value + 1, function()
-        local dir = env.ElephantAutopilotDir
-        local cam = workspace.CurrentCamera
-        if not dir or dir.Magnitude < 0.1 or not cam or not root.Parent then return end
-        local at = root.Position
-        local from = at - dir * 22 + Vector3.new(0, 10, 0)
-        cam.CFrame = CFrame.lookAt(from, at + dir * 10)
-    end)
-    local lastKey = 0
-    local function holdW()
-        if os.clock() - lastKey > 0.5 then -- กดซ้ำเรื่อยๆ กันหลุด
-            lastKey = os.clock()
-            VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.W, false, game)
-        end
-    end
-    local function releaseW()
-        pcall(function() RunService:UnbindFromRenderStep(RENDER_NAME) end)
-        VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.W, false, game)
-    end
-    while alive() and auto.on and root.Parent do
-        local pos = root.Position
-        -- เหยียบจุดแล้วป้ายจะย้ายไปจุดถัดไปเอง (ไม่มี remote) = ถึงแล้ว
-        if os.clock() - lastCheck > 0.5 then
-            lastCheck = os.clock()
-            local now = findTarget()
-            if now ~= target then
-                env.ElephantAutopilotDir = nil
-                releaseW()
-                return true
-            end
-        end
-        -- ถึงจุดทางเดินนี้แล้ว ไปจุดถัดไป
-        while points[i] and flat(points[i] - pos).Magnitude < 6 and i < #points do
-            i += 1
-        end
-        local dir = flat((points[i] or target.Position) - pos)
-        dir = dir.Magnitude > 0.1 and dir.Unit or Vector3.zero
-        env.ElephantAutopilotDir = dir
-        holdW()
-        -- เกมส่ง Input เองรัวๆ อยู่แล้ว (hook เปลี่ยนทิศให้) ส่งเพิ่มเองด้วยถ้ารู้ว่าช้างตัวไหน
-        local mount, remote = myMount(), inputRemote()
-        if mount and remote then
-            env.ElephantSelfInput = true
-            pcall(function() remote:FireServer(mount, 0, dir) end)
-            env.ElephantSelfInput = false
-        end
-        -- ติด 4 วิ: คำนวณทางใหม่
-        if (pos - lastPos).Magnitude > 2 then
-            lastPos, lastMove = pos, os.clock()
-        elseif os.clock() - lastMove > 4 then
-            points, i = computePath(pos, target.Position), 1
-            lastMove = os.clock()
-            status = ("ช้างไม่ขยับ หาทางใหม่ (ช้าง: %s, เกมส่ง Input ล่าสุด %s)"):format(
-                tostring(mount and mount.Name),
-                env.ElephantInputAt and ("%.0f วิที่แล้ว"):format(os.clock() - env.ElephantInputAt) or "ไม่เคย")
-        end
-        if os.clock() - started > 180 then break end -- กันวนไม่จบ
-        RunService.Heartbeat:Wait() -- ส่งทุกเฟรมเหมือนเกม
-    end
-    env.ElephantAutopilotDir = nil
-    releaseW()
-    return false
+    return { from, to }
 end
 
--- รับงานแล้วแต่ยังไม่ได้ขึ้นช้าง: หาปุ่มขี่ช้าง (ProximityPrompt) ใกล้ๆ แล้วกด
+-- ขับช้างไป pos จนกว่า done() จริง (เกมนับแล้ว) หรือถึงระยะ arrive (ถ้า done = nil)
+local function driveTo(pos, arrive, done)
+    local path, pathAt = nil, 0
+    local lastPos, lastMove, started, lastSend = nil, os.clock(), os.clock(), 0
+    local reverseUntil = 0
+    local result = false
+    while alive() and auto.on do
+        if done and done() then result = true break end
+        local mount, root = myMount()
+        if not root then break end
+        local ground = root.Position - Vector3.new(0, (mount:GetAttribute("GroundOffset") or 6.91) - 0.2, 0)
+        local dist = flat(pos - ground).Magnitude
+        if not done and dist <= arrive then result = true break end
+        if os.clock() - pathAt > 0.5 or not path then
+            pathAt = os.clock()
+            path = buildPath(ground, pos)
+        end
+        -- จุดถัดไปบนเส้นทางที่ห่างเกิน 6 studs (ใกล้เป้าแล้วเล็งเป้าตรงๆ)
+        local wp = pos
+        if dist > 8 then
+            for i = 2, #path do
+                if flat(path[i] - ground).Magnitude > 6 then wp = path[i] break end
+            end
+        end
+        local d = flat(wp - ground)
+        local dir = d.Magnitude > 0.05 and d.Unit or flat(root.CFrame.LookVector).Unit
+        local throttle = 1
+        if os.clock() < reverseUntil then throttle = -1 end
+        -- ถึงกลางจุดส่งแล้วแต่เกมยังไม่นับ: ค่อยๆ เดินหน้าช้าๆ ผ่านจุด
+        env.ElephantDrive = { remote = InputRemote, throttle = throttle, dir = dir }
+        if os.clock() - lastSend > 0.1 then
+            lastSend = os.clock()
+            pcall(function() InputRemote:FireServer(mount, throttle, dir) end)
+        end
+        -- ติด 3 วิ: ถอยหลัง 1 วิแล้วไปต่อ
+        if not lastPos or (root.Position - lastPos).Magnitude > 1.5 then
+            lastPos, lastMove = root.Position, os.clock()
+        elseif os.clock() - lastMove > 3 then
+            lastMove = os.clock()
+            reverseUntil = os.clock() + 1
+            status = "ช้างติด ถอยแล้วไปใหม่"
+        end
+        if os.clock() - started > 300 then break end -- กันวนไม่จบ
+        RunService.Heartbeat:Wait()
+    end
+    env.ElephantDrive = nil
+    local mount = myMount()
+    if mount then
+        pcall(function() InputRemote:FireServer(mount, 0, flat(workspace.CurrentCamera.CFrame.LookVector).Unit) end)
+    end
+    return result
+end
+
+-- รับงานแล้วแต่ยังไม่ได้ขึ้นช้าง: หาปุ่มขี่ช้าง (ProximityPrompt บนช้าง) ใกล้ๆ แล้วกด
+local CollectionService = game:GetService("CollectionService")
 local MOUNT_WORDS = { "ขี่", "ride", "mount", "ขึ้นช้าง" }
 local function findMountPrompt()
     local hrp = getRoot()
     local best, bestDist
     for _, p in ipairs(workspace:GetDescendants()) do
         if p:IsA("ProximityPrompt") and p.Enabled then
-            local text = (p.ActionText .. " " .. p.ObjectText .. " " .. (p.Parent and p.Parent.Name or "")):lower()
+            local text = (p.ActionText .. " " .. p.ObjectText):lower()
             local match = false
             for _, w in ipairs(MOUNT_WORDS) do
                 if text:find(w, 1, true) then match = true break end
             end
+            local model = p:FindFirstAncestorWhichIsA("Model")
+            if model and CollectionService:HasTag(model, "RideableBuffalo") then match = true end
             local pos = match and promptPosition(p)
             if pos and hrp then
                 local d = (pos - hrp.Position).Magnitude
@@ -573,51 +359,55 @@ end
 
 local lastMountTry = 0
 local function tryMount()
-    if hudActive() or riding() or os.clock() - lastMountTry < 5 then return end
+    if riding() or os.clock() - lastMountTry < 5 then return end
     lastMountTry = os.clock()
     local prompt = findMountPrompt()
     if not prompt then
-        status = "รับงานแล้ว รอขึ้นช้าง (ไม่เจอปุ่มขี่ช้าง)"
+        status = "มีงานแต่ไม่ได้ขี่ช้าง (ไม่เจอปุ่มขี่ช้าง)"
         return
     end
     local hrp, pos = getRoot(), promptPosition(prompt)
     if hrp and pos and (pos - hrp.Position).Magnitude > prompt.MaxActivationDistance - 2 then
-        -- ยังไม่ได้ขี่ วาร์ปตัวไปข้างช้างได้ (ไม่จม)
-        hrp.CFrame = CFrame.new(pos + Vector3.new(3, 2, 0), pos)
+        hrp.CFrame = CFrame.new(pos + Vector3.new(3, 2, 0), pos) -- ยังไม่ได้ขี่ วาร์ปได้
         task.wait(0.4)
     end
     status = "กดขึ้นช้าง (" .. prompt.ActionText .. ")"
     pressPrompt(prompt, true)
-    task.wait(1)
-    if not hudActive() and not riding() then pressPrompt(prompt, false) end
 end
 
 local function autoLoop()
     while alive() and auto.on do
-        if not jobActive() then
+        local st = jobState.status
+        if not jobActive() and not riding() then
             status = "ยังไม่มีงาน: ไปรับงาน"
             if not acceptJob() then task.wait(3) end
+        elseif not riding() then
+            tryMount()
+            task.wait(1)
+        elseif st == "Active" and jobState.cframe then
+            local idx = jobState.index
+            status = "ขับช้างไปจุดส่ง " .. tostring(idx)
+            if driveTo(jobState.cframe.Position, 0, function()
+                return jobState.status ~= "Active" or jobState.index ~= idx
+            end) then
+                auto.delivered += 1
+                status = "ส่งจุด " .. tostring(idx) .. " แล้ว"
+            end
         else
-            local target = findTarget()
-            if not (hudActive() or riding()) then
-                -- ยังไม่ได้ขึ้นช้าง (ป้าย "ลากซุงไปจุด" ยังไม่ขึ้น) ห้ามวาร์ปไปจุดส่งตัวเปล่า
-                tryMount()
-                task.wait(1)
-            elseif not target then
-                status = "ไม่เจอป้ายจุดส่งซุง รอ..."
-                task.wait(1)
-            else
-                -- วาร์ปไปเกมไม่นับ (ทดสอบแล้ว) ต้องเดินช้างไปเอง
-                status = "เดินช้างไป " .. target.Name
-                if driveTo(target) then
-                    auto.delivered += 1 -- ผ่านจุด (เหยียบแล้วป้ายย้ายไปจุดถัดไป)
-                    status = "ผ่าน " .. target.Name .. " ไปจุดถัดไป"
-                end
+            -- ส่งแล้ว (หรือไม่มีงานแต่ขี่อยู่): ขี่กลับไปหาตาโชคแล้วรับงานต่อ
+            local npc = findJobPrompt()
+            local back = (jobState.cframe and jobState.cframe.Position) or (npc and promptPosition(npc))
+            if back then
+                status = "ส่งซุงแล้ว ขี่กลับไปหาตาโชค"
+                driveTo(back, 10, nil)
+            end
+            if auto.on and alive() and jobState.status ~= "Active" then
+                if not acceptJob() then task.wait(2) end
             end
         end
         task.wait(0.2)
     end
-    env.ElephantAutopilotDir = nil
+    env.ElephantDrive = nil
 end
 
 ---------------------------------------------------------------- หน้าต่าง (Fluent)
@@ -698,14 +488,14 @@ jobSection:AddButton({
 local autoSection = Tabs.main:AddSection("ลากซุงอัตโนมัติ")
 autoSection:AddToggle("EJAuto", {
     Title = "ลากซุงอัตโนมัติ",
-    Description = "รับงาน -> บังคับช้างเดินไปจุดส่งซุงทีละจุด (เหยียบแล้วไปจุดต่อ) -> งานต่อ วนไปเรื่อยๆ",
+    Description = "รับงาน -> ขับช้างตามถนนไปจุดส่ง -> ขี่กลับไปหาตาโชค -> รับงานต่อ วนไปเรื่อยๆ",
     Default = false,
 }):OnChanged(function(v)
     auto.on = v
     if v then
         task.spawn(autoLoop)
     else
-        env.ElephantAutopilotDir = nil
+        env.ElephantDrive = nil
     end
 end)
 local statusPara = jobSection:AddParagraph({ Title = "สถานะ", Content = status })
@@ -717,9 +507,10 @@ task.spawn(function()
         local prompt = findJobPrompt()
         pcall(function()
             local done, total = deliveryCount()
-            statusPara:SetDesc(("%s\nNPC: %s  •  มีงาน: %s\nผ่านจุดส่งไปแล้ว %d จุด%s"):format(status,
+            statusPara:SetDesc(("%s\nNPC: %s  •  งาน: %s  •  ขี่ช้าง: %s\nส่งไปแล้ว %d จุด%s"):format(status,
                 prompt and ("เจอ (" .. prompt.ActionText .. ")") or "ยังหาไม่เจอ",
-                jobActive() and "ใช่" or "ไม่", auto.delivered,
+                tostring(jobState.status) .. (jobState.index and (" จุด " .. tostring(jobState.index)) or ""),
+                riding() and "ใช่" or "ไม่", auto.delivered,
                 done and ("  •  ในเกม %d/%d"):format(done, total) or ""))
         end)
         task.wait(1)
