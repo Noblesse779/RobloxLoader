@@ -279,6 +279,22 @@ local function buildPath(from, to)
     return { from, to }
 end
 
+-- เดินตรงจาก a ไป b ได้ไหม (กวาดลูกกลมกว้างเท่าช้างที่ระดับลำตัว ไม่นับพื้น/ของที่ทะลุได้)
+local function clearLine(a, b, mount)
+    local params = RaycastParams.new()
+    params.FilterType = Enum.RaycastFilterType.Exclude
+    params.FilterDescendantsInstances = { LocalPlayer.Character, mount, workspace:FindFirstChild("ElephantJobLocalGuidance") }
+    params.RespectCanCollide = true
+    for _, h in ipairs({ 4, 8 }) do
+        local from = a + Vector3.new(0, h, 0)
+        local to = Vector3.new(b.X, a.Y + h, b.Z)
+        -- พื้นสูงขึ้นระหว่างทาง (เนิน) ก็ถือว่าชน ใช้ทางตามถนนแทน
+        local ok, hit = pcall(function() return workspace:Spherecast(from, 3, to - from, params) end)
+        if ok and hit then return false end
+    end
+    return true
+end
+
 -- ขับช้างไป pos จนกว่า done() จริง (เกมนับแล้ว) หรือถึงระยะ arrive (ถ้า done = nil)
 local function driveTo(pos, arrive, done)
     local path, pathAt = nil, 0
@@ -296,12 +312,23 @@ local function driveTo(pos, arrive, done)
             pathAt = os.clock()
             path = buildPath(ground, pos)
         end
-        -- จุดถัดไปบนเส้นทางที่ห่างเกิน 6 studs (ใกล้เป้าแล้วเล็งเป้าตรงๆ)
+        -- ตัดโค้ง: เล็งจุดบนเส้นทางที่ไกลที่สุดที่เดินตรงไปได้โดยไม่ชนอะไร
+        -- (ช้างวิ่งเร็วสุดเท่าที่เซิร์ฟเวอร์ให้อยู่แล้ว ทางลัดคือทางเดียวที่ทำให้ถึงไวขึ้น)
         local wp = pos
         if dist > 8 then
-            for i = 2, #path do
-                if flat(path[i] - ground).Magnitude > 6 then wp = path[i] break end
+            wp = nil
+            for i = math.min(#path, 40), 2, -1 do
+                if flat(path[i] - ground).Magnitude > 6 and clearLine(ground, path[i], mount) then
+                    wp = path[i]
+                    break
+                end
             end
+            if not wp then
+                for i = 2, #path do
+                    if flat(path[i] - ground).Magnitude > 6 then wp = path[i] break end
+                end
+            end
+            wp = wp or pos
         end
         local d = flat(wp - ground)
         local dir = d.Magnitude > 0.05 and d.Unit or flat(root.CFrame.LookVector).Unit
