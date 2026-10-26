@@ -716,8 +716,9 @@ local function autoLoop()
         elseif LocalPlayer:FindFirstChild("BuffaloRideMount") and LocalPlayer.BuffaloRideMount.Value then
             status = "ลงจากช้างก่อน (กด Spacebar)"
             task.wait(1)
-        elseif auto.smelt and needSmelt() and (bagFull() or wantSell() or not pickRock(tierOf((pickaxes()[1] or {}).Name or ""))) then
-            -- แปรรูปก่อนขาย / ตอนกระเป๋าเต็ม / ตอนไม่มีหินให้ขุด
+        elseif auto.smelt and needSmelt() and (auto.sell == "ทันทีที่มีของขาย" or bagFull() or wantSell()
+            or not pickRock(tierOf((pickaxes()[1] or {}).Name or ""))) then
+            -- แปรรูปเมื่อแร่ครบ 5: ขายทันที = ครบเมื่อไหร่ไปคราฟเลย / ไม่งั้นรอกระเป๋าเต็มหรือไม่มีหินให้ขุด
             if not smelt() then task.wait(2) end
         elseif wantSell() then
             auto.sellNow = false
