@@ -51,7 +51,7 @@ local auto = {
     smelt = true, -- แปรรูปแร่ที่โต๊ะคราฟ
     sell = "เมื่อกระเป๋าเต็ม", -- ไม่ขาย / เมื่อกระเป๋าเต็ม / ทันทีที่มีของขาย
     sellNow = false,
-    dist = 2.5, -- วาร์ปขุด: ยืนห่างผิวหินกี่ studs
+    dist = 2, -- วาร์ปขุด: ยืนห่างผิวหินกี่ studs
     side = "ข้าง", -- วาร์ปขุด: ยืนตรงไหนของหิน ข้าง / บน / ล่าง
     mined = 0, crafted = 0, sold = 0,
 }
@@ -311,9 +311,9 @@ local function rockStand(rock, from)
     local pos = rock:GetPivot().Position
     local ok, size = pcall(function() return rock:GetExtentsSize() end)
     size = ok and size or Vector3.new(4, 4, 4)
-    local d = math.clamp(auto.dist, 0.5, MiningConfig.Reach - 1)
-    -- บน/ล่าง: ไม่เกินระยะขุดจากจุดกลางหิน (เซิร์ฟเวอร์น่าจะวัดจากจุดกลาง)
-    local up = math.min(size.Y / 2 + d + 1.5, MiningConfig.Reach - 0.5)
+    local d = math.max(auto.dist, 0)
+    -- บน/ล่าง: ห่างจากยอด/ก้นหินตามที่เลื่อน (เดิมโดนจำกัดไว้ที่ระยะขุด เลยเลื่อนแล้วตัวไม่ขยับ)
+    local up = size.Y / 2 + d + 1.5
     if auto.side == "บน" then return pos + Vector3.new(0, up, 0), true end
     if auto.side == "ล่าง" then return pos - Vector3.new(0, up, 0), true end
     local away = Vector3.new(from.X - pos.X, 0, from.Z - pos.Z)
@@ -784,10 +784,10 @@ section:AddDropdown("MineMove", {
 end)
 section:AddSlider("MineDist", {
     Title = "วาร์ปขุด: ระยะห่างจากหิน",
-    Description = "ใช้ตอนเลือกวาร์ป • ห่างจากผิวหิน (ระยะขุดของเกม 7)",
-    Default = 2.5,
-    Min = 0.5,
-    Max = 6,
+    Description = "ใช้ตอนเลือกวาร์ป • ห่างจากผิวหิน (ห่างเกินระยะขุด 7 จากหิน หินจะไม่สั่น ให้ลดลง)",
+    Default = 2,
+    Min = 0,
+    Max = 8,
     Rounding = 1,
 }):OnChanged(function(v)
     auto.dist = v
