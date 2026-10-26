@@ -82,8 +82,12 @@ end
 -- ข้าวอยู่ในกระเป๋าของเกม (ไม่ใช่ Backpack) ต้องเอาออกมาไว้ช่องลัดก่อนถึงจะกลายเป็น Tool
 -- เกมส่ง InventorySystem.Remotes.SetHotbar:FireServer({ ชื่อของในช่องลัดทั้งหมด })
 -- ส่งรายการเดิมที่อยู่ในช่องลัด (Tool ที่มีอยู่) + "Rice" จะได้ไม่ไปลบของอื่นออกจากช่องลัด
-local function ensureRiceTool()
+-- ลองเอาออกมาไม่เกินทุก 4 วิ (ไม่มีข้าวในกระเป๋าแล้วจะได้ไม่ยิงรีโมทรัวๆ) force = เพิ่งได้ข้าวมา
+local lastEnsure = 0
+local function ensureRiceTool(force)
     if #riceTools() > 0 then return true end
+    if not force and os.clock() - lastEnsure < 4 then return false end
+    lastEnsure = os.clock()
     local inv = ReplicatedStorage:FindFirstChild("InventorySystem")
     local remote = inv and inv:FindFirstChild("Remotes") and inv.Remotes:FindFirstChild("SetHotbar")
     if not remote then return false end
@@ -270,7 +274,9 @@ local function talk()
         task.wait(Config.IntroLineSeconds * 2 + 0.5)
         fin = request("FinishIntro", res.token)
     end
-    if not waitFor(4, function() return #riceTools() > 0 end) then
+    -- ข้าวที่ได้เข้ากระเป๋าของเกม ต้องเอาออกมาช่องลัดก่อนถึงจะถือได้
+    if not (waitFor(2, function() return #riceTools() > 0 end) or ensureRiceTool(true)
+        or (task.wait(1) and ensureRiceTool(true))) then
         status = "รับงานแล้วแต่ข้าวไม่เข้ากระเป๋า: " .. tostring(fin.message)
         return false
     end
@@ -452,12 +458,11 @@ local function autoLoop()
                 if c.ready then ready = c break end
             end
             -- ปลูกให้หมดก่อน แล้วค่อยไล่เก็บ
-            if #riceTools() > 0 or (LocalPlayer:GetAttribute("RiceQuestActive") == true and ensureRiceTool()) then
+            -- มีข้าว (ในมือ/ช่องลัด หรือยังค้างในกระเป๋าเกม) ปลูกก่อนเสมอ ไม่ยืนรอข้าวโตทั้งที่มีข้าว
+            if #riceTools() > 0 or ensureRiceTool() then
                 if not plantOne() then task.wait(busy() and 0.2 or 1) end
             elseif ready then
                 if not harvest(ready) then task.wait(busy() and 0.2 or 1) end
-            elseif #crops == 0 and ensureRiceTool() then
-                -- ยังมีข้าวในกระเป๋า (เอาออกมาช่องลัดได้) ปลูกต่อรอบหน้า
             elseif #crops == 0 then
                 -- ปลูก/เก็บหมดแล้ว: ไปหาลุงหมา รับเงิน/รับข้าวรอบใหม่
                 if not talk() then task.wait(3) end
