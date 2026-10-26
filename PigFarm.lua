@@ -134,7 +134,27 @@ local function equipWeapon()
 end
 
 ---------------------------------------------------------------- หมู
+-- ราชาหมู (KingPig): เกิดแล้วหมูตัวอื่นหายหมด ตีคนเดียวไม่ไหว
+-- รอจนมีคนตีจนเลือดบอสเหลือไม่เกิน 20% ค่อยเข้าไปช่วยตี ไม่งั้นยืนรอจนบอสหาย แล้วกลับไปตีหมูปกติ
+local BossState = System:FindFirstChild("BossState")
+local BOSS_JOIN = 0.2
+local function boss()
+    local m = ActiveMonsters:FindFirstChild("KingPig")
+    local h = m and m:FindFirstChildOfClass("Humanoid")
+    if not (h and h.Health > 0) then return nil, 1 end
+    local hp, max = h.Health, h.MaxHealth
+    if BossState and (BossState:GetAttribute("MaxHealth") or 0) > 0 then
+        hp, max = BossState:GetAttribute("Health") or hp, BossState:GetAttribute("MaxHealth")
+    end
+    return m, hp / math.max(1, max)
+end
+
 local function wanted(model)
+    if model.Name == "KingPig" then
+        local _, ratio = boss()
+        if ratio > BOSS_JOIN then return false end -- เลือดบอสยังเยอะ ไม่ไปตี
+        return auto.target == "ทุกตัว" or auto.target == "ราชาหมู (บอส)"
+    end
     if auto.target == "ทุกตัว" then return true end
     local n = model.Name
     if auto.target == "ลูกน้องหมู" then return n:find("ลูกน้อง", 1, true) ~= nil end
@@ -300,6 +320,7 @@ local function fight(pig)
         -- มีตัวเก่งกว่าโผล่มา (เช่นมินิบอส/บอสเกิด) เปลี่ยนไปตีตัวนั้นก่อน
         if auto.sellNow then break end -- กดขายตอนนี้: ไปขายก่อน
         if env.AirdropBusy then break end -- แอร์ดรอปมา: หยุดตีไปก่อน
+        if not wanted(pig) then break end -- เช่นบอสเลือดกลับขึ้นเกิน 20% / เปลี่ยนตัวเลือกเป้า
         if os.clock() - lastCheck > 1 then
             lastCheck = os.clock()
             local top = pickPig()
@@ -515,9 +536,17 @@ local function autoLoop()
             status = "ไม่มีดาบ / หยิบดาบไม่ได้ (ซื้อที่ลุงน้อยขายอาวุธ)"
             task.wait(1)
         else
+            local bossModel, ratio = boss()
             local pig = pickPig()
             if pig then
                 fight(pig)
+            elseif bossModel then
+                -- บอสเกิด หมูตัวอื่นหายหมด: ยืนรอห่างๆ จนเลือดบอสเหลือ 20% หรือบอสหาย
+                status = ("ราชาหมูเกิด รอให้เลือดเหลือ %d%% ค่อยไปช่วยตี (ตอนนี้ %d%%)"):format(
+                    BOSS_JOIN * 100, math.floor(ratio * 100 + 0.5))
+                local hrp = getRoot()
+                if hrp and auto.walk then hum:MoveTo(hrp.Position) end
+                task.wait(1)
             else
                 status = "ไม่มีหมูให้ตี รอเกิด..."
                 task.wait(1)
