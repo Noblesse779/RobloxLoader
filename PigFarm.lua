@@ -240,6 +240,18 @@ end)
 
 local aura = { on = false } -- Kill Aura
 
+-- ครึ่งความกว้างตัวมอน (แนวราบ) เก็บไว้ต่อตัว ไม่ต้องวัดทุกเฟรม
+local radiusCache = setmetatable({}, { __mode = "k" })
+local function bodyRadius(model)
+    local r = radiusCache[model]
+    if not r then
+        local ok, size = pcall(function() return model:GetExtentsSize() end)
+        r = ok and math.clamp(math.min(size.X, size.Z) / 2 - 0.5, 0, 6) or 0
+        radiusCache[model] = r
+    end
+    return r
+end
+
 local function fight(pig)
     local tool, stats = equipWeapon()
     if not tool then
@@ -271,7 +283,9 @@ local function fight(pig)
             noclip = false
             -- เดิน: ไล่ตามตัวหมูตรงๆ (ฟันแล้วหมูกระเด็นออกไป ต้องตามไปฟันต่อทันที ไม่ไปอ้อมหาจุดหลังหมู)
             -- วัดระยะแนวราบ (หมูตัวใหญ่ จุดกลางตัวสูงกว่าเรา วัดตรงๆ เลยเกินระยะทั้งที่ยืนชิดแล้ว)
+            -- ตัวใหญ่ (มินิบอส/บอส) จุดกลางตัวอยู่ลึก ยืนชิดตัวแล้วก็ยังห่างจุดกลางเกินระยะดาบ: หักความกว้างตัวออก
             local flatTo = Vector3.new(root.Position.X - hrp.Position.X, 0, root.Position.Z - hrp.Position.Z).Magnitude
+                - bodyRadius(pig)
             if flatTo > math.max(1.5, math.min(d, stats.Range - 1)) then
                 walkToward(root.Position)
             else
