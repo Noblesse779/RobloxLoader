@@ -458,7 +458,10 @@ end)
 ---------------------------------------------------------------- วนอัตโนมัติ
 local function autoLoop()
     while alive() and auto.on do
-        if busy() and not actionDone then
+        if env.AirdropBusy then
+            status = "พักให้แอร์ดรอป..."
+            task.wait(0.5)
+        elseif busy() and not actionDone then
             task.wait(0.2)
         else
             local crops = myCrops()

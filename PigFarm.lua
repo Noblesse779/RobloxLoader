@@ -299,6 +299,7 @@ local function fight(pig)
         if os.clock() - started > 60 then break end -- ตีไม่ตายใน 1 นาที (ติด/หนี) ไปตัวอื่น
         -- มีตัวเก่งกว่าโผล่มา (เช่นมินิบอส/บอสเกิด) เปลี่ยนไปตีตัวนั้นก่อน
         if auto.sellNow then break end -- กดขายตอนนี้: ไปขายก่อน
+        if env.AirdropBusy then break end -- แอร์ดรอปมา: หยุดตีไปก่อน
         if os.clock() - lastCheck > 1 then
             lastCheck = os.clock()
             local top = pickPig()
@@ -319,6 +320,9 @@ end
 local function auraLoop()
     while alive() and aura.on do
         local hrp, hum = getRoot(), getHum()
+        if env.AirdropBusy then
+            hrp = nil -- แอร์ดรอปมา: พัก Kill Aura
+        end
         if hrp and hum and hum.Health > 0 and not auto.on and not equipWeapon() then
             status = "Kill Aura: ไม่มีดาบ / หยิบดาบไม่ได้"
             task.wait(1)
@@ -496,7 +500,10 @@ end
 local function autoLoop()
     while alive() and auto.on do
         local hum = getHum()
-        if not (hum and hum.Health > 0) then
+        if env.AirdropBusy then
+            status = "พักให้แอร์ดรอป..."
+            task.wait(0.5)
+        elseif not (hum and hum.Health > 0) then
             status = "รอเกิดใหม่..."
             task.wait(1)
         elseif auto.sellNow or (auto.sell == "เมื่อกระเป๋าเต็ม" and bagFull())
