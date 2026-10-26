@@ -381,17 +381,44 @@ local function goNear(pos, within)
         task.wait(0.4)
         return true
     end
+    -- เดิน: หาทางอ้อมของขวาง (ร่ม/โต๊ะ/ตัว NPC หน้าร้าน) ทั้งเส้น เดินตามทีละจุด
+    -- ติดเกิน 1.5 วิ: กระโดด + หาทางใหม่ (ทางเดิมอาจมีคนหรือของมาขวาง)
+    local function arrived()
+        local h = getRoot()
+        return h and (Vector3.new(pos.X, h.Position.Y, pos.Z) - h.Position).Magnitude <= within
+    end
     local t = os.clock()
     while alive() and os.clock() - t < 90 do
         hrp = getRoot()
-        if not hrp then return false end
-        if (Vector3.new(pos.X, hrp.Position.Y, pos.Z) - hrp.Position).Magnitude <= within then
-            local hum = getHum()
-            if hum then hum:MoveTo(hrp.Position) end
+        local hum = getHum()
+        if not (hrp and hum) then return false end
+        if arrived() then
+            hum:MoveTo(hrp.Position)
             return true
         end
-        walkToward(pos)
-        task.wait(0.3)
+        local points = { pos }
+        local path = PathfindingService:CreatePath({ AgentRadius = 2.5, AgentHeight = 5, AgentCanJump = true, WaypointSpacing = 4 })
+        if pcall(function() path:ComputeAsync(hrp.Position, pos) end) and path.Status == Enum.PathStatus.Success then
+            points = {}
+            for _, wp in ipairs(path:GetWaypoints()) do table.insert(points, wp) end
+        end
+        for _, wp in ipairs(points) do
+            if arrived() or os.clock() - t > 90 then break end
+            local target = typeof(wp) == "Vector3" and wp or wp.Position
+            if typeof(wp) ~= "Vector3" and wp.Action == Enum.PathWaypointAction.Jump then hum.Jump = true end
+            hum:MoveTo(target)
+            local last, lastMove, stuck = hrp.Position, os.clock(), false
+            while alive() and os.clock() - lastMove < 1.5 do
+                if arrived() or (Vector3.new(target.X, hrp.Position.Y, target.Z) - hrp.Position).Magnitude < 2 then break end
+                if (hrp.Position - last).Magnitude > 0.4 then last, lastMove = hrp.Position, os.clock() end
+                task.wait(0.1)
+            end
+            if os.clock() - lastMove >= 1.5 then
+                hum.Jump = true
+                stuck = true
+            end
+            if stuck then break end -- คำนวณทางใหม่จากตรงที่ติด
+        end
     end
     return false
 end
