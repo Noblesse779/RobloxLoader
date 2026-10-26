@@ -299,7 +299,7 @@ end
 local function driveTo(pos, arrive, done)
     local path, pathAt = nil, 0
     local lastPos, lastMove, started, lastSend = nil, os.clock(), os.clock(), 0
-    local reverseUntil = 0
+    local reverseUntil, detourUntil, side = 0, 0, 1
     local result = false
     while alive() and auto.on do
         if done and done() then result = true break end
@@ -332,21 +332,37 @@ local function driveTo(pos, arrive, done)
         end
         local d = flat(wp - ground)
         local dir = d.Magnitude > 0.05 and d.Unit or flat(root.CFrame.LookVector).Unit
+        local function turned(deg)
+            return CFrame.Angles(0, math.rad(deg), 0):VectorToWorldSpace(dir)
+        end
         local throttle = 1
-        if os.clock() < reverseUntil then throttle = -1 end
-        -- ถึงกลางจุดส่งแล้วแต่เกมยังไม่นับ: ค่อยๆ เดินหน้าช้าๆ ผ่านจุด
+        if os.clock() < reverseUntil then
+            throttle = -1
+        elseif os.clock() < detourUntil then
+            -- หลังถอย: เบี่ยงออกข้างก่อนแล้วค่อยกลับเข้าทาง
+            dir = turned(70 * side)
+        elseif dist > 8 and not clearLine(ground, ground + dir * 12, mount) then
+            -- มีของขวางข้างหน้า (เช่น Airdrop ตกกลางถนน): หาทิศที่โล่งใกล้ทิศเดิมที่สุด
+            for _, deg in ipairs({ 25, 50, 75, 100 }) do
+                local a, b = turned(deg * side), turned(-deg * side)
+                if clearLine(ground, ground + a * 12, mount) then dir = a break end
+                if clearLine(ground, ground + b * 12, mount) then dir = b break end
+            end
+        end
         env.ElephantDrive = { remote = InputRemote, throttle = throttle, dir = dir }
         if os.clock() - lastSend > 0.1 then
             lastSend = os.clock()
             pcall(function() InputRemote:FireServer(mount, throttle, dir) end)
         end
-        -- ติด 3 วิ: ถอยหลัง 1 วิแล้วไปต่อ
+        -- ติด 2.5 วิ: ถอย 1.5 วิ แล้วเบี่ยงออกข้าง 2 วิ (ติดซ้ำสลับไปอีกข้าง)
         if not lastPos or (root.Position - lastPos).Magnitude > 1.5 then
             lastPos, lastMove = root.Position, os.clock()
-        elseif os.clock() - lastMove > 3 then
+        elseif os.clock() - lastMove > 2.5 then
             lastMove = os.clock()
-            reverseUntil = os.clock() + 1
-            status = "ช้างติด ถอยแล้วไปใหม่"
+            reverseUntil = os.clock() + 1.5
+            detourUntil = reverseUntil + 2
+            side = -side
+            status = "ช้างติด ถอยแล้วอ้อม"
         end
         if os.clock() - started > 300 then break end -- กันวนไม่จบ
         RunService.Heartbeat:Wait()
