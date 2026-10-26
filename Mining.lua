@@ -572,6 +572,24 @@ local function sellable()
     return n
 end
 
+-- จุดยืนหน้าร้าน: ที่ผู้เล่นบันทึกไว้ หรือหน้าตัวลุงหมาน (ทิศที่ลุงหันอยู่) ห่าง 5 studs บนพื้น
+-- ห้ามเดิน/วาร์ปไปข้างร้าน เพราะเข้าไปแล้วติดออกไม่ได้
+local function shopFront(part)
+    if env.MiningShopSpot then return env.MiningShopSpot end
+    local npc = workspace:FindFirstChild(OreShop.Title)
+    local root = npc and (npc:FindFirstChild("HumanoidRootPart") or npc.PrimaryPart)
+    local base = root or part
+    local look = Vector3.new(base.CFrame.LookVector.X, 0, base.CFrame.LookVector.Z)
+    look = look.Magnitude > 0.1 and look.Unit or Vector3.new(0, 0, 1)
+    local stand = base.Position + look * 5
+    local params = RaycastParams.new()
+    params.FilterType = Enum.RaycastFilterType.Exclude
+    params.FilterDescendantsInstances = { LocalPlayer.Character }
+    local hit = workspace:Raycast(stand + Vector3.new(0, 20, 0), Vector3.new(0, -60, 0), params)
+    if hit then stand = Vector3.new(stand.X, hit.Position.Y + 3, stand.Z) end
+    return stand
+end
+
 local function sellOre()
     if sellable() <= 0 then return true end
     local part = workspace:FindFirstChild(OreShop.PartName, true)
@@ -581,8 +599,22 @@ local function sellOre()
         return false
     end
     status = auto.walk and "เดินไปขายแร่..." or "วาร์ปไปขายแร่..."
-    if not goNear(part.Position, math.min(prompt.MaxActivationDistance, SellConfig.SaleDistance or 15) - 3, not auto.walk) then
-        status = "ไปร้านลุงหมานไม่ถึง"
+    local front = shopFront(part)
+    local ok
+    if auto.walk then
+        ok = goNear(front, 2, false)
+    else
+        local hrp = getRoot()
+        if hrp then
+            local face = Vector3.new(part.Position.X, front.Y, part.Position.Z)
+            hrp.CFrame = (face - front).Magnitude > 0.1 and CFrame.lookAt(front, face) or CFrame.new(front)
+            hrp.AssemblyLinearVelocity = Vector3.zero
+            task.wait(0.4)
+            ok = true
+        end
+    end
+    if not ok then
+        status = "ไปหน้าร้านลุงหมานไม่ถึง"
         return false
     end
     local askedAt = os.clock()
@@ -793,6 +825,17 @@ sellSection:AddDropdown("MineSell", {
 }):OnChanged(function(v)
     auto.sell = v
 end)
+sellSection:AddButton({
+    Title = "บันทึกจุดยืนหน้าร้าน",
+    Description = "ไปยืนหน้าร้านลุงหมานตรงที่กด E ขายแร่ได้ แล้วกดปุ่มนี้ สคริปต์จะไปยืนตรงนี้ทุกครั้งที่ขาย",
+    Callback = function()
+        local hrp = getRoot()
+        if hrp then
+            env.MiningShopSpot = hrp.Position
+            Fluent:Notify({ Title = "บันทึกแล้ว", Content = "จุดยืนหน้าร้านลุงหมาน", Duration = 4 })
+        end
+    end,
+})
 local selling = false
 sellSection:AddButton({
     Title = "ขายแร่ตอนนี้",
