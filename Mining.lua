@@ -467,6 +467,23 @@ local function findMyTable()
     end
 end
 
+-- จุดยืนหน้าร้าน: หน้าตัวลุงหมาน (ทิศที่ลุงหันอยู่) ห่าง 5 studs บนพื้น
+-- ห้ามเดิน/วาร์ปไปข้างร้าน เพราะเข้าไปแล้วติดออกไม่ได้
+local function shopFront(part, dist)
+    local npc = workspace:FindFirstChild(OreShop.Title)
+    local root = npc and (npc:FindFirstChild("HumanoidRootPart") or npc.PrimaryPart)
+    local base = root or part
+    local look = Vector3.new(base.CFrame.LookVector.X, 0, base.CFrame.LookVector.Z)
+    look = look.Magnitude > 0.1 and look.Unit or Vector3.new(0, 0, 1)
+    local stand = base.Position + look * (dist or 5)
+    local params = RaycastParams.new()
+    params.FilterType = Enum.RaycastFilterType.Exclude
+    params.FilterDescendantsInstances = { LocalPlayer.Character }
+    local hit = workspace:Raycast(stand + Vector3.new(0, 20, 0), Vector3.new(0, -60, 0), params)
+    if hit then stand = Vector3.new(stand.X, hit.Position.Y + 3, stand.Z) end
+    return stand
+end
+
 local lastPlace = 0
 local function placeTable()
     if os.clock() - lastPlace < (CraftingConfig.TablePlaceCooldown or 10) + 0.5 then return nil end
@@ -478,6 +495,34 @@ local function placeTable()
     if not tool then
         status = "ไม่มีโต๊ะคราฟ (คราฟที่เมนู 🔨: ไม้ 10 + หนังสัตว์ 10)"
         return nil
+    end
+    -- วางที่โล่งหน้าร้านลุงหมาน ห่าง 10 studs (วางใกล้หินบางทีติดหิน วางไม่ลง)
+    -- หันหลังให้ร้าน โต๊ะจะได้ลงฝั่งที่โล่ง ไม่ชนตัวร้าน
+    local shopPart = workspace:FindFirstChild(OreShop.PartName, true)
+    if shopPart then
+        local spot = shopFront(shopPart, 10)
+        status = auto.walk and "เดินไปวางโต๊ะหน้าร้านลุงหมาน..." or "วาร์ปไปวางโต๊ะหน้าร้านลุงหมาน..."
+        local reached
+        if auto.walk then
+            reached = goNear(spot, 2, false)
+        else
+            local hrp = getRoot()
+            if hrp then
+                hrp.CFrame = CFrame.new(spot)
+                hrp.AssemblyLinearVelocity = Vector3.zero
+                task.wait(0.4)
+                reached = true
+            end
+        end
+        if not reached then
+            status = "ไปจุดวางโต๊ะไม่ถึง"
+            return nil
+        end
+        local hrp = getRoot()
+        if hrp then
+            local away = Vector3.new(spot.X - shopPart.Position.X, 0, spot.Z - shopPart.Position.Z)
+            if away.Magnitude > 0.1 then hrp.CFrame = CFrame.lookAt(hrp.Position, hrp.Position + away.Unit) end
+        end
     end
     if not equip(tool) then return nil end
     lastPlace = os.clock()
@@ -570,23 +615,6 @@ local function sellable()
     local n = 0
     for _, name in ipairs(OreShop.Order) do n += count(name) end
     return n
-end
-
--- จุดยืนหน้าร้าน: หน้าตัวลุงหมาน (ทิศที่ลุงหันอยู่) ห่าง 5 studs บนพื้น
--- ห้ามเดิน/วาร์ปไปข้างร้าน เพราะเข้าไปแล้วติดออกไม่ได้
-local function shopFront(part)
-    local npc = workspace:FindFirstChild(OreShop.Title)
-    local root = npc and (npc:FindFirstChild("HumanoidRootPart") or npc.PrimaryPart)
-    local base = root or part
-    local look = Vector3.new(base.CFrame.LookVector.X, 0, base.CFrame.LookVector.Z)
-    look = look.Magnitude > 0.1 and look.Unit or Vector3.new(0, 0, 1)
-    local stand = base.Position + look * 5
-    local params = RaycastParams.new()
-    params.FilterType = Enum.RaycastFilterType.Exclude
-    params.FilterDescendantsInstances = { LocalPlayer.Character }
-    local hit = workspace:Raycast(stand + Vector3.new(0, 20, 0), Vector3.new(0, -60, 0), params)
-    if hit then stand = Vector3.new(stand.X, hit.Position.Y + 3, stand.Z) end
-    return stand
 end
 
 local function sellOre()
