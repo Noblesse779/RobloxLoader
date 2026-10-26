@@ -1,10 +1,13 @@
--- ทั่วไป: ฟรีแคม (ตั้งปุ่มเปิด/ปิดได้) ใช้ได้ทุกแมพ
+-- ทั่วไป: ฟรีแคม (ตั้งปุ่มเปิด/ปิดได้) ใช้ได้ทุกแมพ + สุ่มชุด (เฉพาะแมพที่มีร้านลองชุด OurCatalog)
 -- ฟรีแคม: กล้องลอยอิสระ ตัวละครอยู่ที่เดิม งานอื่นทำต่อได้ปกติ
+-- สุ่มชุด: ใช้ปุ่ม "ลอง" ของร้านในเกมเอง (AvatarAction "Try") ไม่ได้ซื้อของ
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 local ContextActionService = game:GetService("ContextActionService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local AvatarEditorService = game:GetService("AvatarEditorService")
 local LocalPlayer = Players.LocalPlayer
 
 local env = (typeof(getgenv) == "function" and getgenv()) or _G
@@ -98,6 +101,112 @@ task.spawn(function()
     for _, c in ipairs(conns) do c:Disconnect() end
 end)
 
+---------------------------------------------------------------- สุ่มชุด
+-- ช่องที่สุ่ม: ชื่อ, ประเภทของ (ตามหมวดในร้าน), Asset/Bundle
+local SLOTS = {
+    { name = "ผม", assets = { "HairAccessory" } },
+    { name = "หมวก", assets = { "Hat" } },
+    { name = "หน้า", assets = { "FaceAccessory" } },
+    { name = "คอ", assets = { "NeckAccessory" } },
+    { name = "หลัง", assets = { "BackAccessory" } },
+    { name = "ไหล่", assets = { "ShoulderAccessory" } },
+    { name = "เอว", assets = { "WaistAccessory" } },
+    { name = "เสื้อ", assets = { "Shirt" } },
+    { name = "กางเกง", assets = { "Pants" } },
+    { name = "รองเท้า", bundles = { "Shoes" } },
+}
+local SORTS = {
+    Enum.CatalogSortType.Relevance, Enum.CatalogSortType.Bestselling,
+    Enum.CatalogSortType.MostFavorited, Enum.CatalogSortType.RecentlyCreated,
+}
+local outfit = { clear = true, skin = true, auto = false, every = 30, busy = false }
+local pools = {} -- ของที่ค้นมาแล้วต่อช่อง ใช้หมดค่อยค้นใหม่
+
+local function avatarAction()
+    local cat = ReplicatedStorage:FindFirstChild("OurCatalog")
+    return cat and cat:FindFirstChild("AvatarAction")
+end
+
+local function enumList(enum, names)
+    local out = {}
+    for _, n in ipairs(names or {}) do
+        local ok, v = pcall(function() return enum[n] end)
+        if ok and v then out[#out + 1] = v end
+    end
+    return out
+end
+
+-- ค้นแคตตาล็อกแบบเดียวกับร้าน (เรียง/หน้าแบบสุ่ม) แล้วเก็บไอดีไว้ในกอง
+local function refill(slot)
+    local params = CatalogSearchParams.new()
+    params.SearchKeyword = ""
+    params.Limit = 30
+    params.IncludeOffSale = false
+    params.AssetTypes = enumList(Enum.AvatarAssetType, slot.assets)
+    params.BundleTypes = enumList(Enum.BundleType, slot.bundles)
+    params.CategoryFilter = Enum.CatalogCategoryFilter.None
+    params.SortType = SORTS[math.random(#SORTS)]
+    local ok, pages = pcall(function() return AvatarEditorService:SearchCatalogAsync(params) end)
+    if not ok or not pages then return end
+    for _ = 1, math.random(0, 2) do -- ข้ามไปหน้าถัดๆ ไปบ้างให้ไม่ซ้ำ
+        if pages.IsFinished or not pcall(function() pages:AdvanceToNextPageAsync() end) then break end
+    end
+    local list = {}
+    for _, item in ipairs(pages:GetCurrentPage()) do
+        local id = tonumber(item.Id or item.AssetId)
+        if id then
+            list[#list + 1] = { id = id, kind = item.ItemType == "Bundle" and "Bundle" or "Asset" }
+        end
+    end
+    pools[slot.name] = list
+end
+
+local function pick(slot)
+    local list = pools[slot.name]
+    if not list or #list == 0 then
+        refill(slot)
+        list = pools[slot.name]
+    end
+    if not list or #list == 0 then return end
+    return table.remove(list, math.random(#list))
+end
+
+local function randomOutfit()
+    if outfit.busy then return false, "กำลังสุ่มอยู่" end
+    local remote = avatarAction()
+    if not remote then return false, "แมพนี้ไม่มีร้านลองชุด" end
+    outfit.busy = true
+    local worn = 0
+    local function call(...)
+        local args = table.pack(...)
+        local ok, res = pcall(function() return remote:InvokeServer(table.unpack(args, 1, args.n)) end)
+        task.wait(0.3) -- เว้นจังหวะเหมือนกดเอง
+        return ok and res
+    end
+    if outfit.clear then call("Clear") end
+    if outfit.skin then
+        call("Skin", Color3.fromHSV(math.random(), math.random(10, 60) / 100, math.random(35, 100) / 100))
+    end
+    for _, slot in ipairs(SLOTS) do
+        if not alive() then break end
+        local item = pick(slot)
+        if item and call("Try", item.id, item.kind) then worn += 1 end
+    end
+    outfit.busy = false
+    return true, "ใส่ได้ " .. worn .. "/" .. #SLOTS .. " ชิ้น"
+end
+
+task.spawn(function()
+    local last = 0
+    while alive() do
+        task.wait(1)
+        if outfit.auto and not outfit.busy and os.clock() - last >= outfit.every then
+            last = os.clock()
+            randomOutfit()
+        end
+    end
+end)
+
 ---------------------------------------------------------------- หน้าต่าง (Fluent)
 local FLUENT_URL = "https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"
 local FLUENT_CACHE = "AutoFish/fluent.lua" -- ใช้ไฟล์เดียวกับตัวตกปลา
@@ -185,6 +294,45 @@ section:AddSlider("MiscFreecamSpeed", {
     Rounding = 1,
 }):OnChanged(function(v)
     cam.speed = v
+end)
+
+local outfitSection = Tabs.main:AddSection("สุ่มชุด")
+outfitSection:AddButton({
+    Title = "สุ่มชุดเลย",
+    Description = "ลองชุดสุ่มจากร้านในเกม (ผม หมวก เครื่องประดับ เสื้อ กางเกง รองเท้า สีผิว) คนอื่นเห็นด้วย",
+    Callback = function()
+        task.spawn(function()
+            local ok, msg = randomOutfit()
+            Fluent:Notify({ Title = "สุ่มชุด", Content = msg, Duration = 4 })
+        end)
+    end,
+})
+outfitSection:AddToggle("MiscOutfitClear", {
+    Title = "ถอดของเดิมก่อนสุ่ม",
+    Default = true,
+}):OnChanged(function(v)
+    outfit.clear = v
+end)
+outfitSection:AddToggle("MiscOutfitSkin", {
+    Title = "สุ่มสีผิวด้วย",
+    Default = true,
+}):OnChanged(function(v)
+    outfit.skin = v
+end)
+outfitSection:AddToggle("MiscOutfitAuto", {
+    Title = "สุ่มเองเรื่อยๆ",
+    Default = false,
+}):OnChanged(function(v)
+    outfit.auto = v
+end)
+outfitSection:AddSlider("MiscOutfitEvery", {
+    Title = "สุ่มทุกกี่วินาที",
+    Default = 30,
+    Min = 10,
+    Max = 300,
+    Rounding = 0,
+}):OnChanged(function(v)
+    outfit.every = v
 end)
 
 if Window then Window:SelectTab(1) end
