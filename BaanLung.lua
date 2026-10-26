@@ -1,9 +1,10 @@
--- ตัวรวมแมพบ้านลุง: หน้าต่างเดียว แท็บละงาน (ลากซุง / ปลูกข้าว)
+-- ตัวรวมแมพบ้านลุง: หน้าต่างเดียว แท็บละงาน (ลากซุง / ปลูกข้าว / ตีหมู)
 -- แต่ละงานยังเป็นไฟล์ของมันเอง (ElephantJob.lua / RiceJob.lua) ตัวนี้แค่โหลดมาใส่แท็บ
 local BASE = "https://raw.githubusercontent.com/Noblesse779/RobloxLoader/main/"
 local JOBS = {
     { file = "ElephantJob.lua", title = "ลากซุง", icon = "truck" },
     { file = "RiceJob.lua", title = "ปลูกข้าว", icon = "leaf" },
+    { file = "PigFarm.lua", title = "ตีหมู", icon = "sword" },
 }
 
 local env = (typeof(getgenv) == "function" and getgenv()) or _G
@@ -39,7 +40,7 @@ if not ok or typeof(Fluent) ~= "table" then
 end
 
 -- ปิดหน้าต่างเก่าทั้งหมด (ตัวรวมรอบก่อน / ตัวเดี่ยวที่เปิดค้าง)
-for _, key in ipairs({ "BaanLungFluent", "ElephantFluent", "RiceFluent" }) do
+for _, key in ipairs({ "BaanLungFluent", "ElephantFluent", "RiceFluent", "PigFluent" }) do
     if env[key] then
         pcall(function() env[key]:Destroy() end)
         env[key] = nil
@@ -49,7 +50,7 @@ env.BaanLungFluent = Fluent
 
 local Window = Fluent:CreateWindow({
     Title = "บ้านลุง",
-    SubTitle = "ลากซุง • ปลูกข้าว",
+    SubTitle = "ลากซุง • ปลูกข้าว • ตีหมู",
     TabWidth = 150,
     Size = UDim2.fromOffset(560, 400),
     Acrylic = false,
