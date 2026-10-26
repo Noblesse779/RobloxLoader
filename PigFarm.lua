@@ -226,6 +226,37 @@ local function fight(pig)
     return false
 end
 
+-- Kill Aura: ยืนอยู่กับที่ หมูตัวไหนเดินเข้ามาในระยะดาบ หันไปฟันเอง (ระยะเกินดาบเซิร์ฟเวอร์ไม่นับ)
+local aura = { on = false }
+local function auraLoop()
+    while alive() and aura.on do
+        local hrp, hum = getRoot(), getHum()
+        if hrp and hum and hum.Health > 0 and not auto.on then
+            local best, bestDist
+            for _, m in ipairs(ActiveMonsters:GetChildren()) do
+                local h = m:FindFirstChildOfClass("Humanoid")
+                local root = monsterRoot(m)
+                if h and h.Health > 0 and root and wanted(m) then
+                    local d = (root.Position - hrp.Position).Magnitude
+                    if not bestDist or d < bestDist then best, bestDist = root, d end
+                end
+            end
+            local stats = best and WeaponConfig.Weapons[(weaponTools()[1] or {}).Name or ""]
+            if best and stats and bestDist <= stats.Range + 1 then
+                local tool
+                tool, stats = equipWeapon()
+                if tool then
+                    face(best.Position)
+                    if swing(stats) then status = "Kill Aura: ฟัน" end
+                end
+            elseif not auto.on then
+                status = "Kill Aura: รอหมูเข้ามาในระยะ"
+            end
+        end
+        task.wait(0.05)
+    end
+end
+
 local function autoLoop()
     while alive() and auto.on do
         local hum = getHum()
@@ -312,6 +343,14 @@ section:AddToggle("PigAuto", {
 }):OnChanged(function(v)
     auto.on = v
     if v then task.spawn(autoLoop) end
+end)
+section:AddToggle("PigAura", {
+    Title = "Kill Aura",
+    Description = "ยืนอยู่กับที่ หมูเข้ามาในระยะดาบเมื่อไหร่ หันไปฟันเอง (เปิดพร้อมตีอัตโนมัติ จะใช้ตีอัตโนมัติ)",
+    Default = false,
+}):OnChanged(function(v)
+    aura.on = v
+    if v then task.spawn(auraLoop) end
 end)
 section:AddDropdown("PigTarget", {
     Title = "ตีตัวไหน",
