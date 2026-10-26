@@ -164,14 +164,22 @@ local function talk()
         status = "หาลุงหมาไม่เจอ"
         return false
     end
-    -- ยืนห่างหัว 5 studs (ต้องอยู่ในระยะคุย 10 / 14)
+    -- ยืนตรงหน้าลุงหมา 4 studs ความสูงเท่าตัวลุง หันหน้าเข้าหา
+    -- (ไม่ยิงหาพื้นจากข้างบน เพราะไปโดนหลังคาแล้ววาร์ปขึ้นไปอยู่บนหลังคา)
     local hrp = getRoot()
     if not hrp then return false end
-    local away = hrp.Position - head.Position
-    away = Vector3.new(away.X, 0, away.Z)
-    away = away.Magnitude > 0.1 and away.Unit or Vector3.new(0, 0, 1)
+    if LocalPlayer:FindFirstChild("BuffaloRideMount") and LocalPlayer.BuffaloRideMount.Value then
+        status = "ลงจากช้างก่อน (กด Spacebar)"
+        return false
+    end
     if (hrp.Position - head.Position).Magnitude > 8 then
-        if not moveTo(head.Position + away * 5) then return false end
+        local body = model:FindFirstChild("HumanoidRootPart") or head
+        local look = Vector3.new(body.CFrame.LookVector.X, 0, body.CFrame.LookVector.Z)
+        look = look.Magnitude > 0.1 and look.Unit or Vector3.new(0, 0, 1)
+        local stand = body.Position + look * 4
+        hrp.CFrame = CFrame.lookAt(stand, Vector3.new(body.Position.X, stand.Y, body.Position.Z))
+        hrp.AssemblyLinearVelocity = Vector3.zero
+        task.wait(0.35)
     end
     local askedAt = os.clock()
     status = "คุยกับลุงหมา..."
