@@ -28,6 +28,8 @@ local auto = {
     on = false, walk = true, target = "ทุกตัว", swings = 0, kills = 0,
     dist = 4, -- ยืนห่างหมูกี่ studs (ไม่เกินระยะดาบ ไม่งั้นเซิร์ฟเวอร์ไม่นับ)
     side = "หลัง", -- ยืนตรงไหนของหมู: หน้า / หลัง / บน / ล่าง
+    sell = false, -- กระเป๋าเต็มแล้วไปขายเนื้อ
+    sold = 0, -- ขายได้กี่บาทแล้ว
 }
 
 local function getRoot()
@@ -321,12 +323,122 @@ local function auraLoop()
     end
 end
 
+---------------------------------------------------------------- ขายเนื้อเมื่อกระเป๋าเต็ม
+-- อ่านจากโค้ดเกม (PlayerGui.SellHubGui.SellHubClient + SellHubConfig):
+--   กระเป๋า: LocalPlayer.InventoryState  Attribute Total / Capacity, ของแต่ละอย่าง = IntValue ชื่อของ
+--   ร้านเนื้อ: workspace.sellmeatpart.SellMeatPrompt (ต้องอยู่ห่างไม่เกิน SaleDistance 15)
+--   กดปุ่ม -> เซิร์ฟเวอร์ส่ง SellHubSystem.Remotes.Open(ส่วนร้าน, { shopId, ... })
+--   ขาย: Request:InvokeServer("SellAll", nil, nil, GUID, shopId)  ปิด: Request:InvokeServer("Close", nil, nil, nil, shopId)
+local HttpService = game:GetService("HttpService")
+local SellHub = ReplicatedStorage:WaitForChild("SellHubSystem")
+local SellRemotes = SellHub:WaitForChild("Remotes")
+local SellConfig = require(SellHub:WaitForChild("SellHubConfig"))
+local MEAT_ITEMS = SellConfig.Shops.Meat.Order -- Meat / Large Meat / Animal Skin
+
+local opened = { shopId = nil, at = 0 }
+local openConn = SellRemotes:WaitForChild("Open").OnClientEvent:Connect(function(_, state)
+    if type(state) == "table" and state.shopId then
+        opened.shopId, opened.at = state.shopId, os.clock()
+    end
+end)
+task.spawn(function()
+    while alive() do task.wait(1) end
+    openConn:Disconnect()
+end)
+
+local function bagState()
+    local inv = LocalPlayer:FindFirstChild("InventoryState")
+    if not inv then return 0, 100, 0 end
+    local meat = 0
+    for _, name in ipairs(MEAT_ITEMS) do
+        local v = inv:FindFirstChild(name)
+        if v and v:IsA("IntValue") and not v:GetAttribute("SaleLocked") then meat += v.Value end
+    end
+    return inv:GetAttribute("Total") or 0, inv:GetAttribute("Capacity") or 100, meat
+end
+
+local function bagFull()
+    local total, cap, meat = bagState()
+    return meat > 0 and total >= cap
+end
+
+-- ไปให้ถึงระยะ (เดิน/วาร์ป ตามที่เลือก)
+local function goNear(pos, within)
+    local hrp = getRoot()
+    if not hrp then return false end
+    if not auto.walk then
+        local away = Vector3.new(hrp.Position.X - pos.X, 0, hrp.Position.Z - pos.Z)
+        away = away.Magnitude > 0.1 and away.Unit or Vector3.new(0, 0, 1)
+        local stand = pos + away * math.min(4, within - 1) + Vector3.new(0, 3, 0)
+        hrp.CFrame = CFrame.lookAt(stand, Vector3.new(pos.X, stand.Y, pos.Z))
+        hrp.AssemblyLinearVelocity = Vector3.zero
+        task.wait(0.4)
+        return true
+    end
+    local t = os.clock()
+    while alive() and auto.on and os.clock() - t < 90 do
+        hrp = getRoot()
+        if not hrp then return false end
+        if (Vector3.new(pos.X, hrp.Position.Y, pos.Z) - hrp.Position).Magnitude <= within then
+            local hum = getHum()
+            if hum then hum:MoveTo(hrp.Position) end
+            return true
+        end
+        walkToward(pos)
+        task.wait(0.3)
+    end
+    return false
+end
+
+local function sellMeat()
+    local part = workspace:FindFirstChild(SellConfig.Shops.Meat.PartName or "sellmeatpart")
+    local prompt = part and part:FindFirstChild(SellConfig.Shops.Meat.PromptName or "SellMeatPrompt")
+    if not prompt then
+        status = "หาร้านขายเนื้อไม่เจอ"
+        return false
+    end
+    status = auto.walk and "กระเป๋าเต็ม: เดินไปขายเนื้อ..." or "กระเป๋าเต็ม: วาร์ปไปขายเนื้อ..."
+    if not goNear(part.Position, math.min(prompt.MaxActivationDistance, SellConfig.SaleDistance or 15) - 2) then
+        status = "ไปร้านขายเนื้อไม่ถึง"
+        return false
+    end
+    local askedAt = os.clock()
+    if typeof(fireproximityprompt) == "function" then pcall(fireproximityprompt, prompt) end
+    if not waitFor(4, function() return opened.at >= askedAt end) then
+        status = "กดขายเนื้อแล้วร้านไม่เปิด"
+        return false
+    end
+    local shopId = opened.shopId
+    local before = select(3, bagState())
+    local ok, res = pcall(function()
+        return SellRemotes.Request:InvokeServer("SellAll", nil, nil, HttpService:GenerateGUID(false), shopId)
+    end)
+    pcall(function() SellRemotes.Request:InvokeServer("Close", nil, nil, nil, shopId) end)
+    pcall(function() -- ปิดหน้าต่างร้านบนจอ (เกมเปิดให้ตอนกดปุ่ม)
+        local gui = LocalPlayer.PlayerGui:FindFirstChild("SellHubGui")
+        if gui then gui.Enabled = false end
+        if LocalPlayer:GetAttribute("UIBusyOwner") == "SellHub" then
+            LocalPlayer:SetAttribute("UIBusy", false)
+            LocalPlayer:SetAttribute("UIBusyOwner", nil)
+        end
+    end)
+    if ok and type(res) == "table" and res.ok then
+        auto.sold += tonumber(res.totalMoney) or 0
+        status = ("ขายเนื้อ %s ชิ้น ได้ %s บาท"):format(tostring(res.soldCount), tostring(res.totalMoney))
+        return true
+    end
+    status = "ขายไม่สำเร็จ: " .. tostring(ok and type(res) == "table" and (res.reason or res.message) or res)
+    return select(3, bagState()) < before
+end
+
 local function autoLoop()
     while alive() and auto.on do
         local hum = getHum()
         if not (hum and hum.Health > 0) then
             status = "รอเกิดใหม่..."
             task.wait(1)
+        elseif auto.sell and bagFull() then
+            if not sellMeat() then task.wait(3) end
         elseif not equipWeapon() then
             -- ถือดาบดีสุดให้ได้ก่อน แล้วค่อยไปหาหมู
             status = "ไม่มีดาบ / หยิบดาบไม่ได้ (ซื้อที่ลุงน้อยขายอาวุธ)"
@@ -456,6 +568,13 @@ section:AddDropdown("PigSide", {
 }):OnChanged(function(v)
     auto.side = v
 end)
+section:AddToggle("PigSell", {
+    Title = "ขายเนื้อเมื่อกระเป๋าเต็ม",
+    Description = "กระเป๋าเต็ม -> ไปร้านขายเนื้อหมู ขาย Meat / Large Meat / Animal Skin ทั้งหมด -> กลับมาตีต่อ (ของที่ล็อกขายไว้ไม่ขาย)",
+    Default = false,
+}):OnChanged(function(v)
+    auto.sell = v
+end)
 local statusPara = section:AddParagraph({ Title = "สถานะ", Content = status })
 
 if Window then Window:SelectTab(1) end
@@ -469,8 +588,9 @@ task.spawn(function()
                 local h = m:FindFirstChildOfClass("Humanoid")
                 if h and h.Health > 0 and wanted(m) then count += 1 end
             end
-            statusPara:SetDesc(("%s\nดาบ: %s  •  หมูในแมพ: %d\nฟันไป %d ครั้ง  •  ฆ่าไป %d ตัว"):format(
-                status, tool and tool.Name or "ไม่มี", count, auto.swings, auto.kills))
+            local total, cap, meat = bagState()
+            statusPara:SetDesc(("%s\nดาบ: %s  •  หมูในแมพ: %d\nฟันไป %d ครั้ง  •  ฆ่าไป %d ตัว\nกระเป๋า %d/%d (เนื้อ %d)  •  ขายได้ %d บาท"):format(
+                status, tool and tool.Name or "ไม่มี", count, auto.swings, auto.kills, total, cap, meat, auto.sold))
         end)
         task.wait(0.5)
     end
