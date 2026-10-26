@@ -284,7 +284,17 @@ local function zone()
     return z and z:IsA("BasePart") and z or nil
 end
 
--- จุดปลูก: ตารางในแปลง ห่างกันพอดีระยะขั้นต่ำ เลือกจุดว่างที่ใกล้ตัวเราที่สุด = ปลูกติดๆ กันเป็นกลุ่ม
+-- จุดนั้นเป็นนา (มีน้ำอยู่เหนือพื้นแปลง) ไหม: เกมให้ปลูกเฉพาะตรงที่มีน้ำ ทางเดินดินที่ผ่ากลางแปลงไม่ได้
+local function isPaddy(spot, z)
+    local params = RaycastParams.new()
+    params.FilterType = Enum.RaycastFilterType.Include
+    params.FilterDescendantsInstances = { workspace.Terrain }
+    params.IgnoreWater = false
+    local hit = workspace:Raycast(Vector3.new(spot.X, z.Position.Y + 30, spot.Z), Vector3.new(0, -60, 0), params)
+    return hit ~= nil and hit.Material == Enum.Material.Water
+end
+
+-- จุดปลูก: ตารางในแปลง ห่างกันพอดีระยะขั้นต่ำ เลือกจุดว่างที่เป็นนาและใกล้ตัวเราที่สุด = ปลูกติดๆ กันเป็นกลุ่ม
 local function plantSpot()
     local z = zone()
     if not z then return nil end
@@ -296,23 +306,24 @@ local function plantSpot()
     end
     local hrp = getRoot()
     local me = hrp and hrp.Position or z.Position
-    local hx, hz = z.Size.X / 2 - 1.5, z.Size.Z / 2 - 1.5
-    local best, bestDist
+    me = Vector3.new(me.X, 0, me.Z)
+    local hx, hz = z.Size.X / 2 - 2.5, z.Size.Z / 2 - 2.5
+    local free = {}
     for x = -hx, hx, spacing do
         for zz = -hz, hz, spacing do
             local spot = (z.CFrame * CFrame.new(x, 0, zz)).Position
             local flatSpot = Vector3.new(spot.X, 0, spot.Z)
-            local free = true
+            local ok = true
             for _, o in ipairs(others) do
-                if (o - flatSpot).Magnitude < spacing then free = false break end
+                if (o - flatSpot).Magnitude < spacing then ok = false break end
             end
-            if free then
-                local d = (Vector3.new(me.X, 0, me.Z) - flatSpot).Magnitude
-                if not bestDist or d < bestDist then best, bestDist = spot, d end
-            end
+            if ok then table.insert(free, { spot = spot, d = (me - flatSpot).Magnitude }) end
         end
     end
-    return best
+    table.sort(free, function(a, b) return a.d < b.d end)
+    for _, c in ipairs(free) do
+        if isPaddy(c.spot, z) then return c.spot end
+    end
 end
 
 local function plantOne()
