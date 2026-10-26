@@ -119,6 +119,101 @@ local function goTalk()
     return true
 end
 
+---------------------------------------------------------------- เลือก "1.) รับงานลากซุง"
+-- คุยแล้วมีตัวเลือก 1.) ["รับงานลากซุง"]  2.) ["ไว้ก่อนครับ"] -> เลือกข้อ 1 แล้วเกมส่ง Accept + รหัสงานเอง
+local function isShown(gui)
+    while gui do
+        if gui:IsA("ScreenGui") then return gui.Enabled end
+        if gui:IsA("GuiObject") and not gui.Visible then return false end
+        gui = gui.Parent
+    end
+    return false
+end
+
+local ACCEPT_WORDS = { "รับงาน", "accept", "take the job" }
+local function findAcceptOption()
+    for _, d in ipairs(LocalPlayer.PlayerGui:GetDescendants()) do
+        if (d:IsA("TextButton") or d:IsA("TextLabel")) and isShown(d) then
+            local t = d.Text:lower()
+            for _, w in ipairs(ACCEPT_WORDS) do
+                if t:find(w, 1, true) and not t:find("ไว้ก่อน", 1, true) then
+                    return d:IsA("GuiButton") and d or d:FindFirstAncestorWhichIsA("GuiButton") or d
+                end
+            end
+        end
+    end
+end
+
+local function clickGui(gui)
+    local c = gui.AbsolutePosition + gui.AbsoluteSize / 2
+    local sg = gui:FindFirstAncestorWhichIsA("ScreenGui")
+    if sg and not sg.IgnoreGuiInset then
+        c += game:GetService("GuiService"):GetGuiInset()
+    end
+    VirtualInputManager:SendMouseButtonEvent(c.X, c.Y, 0, true, game, 1)
+    task.wait(0.05)
+    VirtualInputManager:SendMouseButtonEvent(c.X, c.Y, 0, false, game, 1)
+end
+
+local function pressGuiButton(button)
+    if button:IsA("GuiButton") then
+        for _, signal in ipairs({ "MouseButton1Click", "Activated" }) do
+            local fired = pcall(function()
+                if typeof(firesignal) == "function" then
+                    firesignal(button[signal])
+                elseif typeof(getconnections) == "function" then
+                    for _, c in ipairs(getconnections(button[signal])) do c:Fire() end
+                else
+                    error("no")
+                end
+            end)
+            if fired then return end
+        end
+    end
+    clickGui(button)
+end
+
+-- ขี่ช้างอยู่ไหม (นั่งบนที่นั่งของช้าง)
+local function riding()
+    local char = LocalPlayer.Character
+    local hum = char and char:FindFirstChildOfClass("Humanoid")
+    return hum ~= nil and hum.SeatPart ~= nil
+end
+
+local function acceptJob()
+    if riding() then
+        status = "ขี่ช้างอยู่แล้ว (รับงานอยู่)"
+        return true
+    end
+    if not goTalk() then return false end
+    local option
+    if not waitFor(3, function()
+        option = findAcceptOption()
+        return option ~= nil
+    end) then
+        -- หาตัวเลือกบนจอไม่เจอ: กดเลข 1 แทน (ผู้เล่นกด 1 เองก็รับงานได้)
+        VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.One, false, game)
+        task.wait(0.1)
+        VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.One, false, game)
+    else
+        pressGuiButton(option)
+    end
+    if waitFor(4, riding) then
+        status = "รับงานแล้ว ขี่ช้างอยู่"
+        return true
+    end
+    -- กดที่ตัวเลือกไม่ติด ลองกดเลข 1 อีกที
+    VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.One, false, game)
+    task.wait(0.1)
+    VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.One, false, game)
+    if waitFor(3, riding) then
+        status = "รับงานแล้ว ขี่ช้างอยู่"
+        return true
+    end
+    status = option and "กดรับงานแล้วแต่ไม่ได้ขี่ช้าง" or "ไม่เจอตัวเลือก รับงานลากซุง"
+    return false
+end
+
 ---------------------------------------------------------------- หน้าต่าง (Fluent)
 local FLUENT_URL = "https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"
 local FLUENT_CACHE = "AutoFish/fluent.lua" -- ใช้ไฟล์เดียวกับตัวตกปลา
@@ -170,10 +265,10 @@ local Tabs = {
 
 local jobSection = Tabs.main:AddSection("รับงานลากซุง")
 jobSection:AddButton({
-    Title = "วาร์ปไปคุยกับ ตาโชคเลี้ยงช้าง",
-    Description = "วาร์ปไปหน้า NPC แล้วกดคุยเรื่องงานลากซุงให้",
+    Title = "วาร์ปไปรับงานลากซุง",
+    Description = "วาร์ปไปหา ตาโชคเลี้ยงช้าง -> กด E คุย -> เลือก 1.) รับงานลากซุง -> ขึ้นขี่ช้าง",
     Callback = function()
-        task.spawn(goTalk)
+        task.spawn(acceptJob)
     end,
 })
 jobSection:AddButton({
@@ -195,8 +290,9 @@ task.spawn(function()
     while alive() and not Fluent.Unloaded do
         local prompt = findJobPrompt()
         pcall(function()
-            statusPara:SetDesc(("%s\nNPC: %s"):format(status,
-                prompt and ("เจอ (" .. prompt.ActionText .. ")") or "ยังหาไม่เจอ"))
+            statusPara:SetDesc(("%s\nNPC: %s  •  ขี่ช้าง: %s"):format(status,
+                prompt and ("เจอ (" .. prompt.ActionText .. ")") or "ยังหาไม่เจอ",
+                riding() and "ใช่" or "ไม่"))
         end)
         task.wait(1)
     end
