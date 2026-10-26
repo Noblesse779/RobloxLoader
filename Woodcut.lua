@@ -212,13 +212,16 @@ local function choppable(tree)
 end
 
 local function trunkPos(tree)
-    -- จุดโคนต้น: ใช้ชิ้นที่ต่ำสุด (ลำต้น) แทนจุดกลางทั้งต้น (สูงขึ้นไปในพุ่มใบ)
+    -- จุดโคนต้น: ขอบล่างของชิ้นที่ต่ำสุด (ลำต้น) ไม่ใช่จุดกลางทั้งต้น (สูงขึ้นไปในพุ่มใบ)
     local pivot = tree:GetPivot().Position
-    local low
+    local low, lowY
     for _, p in ipairs(tree:GetDescendants()) do
-        if p:IsA("BasePart") and (not low or p.Position.Y < low.Position.Y) then low = p end
+        if p:IsA("BasePart") then
+            local bottom = p.Position.Y - p.Size.Y / 2
+            if not lowY or bottom < lowY then low, lowY = p, bottom end
+        end
     end
-    return low and Vector3.new(low.Position.X, low.Position.Y, low.Position.Z) or pivot
+    return low and Vector3.new(low.Position.X, lowY, low.Position.Z) or pivot
 end
 
 -- ระยะจากต้นไม้ถึงผู้เล่นคนอื่นที่ใกล้สุด
@@ -305,8 +308,10 @@ local function chopTree(tree, axe)
             local params = RaycastParams.new()
             params.FilterType = Enum.RaycastFilterType.Exclude
             params.FilterDescendantsInstances = { LocalPlayer.Character, tree }
-            local hit = workspace:Raycast(stand + Vector3.new(0, 20, 0), Vector3.new(0, -60, 0), params)
-            if hit then stand = Vector3.new(stand.X, hit.Position.Y + 3, stand.Z) end
+            -- ยืนที่พื้นระดับโคนต้น: ยิงหาพื้นจากแค่เหนือโคนต้น (ยิงจากสูงๆ ไปโดนพุ่มใบ แล้วไปยืนบนยอดไม้)
+            stand = Vector3.new(stand.X, pos.Y, stand.Z)
+            local hit = workspace:Raycast(stand + Vector3.new(0, 4, 0), Vector3.new(0, -30, 0), params)
+            stand = Vector3.new(stand.X, (hit and hit.Position.Y or pos.Y) + 3, stand.Z)
             holdCF = CFrame.lookAt(stand, Vector3.new(pos.X, stand.Y, pos.Z))
             hrp.CFrame = holdCF
         end
