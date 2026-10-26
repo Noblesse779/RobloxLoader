@@ -108,15 +108,23 @@ local function goTalk()
         status = "หา NPC ไม่เจอ: เดินไปหน้า NPC แล้วกด บันทึกจุด NPC"
         return false
     end
-    shownPrompt = nil
     hrp.CFrame = target
     status = "วาร์ปไปหา NPC แล้ว รอปุ่มคุยขึ้น..."
-    if not waitFor(3, function() return shownPrompt ~= nil end) then
+    -- ปุ่มที่ขึ้นอยู่ก่อนแล้ว (เกิดมาข้าง NPC) จะไม่มีสัญญาณ "ขึ้นใหม่" เลยใช้ปุ่ม NPC ที่หาเจอได้เลย
+    local function usable()
+        if shownPrompt and shownPrompt.Parent then return shownPrompt end
+        local pos = prompt and promptPosition(prompt)
+        if pos and (pos - hrp.Position).Magnitude <= prompt.MaxActivationDistance + 1 then
+            return prompt
+        end
+    end
+    local use
+    if not waitFor(3, function() use = usable() return use ~= nil end) then
         status = "วาร์ปไปแล้วแต่ปุ่มคุยไม่ขึ้น"
         return false
     end
-    status = ("กดคุยแล้ว (%s)"):format(shownPrompt.ActionText)
-    return true, shownPrompt
+    status = ("กดคุยแล้ว (%s)"):format(use.ActionText)
+    return true, use
 end
 
 ---------------------------------------------------------------- เลือก "1.) รับงานลากซุง"
