@@ -72,6 +72,31 @@ local function riceTools()
     return list
 end
 
+-- ข้าวอยู่ในกระเป๋าของเกม (ไม่ใช่ Backpack) ต้องเอาออกมาไว้ช่องลัดก่อนถึงจะกลายเป็น Tool
+-- เกมส่ง InventorySystem.Remotes.SetHotbar:FireServer({ ชื่อของในช่องลัดทั้งหมด })
+-- ส่งรายการเดิมที่อยู่ในช่องลัด (Tool ที่มีอยู่) + "Rice" จะได้ไม่ไปลบของอื่นออกจากช่องลัด
+local function ensureRiceTool()
+    if #riceTools() > 0 then return true end
+    local inv = ReplicatedStorage:FindFirstChild("InventorySystem")
+    local remote = inv and inv:FindFirstChild("Remotes") and inv.Remotes:FindFirstChild("SetHotbar")
+    if not remote then return false end
+    local names, seen = {}, {}
+    for _, holder in ipairs({ LocalPlayer.Character, LocalPlayer:FindFirstChildOfClass("Backpack") }) do
+        if holder then
+            for _, t in ipairs(holder:GetChildren()) do
+                if t:IsA("Tool") and not seen[t.Name] then
+                    seen[t.Name] = true
+                    table.insert(names, t.Name)
+                end
+            end
+        end
+    end
+    if not seen[Config.ToolName] then table.insert(names, Config.ToolName) end
+    status = "เอาข้าวออกมาไว้ช่องลัด..."
+    remote:FireServer(names)
+    return waitFor(3, function() return #riceTools() > 0 end)
+end
+
 local function cropPart(model)
     local p = model:FindFirstChild("Handle") or model:FindFirstChildWhichIsA("BasePart", true)
     return p and p:IsA("BasePart") and p or nil
@@ -273,8 +298,10 @@ local function autoLoop()
             end
             if ready then
                 if not harvest(ready) then task.wait(1) end
-            elseif #riceTools() > 0 then
+            elseif #riceTools() > 0 or (LocalPlayer:GetAttribute("RiceQuestActive") == true and ensureRiceTool()) then
                 if not plantOne() then task.wait(1) end
+            elseif #crops == 0 and ensureRiceTool() then
+                -- ยังมีข้าวในกระเป๋า (เอาออกมาช่องลัดได้) ปลูกต่อรอบหน้า
             elseif #crops == 0 then
                 -- ปลูก/เก็บหมดแล้ว: ไปหาลุงหมา รับเงิน/รับข้าวรอบใหม่
                 if not talk() then task.wait(3) end
