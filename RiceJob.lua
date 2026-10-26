@@ -359,15 +359,24 @@ end
 local function plantOne()
     local tool = riceTools()[1]
     if not tool then return false end
+    -- ถือข้าวให้ได้ก่อน แล้วค่อยทำอย่างอื่น
+    local hum = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+    if not hum then return false end
+    if tool.Parent ~= LocalPlayer.Character then
+        status = "หยิบข้าวขึ้นมาถือ..."
+        hum:EquipTool(tool)
+        if not waitFor(2, function() return tool.Parent == LocalPlayer.Character end) then
+            status = "หยิบข้าวขึ้นมาถือไม่ได้"
+            return false
+        end
+    end
     local spot = plantSpot()
     if not spot then
         status = "หาที่ว่างในแปลงไม่เจอ"
         return false
     end
     if not moveTo(spot) then return false end
-    local hum = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
-    if not hum then return false end
-    if tool.Parent ~= LocalPlayer.Character then
+    if tool.Parent ~= LocalPlayer.Character then -- เผื่อหลุดมือระหว่างทาง
         hum:EquipTool(tool)
         task.wait(0.3)
     end
