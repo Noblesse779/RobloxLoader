@@ -48,12 +48,19 @@ end
 
 -- เซิร์ฟเวอร์ส่งมาตอนกดคุยกับลุงหมา
 local dialogue = { data = nil, at = 0 }
-local conn = Remotes.OpenDialogue.OnClientEvent:Connect(function(d)
-    if type(d) == "table" then dialogue.data, dialogue.at = d, os.clock() end
-end)
+-- แจ้งเตือนจากเกม เช่น "เก็บข้าวสำเร็จ! ได้รับเงิน 59 บาท" = เก็บเสร็จแล้ว ไปต้นต่อไปได้เลย
+local notify = { text = "", at = 0 }
+local conns = {
+    Remotes.OpenDialogue.OnClientEvent:Connect(function(d)
+        if type(d) == "table" then dialogue.data, dialogue.at = d, os.clock() end
+    end),
+    Remotes.Notify.OnClientEvent:Connect(function(text)
+        if type(text) == "string" then notify.text, notify.at = text, os.clock() end
+    end),
+}
 task.spawn(function()
     while alive() do task.wait(1) end
-    conn:Disconnect()
+    for _, c in ipairs(conns) do c:Disconnect() end
 end)
 
 ---------------------------------------------------------------- ข้าวในกระเป๋า / ต้นข้าวของเรา
@@ -282,8 +289,13 @@ local function harvest(crop)
         if not moveTo(crop.part.Position + Vector3.new(2, 0, 0)) then return false end
     end
     status = "เก็บข้าว..."
+    local startedAt = os.clock()
     local res = request("UseRice", crop.model)
-    waitFor(Config.AnimationTimeout or 12, function() return not busy() end)
+    -- ไม่ต้องรอท่าจบ: ต้นหายไป หรือเกมแจ้งว่าเก็บสำเร็จ ก็ไปต้นต่อไปเลย
+    waitFor(Config.AnimationTimeout or 12, function()
+        return not busy() or not crop.model.Parent
+            or (notify.at >= startedAt and notify.text:find("เก็บ", 1, true) ~= nil)
+    end)
     if not res.ok and crop.model.Parent then
         status = "เก็บไม่สำเร็จ: " .. tostring(res.message)
         return false
