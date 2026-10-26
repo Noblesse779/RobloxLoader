@@ -285,12 +285,22 @@ local function clearLine(a, b, mount)
     params.FilterType = Enum.RaycastFilterType.Exclude
     params.FilterDescendantsInstances = { LocalPlayer.Character, mount, workspace:FindFirstChild("ElephantJobLocalGuidance") }
     params.RespectCanCollide = true
-    for _, h in ipairs({ 4, 8 }) do
+    for _, h in ipairs({ 2.5, 6 }) do
         local from = a + Vector3.new(0, h, 0)
         local to = Vector3.new(b.X, a.Y + h, b.Z)
-        -- พื้นสูงขึ้นระหว่างทาง (เนิน) ก็ถือว่าชน ใช้ทางตามถนนแทน
+        -- พื้นสูงขึ้นระหว่างทาง (เนิน) / ราวสะพานเตี้ยๆ ก็ถือว่าชน ใช้ทางตามถนนแทน
         local ok, hit = pcall(function() return workspace:Spherecast(from, 3, to - from, params) end)
         if ok and hit then return false end
+    end
+    -- ต้องมีพื้นให้เหยียบตลอดทาง: ไม่ใช่น้ำ ไม่ใช่ขอบสะพาน/ตลิ่งที่ตกลงไป
+    local flatDist = Vector3.new(b.X - a.X, 0, b.Z - a.Z)
+    local steps = math.max(1, math.floor(flatDist.Magnitude / 4))
+    for i = 1, steps do
+        local p = a + flatDist * (i / steps)
+        local hit = workspace:Raycast(p + Vector3.new(0, 6, 0), Vector3.new(0, -14, 0), params)
+        if not hit or hit.Material == Enum.Material.Water or math.abs(hit.Position.Y - a.Y) > 3 then
+            return false
+        end
     end
     return true
 end
@@ -300,6 +310,7 @@ local function driveTo(pos, arrive, done)
     local path, pathAt = nil, 0
     local lastPos, lastMove, started, lastSend = nil, os.clock(), os.clock(), 0
     local reverseUntil, detourUntil, side = 0, 0, 1
+    local noShortcut = false -- ติดแล้วเลิกตัดโค้ง เดินตามถนนอย่างเดียวจนถึงจุดนี้
     local result = false
     while alive() and auto.on do
         if done and done() then result = true break end
@@ -317,7 +328,7 @@ local function driveTo(pos, arrive, done)
         local wp = pos
         if dist > 8 then
             wp = nil
-            for i = math.min(#path, 40), 2, -1 do
+            for i = (noShortcut and 1 or math.min(#path, 40)), 2, -1 do
                 if flat(path[i] - ground).Magnitude > 6 and clearLine(ground, path[i], mount) then
                     wp = path[i]
                     break
@@ -362,7 +373,8 @@ local function driveTo(pos, arrive, done)
             reverseUntil = os.clock() + 1.5
             detourUntil = reverseUntil + 2
             side = -side
-            status = "ช้างติด ถอยแล้วอ้อม"
+            noShortcut = true
+            status = "ช้างติด ถอยแล้วเดินตามถนน"
         end
         if os.clock() - started > 300 then break end -- กันวนไม่จบ
         RunService.Heartbeat:Wait()
