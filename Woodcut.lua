@@ -29,6 +29,8 @@ local auto = {
     walk = true, -- เดินไปตัด (false = วาร์ป)
     target = 0, -- ตัดจนได้ไม้กี่ชิ้นแล้วหยุด (0 = ไม่จำกัด ตัดจนกระเป๋าเต็ม)
     dist = 2, -- วาร์ปตัด: ยืนห่างลำต้นกี่ studs
+    hide = true, -- เลือกต้นขอบแมพ ห่างคนอื่น (กันคนเห็น)
+    resetOnOff = true, -- ปิดสวิตช์แล้วรีเซ็ตตัว (เกิดใหม่ที่จุดเกิด ไม่ค้างอยู่ขอบแมพ)
     chopped = 0,
 }
 
@@ -219,17 +221,54 @@ local function trunkPos(tree)
     return low and Vector3.new(low.Position.X, low.Position.Y, low.Position.Z) or pivot
 end
 
-local function pickTree()
-    local hrp = getRoot()
-    if not hrp then return nil end
-    local best, bestDist
-    for _, tree in ipairs(CollectionService:GetTagged(Config.TreeTag)) do
-        if choppable(tree) then
-            local d = (tree:GetPivot().Position - hrp.Position).Magnitude
-            if not bestDist or d < bestDist then best, bestDist = tree, d end
+-- ระยะจากต้นไม้ถึงผู้เล่นคนอื่นที่ใกล้สุด
+local function nearestOther(pos)
+    local best = math.huge
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= LocalPlayer then
+            local r = p.Character and p.Character:FindFirstChild("HumanoidRootPart")
+            if r then best = math.min(best, (r.Position - pos).Magnitude) end
         end
     end
     return best
+end
+
+local HIDE_DIST = 80 -- ห่างคนอื่นอย่างน้อยเท่านี้ถึงนับว่าลับตา
+local function pickTree()
+    local hrp = getRoot()
+    if not hrp then return nil end
+    local trees = {}
+    local center = Vector3.zero
+    for _, tree in ipairs(CollectionService:GetTagged(Config.TreeTag)) do
+        if choppable(tree) then
+            table.insert(trees, tree)
+            center += tree:GetPivot().Position
+        end
+    end
+    if #trees == 0 then return nil end
+    center /= #trees
+    if not auto.hide then
+        local best, bestDist
+        for _, tree in ipairs(trees) do
+            local d = (tree:GetPivot().Position - hrp.Position).Magnitude
+            if not bestDist or d < bestDist then best, bestDist = tree, d end
+        end
+        return best
+    end
+    -- หลบคน: เอาต้นที่ห่างคนอื่นเกิน 80 studs และอยู่ขอบแมพ (ห่างกลางดงไม้) ต้นที่ใกล้เราก่อนในกลุ่มนั้น
+    -- ไม่มีต้นไหนลับตาเลย: เอาต้นที่ห่างคนอื่นมากสุด
+    local best, bestScore, far, farDist
+    for _, tree in ipairs(trees) do
+        local pos = tree:GetPivot().Position
+        local other = nearestOther(pos)
+        if not farDist or other > farDist then far, farDist = tree, other end
+        if other >= HIDE_DIST then
+            local edge = Vector3.new(pos.X - center.X, 0, pos.Z - center.Z).Magnitude
+            local score = edge - (pos - hrp.Position).Magnitude * 0.5 -- ขอบแมพมาก + ใกล้เรา
+            if not bestScore or score > bestScore then best, bestScore = tree, score end
+        end
+    end
+    return best or far
 end
 
 local function chopTree(tree, axe)
@@ -401,8 +440,34 @@ section:AddToggle("WoodAuto", {
     Description = "ถือขวานดีสุด -> ตัดต้นไม้ใกล้สุด -> ต้นต่อไป จนได้ไม้ครบ / กระเป๋าเต็ม",
     Default = false,
 }):OnChanged(function(v)
+    local wasOn = auto.on
     auto.on = v
-    if v then task.spawn(autoLoop) else holdCF = nil end
+    if v then
+        task.spawn(autoLoop)
+    else
+        holdCF = nil
+        -- ปิดแล้วรีเซ็ตตัว: ตายแล้วเกิดใหม่ที่จุดเกิด ไม่ค้างอยู่ตรงขอบแมพ
+        if wasOn and auto.resetOnOff then
+            local hum = getHum()
+            if hum then hum.Health = 0 end
+            local char = LocalPlayer.Character
+            if char then pcall(function() char:BreakJoints() end) end
+        end
+    end
+end)
+section:AddToggle("WoodHide", {
+    Title = "ตัดต้นขอบแมพ (หลบคน)",
+    Description = "เลือกต้นที่อยู่ขอบแมพ ห่างผู้เล่นคนอื่นเกิน 80 studs ก่อน กันคนเห็น",
+    Default = true,
+}):OnChanged(function(v)
+    auto.hide = v
+end)
+section:AddToggle("WoodReset", {
+    Title = "ปิดตัดไม้แล้วรีเซ็ตตัว",
+    Description = "พอปิดสวิตช์ตัดไม้ ตัวจะตายแล้วเกิดใหม่ที่จุดเกิด",
+    Default = true,
+}):OnChanged(function(v)
+    auto.resetOnOff = v
 end)
 section:AddDropdown("WoodMove", {
     Title = "วิธีไป",
