@@ -380,6 +380,32 @@ local function harvest(crop)
     return true
 end
 
+---------------------------------------------------------------- เร่งท่าปลูก/ก้มเก็บ
+-- ท่าก้ม (Config.AnimationId) เล่นบนตัวเรา: ตอนเปิดออโต้ให้เล่นเร็ว 5 เท่า
+-- ถ้าเซิร์ฟเวอร์จับเวลาเอง (RiceActionBusy ยังค้าง) ก็จะไม่เร็วขึ้น แค่ท่าดูเร็ว
+local ANIM_ID = tostring(Config.AnimationId):match("%d+")
+local ANIM_SPEED = 5
+local animConn
+local function hookAnimator(char)
+    if animConn then animConn:Disconnect() animConn = nil end
+    local hum = char and char:WaitForChild("Humanoid", 10)
+    local animator = hum and hum:WaitForChild("Animator", 10)
+    if not animator then return end
+    animConn = animator.AnimationPlayed:Connect(function(track)
+        local id = track.Animation and track.Animation.AnimationId:match("%d+")
+        if auto.on and id == ANIM_ID then
+            track:AdjustSpeed(ANIM_SPEED)
+        end
+    end)
+end
+task.spawn(hookAnimator, LocalPlayer.Character)
+local charConn = LocalPlayer.CharacterAdded:Connect(hookAnimator)
+task.spawn(function()
+    while alive() do task.wait(1) end
+    charConn:Disconnect()
+    if animConn then animConn:Disconnect() end
+end)
+
 ---------------------------------------------------------------- วนอัตโนมัติ
 local function autoLoop()
     while alive() and auto.on do
