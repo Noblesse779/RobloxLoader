@@ -409,118 +409,15 @@ local Tabs = {
     main = Window:AddTab({ Title = "หลัก", Icon = "home" }),
 }
 
+-- ปุ่มเดียว: เปิดแล้วแทงเองทุกตาเรา (เปิดเกม/ตรง/เด้งขอบ/กันลูกขาวลง ใช้ค่าตั้งใน settings ข้างบน)
 local shotSection = Tabs.main:AddSection("แทง")
 shotSection:AddToggle("PoolAuto", {
     Title = "แทงอัตโนมัติ",
-    Description = "ถึงตาเรา (ลูกหยุดแล้ว) จะเลือกลูกที่ลงง่ายสุดแล้วแทงเอง",
+    Description = "ถึงตาเราแทงเองจนจบเกม",
     Default = false,
 }):OnChanged(function(v)
     settings.auto = v
 end)
-shotSection:AddButton({
-    Title = "แทง 1 ครั้ง",
-    Description = "คำนวณแล้วแทงตอนนี้เลย (กดตอนถึงตาเรา)",
-    Callback = function()
-        shoot()
-    end,
-})
-shotSection:AddDropdown("PoolGroup", {
-    Title = "ลูกฝั่งเรา",
-    Values = { "อัตโนมัติ", "ลูกเต็ม (1-7)", "ลูกลาย (9-15)" },
-    Multi = false,
-    Default = 1,
-}):OnChanged(function(v)
-    settings.group = v
-end)
-shotSection:AddSlider("PoolPower", {
-    Title = "คูณแรงแทง",
-    Description = "ลูกไม่ถึงหลุม = เพิ่ม, แรงเกินจนลูกเด้งออก = ลด",
-    Default = 1,
-    Min = 0.5,
-    Max = 1.8,
-    Rounding = 2,
-}):OnChanged(function(v)
-    settings.powerScale = v
-end)
-local proSection = Tabs.main:AddSection("แทงแบบโปร")
-proSection:AddToggle("PoolBanks", {
-    Title = "ลูกเป้าเด้งขอบลงหลุม",
-    Description = "ไม่มีมุมตรง ให้ลูกเป้าเด้งขอบ 1 ครั้งแล้วลง",
-    Default = true,
-}):OnChanged(function(v)
-    settings.banks = v
-end)
-proSection:AddToggle("PoolKicks", {
-    Title = "ลูกขาวเด้งขอบไปชน",
-    Description = "มีลูกขวางทางตรง ให้ลูกขาวเด้งขอบอ้อมไปชน",
-    Default = true,
-}):OnChanged(function(v)
-    settings.kicks = v
-end)
-proSection:AddSlider("PoolBounce", {
-    Title = "ขอบเด้ง",
-    Description = "เด้งขอบแล้วไปสั้นกว่าหลุม (ชนขอบก่อนหลุม) = ลด, เลยหลุม = เพิ่ม",
-    Default = 0.85,
-    Min = 0.5,
-    Max = 1,
-    Rounding = 2,
-}):OnChanged(function(v)
-    settings.bounce = v
-end)
-proSection:AddSlider("PoolSpinY", {
-    Title = "สปิน บน(+)/ล่าง(-)",
-    Description = "บน = ลูกขาวตามไปข้างหน้า, ล่าง = ดึงกลับ (สปินทำให้เด้งขอบคลาดได้)",
-    Default = 0,
-    Min = -1,
-    Max = 1,
-    Rounding = 2,
-}):OnChanged(function(v)
-    settings.spinY = v
-end)
-proSection:AddSlider("PoolBreakSpin", {
-    Title = "สปินตอนเปิดเกม",
-    Description = "บวก = สปินบน (ถ้าลูกขาวดึงกลับแทนที่จะตามเข้ากอง ให้ใส่ค่าลบ)",
-    Default = 0.7,
-    Min = -1,
-    Max = 1,
-    Rounding = 2,
-}):OnChanged(function(v)
-    settings.breakSpin = v
-end)
-proSection:AddSlider("PoolSpinX", {
-    Title = "สปิน ซ้าย(-)/ขวา(+)",
-    Description = "ปล่อย 0 ไว้ดีที่สุด สปินข้างทำให้มุมเพี้ยน",
-    Default = 0,
-    Min = -1,
-    Max = 1,
-    Rounding = 2,
-}):OnChanged(function(v)
-    settings.spinX = v
-end)
-
-shotSection:AddButton({
-    Title = "คัดลอกข้อมูลโต๊ะล่าสุด",
-    Description = "ส่งให้คนทำสคริปต์ดูตอนเลือกฝั่ง/ตาเล่นผิด",
-    Callback = function()
-        if not state then return end
-        local parts = {}
-        for k, v in pairs(state) do
-            if k ~= "balls" then
-                local s = typeof(v) == "table" and "{table}" or tostring(v)
-                if typeof(v) == "table" then
-                    local inner = {}
-                    for k2, v2 in pairs(v) do table.insert(inner, tostring(k2) .. "=" .. tostring(v2)) end
-                    s = "{" .. table.concat(inner, ", ") .. "}"
-                end
-                table.insert(parts, tostring(k) .. " = " .. s)
-            end
-        end
-        local text = table.concat(parts, "\n")
-        if typeof(setclipboard) == "function" then setclipboard(text) end
-        print(text)
-        Fluent:Notify({ Title = "คัดลอกแล้ว", Content = "ข้อมูลโต๊ะ", Duration = 4 })
-    end,
-})
 local statusPara = shotSection:AddParagraph({ Title = "สถานะ", Content = status })
 
 Window:SelectTab(1)
