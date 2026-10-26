@@ -206,8 +206,7 @@ end
 local lastSwing = 0
 local function swing(stats)
     -- รอครบดีเลของดาบ + เผื่อนิดหน่อย และไม่เกินจำนวนครั้ง/วิ ที่เกมยอม
-    -- ถี่สุดที่เซิร์ฟเวอร์รับ: ดีเลดาบพอดี (เร็วกว่านี้เซิร์ฟเวอร์ทิ้ง ไม่โดน)
-    local gap = math.max(stats.Cooldown, 1 / (WeaponConfig.RequestsPerSecond or 5))
+    local gap = math.max(stats.Cooldown + 0.03, 1 / (WeaponConfig.RequestsPerSecond or 5))
     if os.clock() - lastSwing < gap then return false end
     lastSwing = os.clock()
     AttackRemote:FireServer()
@@ -279,6 +278,42 @@ task.spawn(function()
     gatherConn:Disconnect()
 end)
 
+-- ล่อหมู: วาร์ปไปฟันหมูที่อยู่ห่างๆ ตัวละที ให้มันหันมาไล่เรา แล้ววาร์ปกลับจุดเดิม
+-- หมูที่เกมคุมเองดึงตรงๆ ไม่ได้ แต่โดนตีแล้วจะเดินตามมาหาเอง
+local lastTag = 0
+local function tagRound()
+    if os.clock() - lastTag < 6 then return end
+    lastTag = os.clock()
+    local hrp = getRoot()
+    local tool = weaponTools()[1]
+    if not (hrp and tool and tool.Parent == LocalPlayer.Character) then return end
+    local stats = WeaponConfig.Weapons[tool.Name]
+    local home = hrp.CFrame
+    local tagged = 0
+    for _, m in ipairs(ActiveMonsters:GetChildren()) do
+        if tagged >= 8 or not (alive() and (auto.on or aura.on) and auto.gather) then break end
+        local h = m:FindFirstChildOfClass("Humanoid")
+        local root = monsterRoot(m)
+        if h and h.Health > 0 and root and wanted(m) then
+            local far = (root.Position - home.Position).Magnitude
+            if far > stats.Range + 4 and far <= auto.gatherRadius then
+                local back = (root.CFrame * CFrame.new(0, 0, math.min(3, stats.Range - 1))).Position
+                hrp.CFrame = CFrame.lookAt(back, Vector3.new(root.Position.X, back.Y, root.Position.Z))
+                hrp.AssemblyLinearVelocity = Vector3.zero
+                -- รอให้ฟันได้ (ดีเลดาบ) แล้วฟันทีเดียว
+                local t = os.clock()
+                while os.clock() - t < 1 and not swing(stats) do RunService.Heartbeat:Wait() end
+                tagged += 1
+            end
+        end
+    end
+    if tagged > 0 then
+        hrp.CFrame = home
+        hrp.AssemblyLinearVelocity = Vector3.zero
+        status = ("ล่อหมูมา %d ตัว"):format(tagged)
+    end
+end
+
 local function fight(pig)
     local tool, stats = equipWeapon()
     if not tool then
@@ -326,6 +361,7 @@ local function fight(pig)
         end
         if os.clock() - started > 60 then break end -- ตีไม่ตายใน 1 นาที (ติด/หนี) ไปตัวอื่น
         -- มีตัวเก่งกว่าโผล่มา (เช่นมินิบอส/บอสเกิด) เปลี่ยนไปตีตัวนั้นก่อน
+        if auto.gather then tagRound() end
         if os.clock() - lastCheck > 1 then
             lastCheck = os.clock()
             local top = pickPig()
@@ -350,6 +386,7 @@ local function auraLoop()
             status = "Kill Aura: ไม่มีดาบ / หยิบดาบไม่ได้"
             task.wait(1)
         elseif hrp and hum and hum.Health > 0 and not auto.on then
+            if auto.gather then tagRound() end
             local held = weaponTools()[1]
             local range = held and WeaponConfig.Weapons[held.Name].Range + 1 or 0
             local pig = pickPig(range)
@@ -627,7 +664,7 @@ section:AddDropdown("PigSide", {
 end)
 section:AddToggle("PigGather", {
     Title = "รวมหมู",
-    Description = "ดึงหมูรอบตัวมากองตรงหน้า ฟันทีเดียวโดนหลายตัว (ใช้กับตีอัตโนมัติ / Kill Aura) ตัวที่เกมคุมเองดึงไม่มา",
+    Description = "ดึงหมูใกล้ๆ มากองตรงหน้า + วาร์ปไปฟันหมูที่อยู่ห่างๆ ตัวละทีให้มันเดินตามมา (ใช้กับตีอัตโนมัติ / Kill Aura)",
     Default = false,
 }):OnChanged(function(v)
     auto.gather = v
