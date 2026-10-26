@@ -72,8 +72,9 @@ ProximityPromptService.PromptHidden:Connect(function(p)
     if shownPrompt == p then shownPrompt = nil end
 end)
 
-local function pressPrompt(prompt)
-    if typeof(fireproximityprompt) == "function" then
+-- useFire = ใช้ fireproximityprompt  ไม่งั้นกดปุ่มจริง (เหมือนผู้เล่นกด E)
+local function pressPrompt(prompt, useFire)
+    if useFire and typeof(fireproximityprompt) == "function" then
         if pcall(fireproximityprompt, prompt) then return true end
     end
     local key = prompt.KeyboardKeyCode or Enum.KeyCode.E
@@ -114,9 +115,8 @@ local function goTalk()
         status = "วาร์ปไปแล้วแต่ปุ่มคุยไม่ขึ้น"
         return false
     end
-    pressPrompt(shownPrompt)
-    status = ("กดคุยแล้ว (%s)"):format(shownPrompt and shownPrompt.ActionText or "?")
-    return true
+    status = ("กดคุยแล้ว (%s)"):format(shownPrompt.ActionText)
+    return true, shownPrompt
 end
 
 ---------------------------------------------------------------- เลือก "1.) รับงานลากซุง"
@@ -130,10 +130,12 @@ local function isShown(gui)
     return false
 end
 
-local ACCEPT_WORDS = { "รับงาน", "accept", "take the job" }
-local function findAcceptOption()
-    for _, d in ipairs(LocalPlayer.PlayerGui:GetDescendants()) do
-        if (d:IsA("TextButton") or d:IsA("TextLabel")) and isShown(d) then
+local ACCEPT_WORDS = { "รับงานลากซุง", "accept", "take the job" }
+-- strict = ต้องมี "1." ด้วย (กันไปเจอป้ายชื่องานที่ตั้งอยู่ในแมพตลอด)
+local function scanAccept(root, needShown, strict)
+    for _, d in ipairs(root:GetDescendants()) do
+        if (d:IsA("TextButton") or d:IsA("TextLabel")) and (not needShown or isShown(d))
+            and (not strict or d.Text:find("1.", 1, true)) then
             local t = d.Text:lower()
             for _, w in ipairs(ACCEPT_WORDS) do
                 if t:find(w, 1, true) and not t:find("ไว้ก่อน", 1, true) then
@@ -142,6 +144,19 @@ local function findAcceptOption()
             end
         end
     end
+end
+-- หน้าต่างตัวเลือกหลังคุย: หาในหน้าจอก่อน ไม่เจอค่อยหาในแมพ/CoreGui (บางเกมทำเป็นป้ายเหนือหัว)
+local function findAcceptOption()
+    local found = scanAccept(LocalPlayer.PlayerGui, true)
+    if found then return found end
+    for _, bb in ipairs(workspace:GetDescendants()) do
+        if (bb:IsA("BillboardGui") or bb:IsA("SurfaceGui")) and bb.Enabled then
+            found = scanAccept(bb, false, true)
+            if found then return found end
+        end
+    end
+    pcall(function() found = scanAccept(game:GetService("CoreGui"), false, true) end)
+    return found
 end
 
 local function clickGui(gui)
@@ -205,32 +220,45 @@ local function acceptJob()
     local function accepted()
         return env.ElephantAcceptAt ~= acceptBefore or jobActive()
     end
-    if not goTalk() then return false end
-    local option
-    if not waitFor(3, function()
-        option = findAcceptOption()
-        return option ~= nil
-    end) then
-        -- หาตัวเลือกบนจอไม่เจอ: กดเลข 1 แทน (ผู้เล่นกด 1 เองก็รับงานได้)
+    local function pressOne()
         VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.One, false, game)
         task.wait(0.1)
         VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.One, false, game)
-    else
-        pressGuiButton(option)
     end
-    if waitFor(4, accepted) then
+    local talked, prompt = goTalk()
+    if not talked then return false end
+    -- กด E จริงก่อน (เหมือนผู้เล่น) ถ้าหน้าต่างตัวเลือกไม่ขึ้นค่อยลอง fireproximityprompt
+    local option
+    local function dialog()
+        option = findAcceptOption()
+        return option ~= nil or accepted()
+    end
+    pressPrompt(prompt, false)
+    if not waitFor(3, dialog) then
+        pressPrompt(prompt, true)
+        if not waitFor(3, dialog) then
+            -- ห้ามกด 1 ตอนหน้าต่างไม่ขึ้น (จะไปเปิดกระเป๋า/ช่องของแทน)
+            status = "กดคุยแล้วแต่หน้าต่างตัวเลือกไม่ขึ้น"
+            return false
+        end
+    end
+    if accepted() then
         status = "รับงานแล้ว"
         return true
     end
-    -- กดที่ตัวเลือกไม่ติด ลองกดเลข 1 อีกที
-    VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.One, false, game)
-    task.wait(0.1)
-    VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.One, false, game)
+    status = "เจอตัวเลือก รับงานลากซุง กำลังเลือก..."
+    -- หน้าต่างขึ้นแล้ว: กดเลข 1 (ผู้เล่นกดเองก็รับงานได้) ไม่ติดค่อยกดที่ตัวเลือก
+    pressOne()
     if waitFor(3, accepted) then
         status = "รับงานแล้ว"
         return true
     end
-    status = option and "กดรับงานแล้วแต่งานไม่ขึ้น" or "ไม่เจอตัวเลือก รับงานลากซุง"
+    if option then pressGuiButton(option) end
+    if waitFor(3, accepted) then
+        status = "รับงานแล้ว"
+        return true
+    end
+    status = "เจอตัวเลือกแล้วแต่กดไม่ติด"
     return false
 end
 
