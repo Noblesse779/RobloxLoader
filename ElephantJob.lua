@@ -208,7 +208,8 @@ local function hudActive()
 end
 local function jobActive()
     if env.ElephantAcceptAt and os.clock() - env.ElephantAcceptAt < 15 then return true end
-    return riding() or hudActive() or (findTarget ~= nil and findTarget() ~= nil)
+    -- ไม่นับป้าย "จุดส่งซุง" ในแมพ (บางป้ายตั้งอยู่ตลอด ทำให้คิดว่ามีงานทั้งที่ไม่มี)
+    return riding() or hudActive()
 end
 
 local function acceptJob()
@@ -225,6 +226,9 @@ local function acceptJob()
         task.wait(0.1)
         VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.One, false, game)
     end
+    -- เก็บของที่ถืออยู่ก่อน (ถือของอยู่จะคุยกับ NPC ไม่ได้ / กด 1 ไปหยิบของ)
+    local hum = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+    if hum then hum:UnequipTools() end
     local talked, prompt = goTalk()
     if not talked then return false end
     -- กด E จริงก่อน (เหมือนผู้เล่น) ถ้าหน้าต่างตัวเลือกไม่ขึ้นค่อยลอง fireproximityprompt
