@@ -435,32 +435,40 @@ local function loadFluent(useCache)
     end
     return loadstring(source)()
 end
-local ok, Fluent = pcall(loadFluent, true)
-if not ok or typeof(Fluent) ~= "table" then
-    ok, Fluent = pcall(loadFluent, false)
-end
-if not ok or typeof(Fluent) ~= "table" then
-    warn("[RiceJob] โหลดหน้าต่างไม่ได้: " .. tostring(Fluent))
-    return
-end
+-- เปิดผ่านตัวรวม (BaanLung.lua) จะส่งแท็บ + Fluent มาให้: ใช้แท็บนั้น ไม่สร้างหน้าต่างเอง
+local HUB_TAB, HUB_FLUENT = ...
+local Fluent, Window, Tabs
+if HUB_TAB then
+    Fluent, Tabs = HUB_FLUENT, { main = HUB_TAB }
+else
+    local ok
+    ok, Fluent = pcall(loadFluent, true)
+    if not ok or typeof(Fluent) ~= "table" then
+        ok, Fluent = pcall(loadFluent, false)
+    end
+    if not ok or typeof(Fluent) ~= "table" then
+        warn("[RiceJob] โหลดหน้าต่างไม่ได้: " .. tostring(Fluent))
+        return
+    end
 
-if env.RiceFluent then
-    pcall(function() env.RiceFluent:Destroy() end)
-end
-env.RiceFluent = Fluent
+    if env.RiceFluent then
+        pcall(function() env.RiceFluent:Destroy() end)
+    end
+    env.RiceFluent = Fluent
 
-local Window = Fluent:CreateWindow({
-    Title = "ปลูกข้าว",
-    SubTitle = "ลุงหมา",
-    TabWidth = 150,
-    Size = UDim2.fromOffset(540, 340),
-    Acrylic = false,
-    Theme = "Darker",
-    MinimizeKey = Enum.KeyCode.H,
-})
-local Tabs = {
-    main = Window:AddTab({ Title = "หลัก", Icon = "home" }),
-}
+    Window = Fluent:CreateWindow({
+        Title = "ปลูกข้าว",
+        SubTitle = "ลุงหมา",
+        TabWidth = 150,
+        Size = UDim2.fromOffset(540, 340),
+        Acrylic = false,
+        Theme = "Darker",
+        MinimizeKey = Enum.KeyCode.H,
+    })
+    Tabs = {
+        main = Window:AddTab({ Title = "หลัก", Icon = "home" }),
+    }
+end
 
 local section = Tabs.main:AddSection("ปลูกข้าว")
 section:AddToggle("RiceAuto", {
@@ -482,7 +490,7 @@ section:AddDropdown("RiceMove", {
 end)
 local statusPara = section:AddParagraph({ Title = "สถานะ", Content = status })
 
-Window:SelectTab(1)
+if Window then Window:SelectTab(1) end
 
 task.spawn(function()
     while alive() and not Fluent.Unloaded do
