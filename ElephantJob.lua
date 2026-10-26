@@ -207,7 +207,8 @@ local function hudActive()
     return false
 end
 local function jobActive()
-    if env.ElephantAcceptAt and os.clock() - env.ElephantAcceptAt < 15 then return true end
+    -- รับงานแล้วถือว่ามีงานไปยาวๆ (กันรับซ้ำ) จนกว่าจะกด ลงจากช้าง หรือผ่านไป 10 นาทีไม่เห็นป้ายงาน
+    if env.ElephantAcceptAt and os.clock() - env.ElephantAcceptAt < 600 then return true end
     -- ไม่นับป้าย "จุดส่งซุง" ในแมพ (บางป้ายตั้งอยู่ตลอด ทำให้คิดว่ามีงานทั้งที่ไม่มี)
     return riding() or hudActive()
 end
@@ -537,6 +538,49 @@ local function teleportTo(target)
     return true
 end
 
+-- รับงานแล้วแต่ยังไม่ได้ขึ้นช้าง: หาปุ่มขี่ช้าง (ProximityPrompt) ใกล้ๆ แล้วกด
+local MOUNT_WORDS = { "ขี่", "ride", "mount", "ขึ้นช้าง" }
+local function findMountPrompt()
+    local hrp = getRoot()
+    local best, bestDist
+    for _, p in ipairs(workspace:GetDescendants()) do
+        if p:IsA("ProximityPrompt") and p.Enabled then
+            local text = (p.ActionText .. " " .. p.ObjectText .. " " .. (p.Parent and p.Parent.Name or "")):lower()
+            local match = false
+            for _, w in ipairs(MOUNT_WORDS) do
+                if text:find(w, 1, true) then match = true break end
+            end
+            local pos = match and promptPosition(p)
+            if pos and hrp then
+                local d = (pos - hrp.Position).Magnitude
+                if d < 150 and (not bestDist or d < bestDist) then best, bestDist = p, d end
+            end
+        end
+    end
+    return best
+end
+
+local lastMountTry = 0
+local function tryMount()
+    if hudActive() or riding() or os.clock() - lastMountTry < 5 then return end
+    lastMountTry = os.clock()
+    local prompt = findMountPrompt()
+    if not prompt then
+        status = "รับงานแล้ว รอขึ้นช้าง (ไม่เจอปุ่มขี่ช้าง)"
+        return
+    end
+    local hrp, pos = getRoot(), promptPosition(prompt)
+    if hrp and pos and (pos - hrp.Position).Magnitude > prompt.MaxActivationDistance - 2 then
+        -- ยังไม่ได้ขี่ วาร์ปตัวไปข้างช้างได้ (ไม่จม)
+        hrp.CFrame = CFrame.new(pos + Vector3.new(3, 2, 0), pos)
+        task.wait(0.4)
+    end
+    status = "กดขึ้นช้าง (" .. prompt.ActionText .. ")"
+    pressPrompt(prompt, true)
+    task.wait(1)
+    if not hudActive() and not riding() then pressPrompt(prompt, false) end
+end
+
 local function autoLoop()
     while alive() and auto.on do
         if not jobActive() then
@@ -544,7 +588,11 @@ local function autoLoop()
             if not acceptJob() then task.wait(3) end
         else
             local target = findTarget()
-            if not target then
+            if not (hudActive() or riding()) then
+                -- ยังไม่ได้ขึ้นช้าง (ป้าย "ลากซุงไปจุด" ยังไม่ขึ้น) ห้ามวาร์ปไปจุดส่งตัวเปล่า
+                tryMount()
+                task.wait(1)
+            elseif not target then
                 status = "ไม่เจอป้ายจุดส่งซุง รอ..."
                 task.wait(1)
             else
