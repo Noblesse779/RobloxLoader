@@ -256,9 +256,7 @@ local function sendAccept(id)
     local remotes = sys and sys:FindFirstChild("Remotes")
     local request = remotes and remotes:FindFirstChild("Request")
     if not request then return false end
-    env.ElephantSelfAccept = true
     local ok, res = pcall(function() return request:InvokeServer("Accept", id) end)
-    env.ElephantSelfAccept = false
     return ok, res
 end
 
@@ -267,9 +265,13 @@ local function acceptJob()
         status = "มีงานลากซุงอยู่แล้ว"
         return true
     end
-    local acceptBefore = env.ElephantAcceptAt
+    -- รับงานสำเร็จ = ป้าย "ลากซุงไปจุด" ขึ้น หรือได้ขี่ช้าง
     local function accepted()
-        return env.ElephantAcceptAt ~= acceptBefore or jobActive()
+        if hudActive() or riding() then
+            env.ElephantAcceptAt = os.clock()
+            return true
+        end
+        return false
     end
     local function pressOne()
         VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.One, false, game)
@@ -293,8 +295,7 @@ local function acceptJob()
         status = "ได้รหัสงานแล้ว ส่งรับงาน..."
         sendAccept(id)
         -- นับว่าสำเร็จต่อเมื่อขึ้นช้าง/ป้ายงานขึ้นจริง
-        if waitFor(4, function() return hudActive() or riding() end) then
-            env.ElephantAcceptAt = os.clock()
+        if waitFor(6, accepted) then
             status = "รับงานแล้ว"
             return true
         end
@@ -321,12 +322,12 @@ local function acceptJob()
     status = "เจอตัวเลือก รับงานลากซุง กำลังเลือก..."
     -- หน้าต่างขึ้นแล้ว: กดเลข 1 (ผู้เล่นกดเองก็รับงานได้) ไม่ติดค่อยกดที่ตัวเลือก
     pressOne()
-    if waitFor(3, accepted) then
+    if waitFor(6, accepted) then
         status = "รับงานแล้ว"
         return true
     end
     if option then pressGuiButton(option) end
-    if waitFor(3, accepted) then
+    if waitFor(6, accepted) then
         status = "รับงานแล้ว"
         return true
     end
@@ -364,12 +365,6 @@ local function inputRemote()
     return net and net:FindFirstChild("Input")
 end
 
-local function requestRemote()
-    local sys = ReplicatedStorage:FindFirstChild("ElephantJobSystem")
-    local remotes = sys and sys:FindFirstChild("Remotes")
-    return remotes and remotes:FindFirstChild("Request")
-end
-
 -- ช้างของเรา: จากที่นั่ง หรือจากตัวแรกที่เกมส่งไปกับ Input (ดักได้ใน hook)
 local function myMount()
     local char = LocalPlayer.Character
@@ -381,24 +376,19 @@ local function myMount()
 end
 
 -- ติดตั้งตัวดักครั้งเดียว (รันสคริปต์ใหม่ใช้ตัวเดิม อ่านค่าจาก env)
--- - Request:InvokeServer("Accept", id) = รับงานแล้ว -> จำเวลาไว้
--- - Input:FireServer(ช้าง, flag, ทิศ) = จำช้างไว้ และเปลี่ยนทิศเป็นทิศไปจุดส่ง
-if not env.ElephantHook2 and typeof(hookmetamethod) == "function"
+-- Input:FireServer(ช้าง, flag, ทิศ) = จำช้างไว้ และเปลี่ยนทิศเป็นทิศไปจุดส่ง
+-- ห้ามดัก InvokeServer: executor บางตัวรอผลใน hook ไม่ได้ ทำให้ Accept ของเกมพัง (ช้างไม่ขึ้น)
+if not env.ElephantHook3 and typeof(hookmetamethod) == "function"
     and typeof(getnamecallmethod) == "function" then
-    env.ElephantHook2 = true
+    env.ElephantHook3 = true
     local wrap = typeof(newcclosure) == "function" and newcclosure or function(f) return f end
     local old
     old = hookmetamethod(game, "__namecall", wrap(function(self, ...)
-        local method = getnamecallmethod()
-        if method == "FireServer" and self == inputRemote() then
+        if getnamecallmethod() == "FireServer" and self == inputRemote() then
             local mount, flag = ...
             if typeof(mount) == "Instance" then env.ElephantMount = mount end
             local dir = env.ElephantAutopilotDir
             if dir then return old(self, mount, flag, dir) end
-        elseif method == "InvokeServer" and self == requestRemote() then
-            local action = ...
-            -- นับเฉพาะตอนเกมส่งเอง (เลือกตัวเลือกแล้ว) ตัวที่สคริปต์ลองส่งเองไม่นับ
-            if action == "Accept" and not env.ElephantSelfAccept then env.ElephantAcceptAt = os.clock() end
         end
         return old(self, ...)
     end))
