@@ -82,8 +82,12 @@ end
 -- ข้าวอยู่ในกระเป๋าของเกม (ไม่ใช่ Backpack) ต้องเอาออกมาไว้ช่องลัดก่อนถึงจะกลายเป็น Tool
 -- เกมส่ง InventorySystem.Remotes.SetHotbar:FireServer({ ชื่อของในช่องลัดทั้งหมด })
 -- ส่งรายการเดิมที่อยู่ในช่องลัด (Tool ที่มีอยู่) + "Rice" จะได้ไม่ไปลบของอื่นออกจากช่องลัด
-local function ensureRiceTool()
+-- ลองเอาออกมาไม่เกินทุก 4 วิ (ไม่มีข้าวในกระเป๋าแล้วจะได้ไม่ยิงรีโมทรัวๆ) force = เพิ่งได้ข้าวมา
+local lastEnsure = 0
+local function ensureRiceTool(force)
     if #riceTools() > 0 then return true end
+    if not force and os.clock() - lastEnsure < 4 then return false end
+    lastEnsure = os.clock()
     local inv = ReplicatedStorage:FindFirstChild("InventorySystem")
     local remote = inv and inv:FindFirstChild("Remotes") and inv.Remotes:FindFirstChild("SetHotbar")
     if not remote then return false end
@@ -270,7 +274,9 @@ local function talk()
         task.wait(Config.IntroLineSeconds * 2 + 0.5)
         fin = request("FinishIntro", res.token)
     end
-    if not waitFor(4, function() return #riceTools() > 0 end) then
+    -- ข้าวที่ได้เข้ากระเป๋าของเกม ต้องเอาออกมาช่องลัดก่อนถึงจะถือได้
+    if not (waitFor(2, function() return #riceTools() > 0 end) or ensureRiceTool(true)
+        or (task.wait(1) and ensureRiceTool(true))) then
         status = "รับงานแล้วแต่ข้าวไม่เข้ากระเป๋า: " .. tostring(fin.message)
         return false
     end
@@ -327,30 +333,67 @@ local function plantSpot()
     end
 end
 
+-- เกมล็อกตัวไว้ระหว่างท่า (RiceActionBusy) ทั้งที่ได้ผลแล้ว: ปลดล็อกฝั่งเราแล้วไปต่อเลย
+local actionDone = false -- ทำต้นล่าสุดเสร็จแล้ว (ได้ต้น/ได้เงิน) ไม่ต้องรอท่าจบ
+local function unfreeze()
+    local hrp = getRoot()
+    local hum = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+    if hrp then hrp.Anchored = false end
+    if hum then
+        hum.PlatformStand = false
+        if hum.WalkSpeed < 16 then hum.WalkSpeed = 16 end
+        if hum.UseJumpPower and hum.JumpPower <= 0 then hum.JumpPower = 50 end
+    end
+end
+
+-- ส่งคำสั่งแบบไม่รอคำตอบ (คำตอบกลับมาตอนท่าจบ) แล้วดูผลจากของในแมพแทน
+local function fire(action, arg)
+    local box = { done = false, res = nil }
+    task.spawn(function()
+        box.res = request(action, arg)
+        box.done = true
+    end)
+    return box
+end
+
 local function plantOne()
     local tool = riceTools()[1]
     if not tool then return false end
+    -- ถือข้าวให้ได้ก่อน แล้วค่อยทำอย่างอื่น
+    local hum = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+    if not hum then return false end
+    if tool.Parent ~= LocalPlayer.Character then
+        status = "หยิบข้าวขึ้นมาถือ..."
+        hum:EquipTool(tool)
+        if not waitFor(2, function() return tool.Parent == LocalPlayer.Character end) then
+            status = "หยิบข้าวขึ้นมาถือไม่ได้"
+            return false
+        end
+    end
     local spot = plantSpot()
     if not spot then
         status = "หาที่ว่างในแปลงไม่เจอ"
         return false
     end
     if not moveTo(spot) then return false end
-    local hum = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
-    if not hum then return false end
-    if tool.Parent ~= LocalPlayer.Character then
+    if tool.Parent ~= LocalPlayer.Character then -- เผื่อหลุดมือระหว่างทาง
         hum:EquipTool(tool)
         task.wait(0.3)
     end
-    local before = #riceTools()
+    local before = #myCrops()
     status = "ปลูกข้าว..."
-    local res = request("UseRice")
-    -- รอท่าปลูกจบ (ห้ามขยับระหว่างนี้)
-    waitFor(Config.AnimationTimeout or 12, function() return not busy() end)
-    if not res.ok and #riceTools() >= before then
-        status = "ปลูกไม่สำเร็จ: " .. tostring(res.message)
+    actionDone = false
+    local box = fire("UseRice")
+    -- ต้นใหม่โผล่ในแปลง = ปลูกสำเร็จ ไปต่อเลยไม่ต้องรอท่าจบ
+    waitFor(Config.AnimationTimeout or 12, function()
+        return #myCrops() > before or (box.done and (not box.res.ok or not busy()))
+    end)
+    if #myCrops() <= before then
+        status = "ปลูกไม่สำเร็จ: " .. tostring(box.res and box.res.message or "หมดเวลา")
         return false
     end
+    actionDone = true
+    unfreeze()
     auto.planted += 1
     status = "ปลูกแล้ว เหลือข้าว " .. #riceTools() .. " ต้น"
     return true
@@ -365,16 +408,22 @@ local function harvest(crop)
     end
     status = "เก็บข้าว..."
     local startedAt = os.clock()
-    local res = request("UseRice", crop.model)
-    -- ไม่ต้องรอท่าจบ: ต้นหายไป หรือเกมแจ้งว่าเก็บสำเร็จ ก็ไปต้นต่อไปเลย
+    actionDone = false
+    local box = fire("UseRice", crop.model)
+    -- ได้เงินแล้ว (แจ้งเตือน "เก็บข้าวสำเร็จ") หรือต้นหายไป = เสร็จ ไปต้นต่อไปเลย
+    local function got()
+        return not crop.model.Parent
+            or (notify.at >= startedAt and notify.text:find("สำเร็จ", 1, true) ~= nil)
+    end
     waitFor(Config.AnimationTimeout or 12, function()
-        return not busy() or not crop.model.Parent
-            or (notify.at >= startedAt and notify.text:find("เก็บ", 1, true) ~= nil)
+        return got() or (box.done and (not box.res.ok or not busy()))
     end)
-    if not res.ok and crop.model.Parent then
-        status = "เก็บไม่สำเร็จ: " .. tostring(res.message)
+    if not got() then
+        status = "เก็บไม่สำเร็จ: " .. tostring(box.res and box.res.message or "หมดเวลา")
         return false
     end
+    actionDone = true
+    unfreeze()
     auto.harvested += 1
     status = "เก็บแล้ว"
     return true
@@ -409,8 +458,8 @@ end)
 ---------------------------------------------------------------- วนอัตโนมัติ
 local function autoLoop()
     while alive() and auto.on do
-        if busy() then
-            task.wait(0.3)
+        if busy() and not actionDone then
+            task.wait(0.2)
         else
             local crops = myCrops()
             local ready
@@ -418,12 +467,11 @@ local function autoLoop()
                 if c.ready then ready = c break end
             end
             -- ปลูกให้หมดก่อน แล้วค่อยไล่เก็บ
-            if #riceTools() > 0 or (LocalPlayer:GetAttribute("RiceQuestActive") == true and ensureRiceTool()) then
-                if not plantOne() then task.wait(1) end
+            -- มีข้าว (ในมือ/ช่องลัด หรือยังค้างในกระเป๋าเกม) ปลูกก่อนเสมอ ไม่ยืนรอข้าวโตทั้งที่มีข้าว
+            if #riceTools() > 0 or ensureRiceTool() then
+                if not plantOne() then task.wait(busy() and 0.2 or 1) end
             elseif ready then
-                if not harvest(ready) then task.wait(1) end
-            elseif #crops == 0 and ensureRiceTool() then
-                -- ยังมีข้าวในกระเป๋า (เอาออกมาช่องลัดได้) ปลูกต่อรอบหน้า
+                if not harvest(ready) then task.wait(busy() and 0.2 or 1) end
             elseif #crops == 0 then
                 -- ปลูก/เก็บหมดแล้ว: ไปหาลุงหมา รับเงิน/รับข้าวรอบใหม่
                 if not talk() then task.wait(3) end
