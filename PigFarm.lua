@@ -28,9 +28,9 @@ local auto = {
     on = false, walk = true, target = "ทุกตัว", swings = 0, kills = 0,
     dist = 4, -- ยืนห่างหมูกี่ studs (ไม่เกินระยะดาบ ไม่งั้นเซิร์ฟเวอร์ไม่นับ)
     side = "หลัง", -- ยืนตรงไหนของหมู: หน้า / หลัง / บน / ล่าง
-    sell = false, -- กระเป๋าเต็มแล้วไปขายเนื้อ
-    gather = false, -- ดึงหมูรอบตัวมากองตรงหน้า
-    gatherRadius = 60,
+    sell = "ไม่ขาย", -- ขายเนื้อเมื่อไหร่: ไม่ขาย / เมื่อกระเป๋าเต็ม / ทันทีที่มีเนื้อ
+    sellWalk = true, -- เดินไปขาย (false = วาร์ปไปขาย)
+    sellNow = false, -- กดปุ่ม ขายตอนนี้
     sold = 0, -- ขายได้กี่บาทแล้ว
 }
 
@@ -238,81 +238,7 @@ task.spawn(function()
     noclipConn:Disconnect()
 end)
 
-local aura = { on = false } -- Kill Aura (ประกาศไว้ก่อน ตัวรวมหมูใช้ด้วย)
-
--- รวมหมู: หมูที่อยู่ใกล้ (ฝั่งเราคุมฟิสิกส์ของมันอยู่) ดึงมากองตรงหน้าเราในระยะดาบ ฟันทีเดียวโดนหลายตัว
--- ตัวที่เซิร์ฟเวอร์คุมเอง (isnetworkowner = false) ดึงไม่มา ข้ามไป
-local function gatherStep()
-    local hrp = getRoot()
-    local tool = weaponTools()[1]
-    if not (hrp and tool) then return end
-    local range = WeaponConfig.Weapons[tool.Name].Range
-    local d = math.clamp(range - 1.5, 2, 4)
-    local i = 0
-    for _, m in ipairs(ActiveMonsters:GetChildren()) do
-        local h = m:FindFirstChildOfClass("Humanoid")
-        local root = monsterRoot(m)
-        if h and h.Health > 0 and root and wanted(m)
-            and (root.Position - hrp.Position).Magnitude <= auto.gatherRadius then
-            local owned = true
-            if typeof(isnetworkowner) == "function" then
-                local ok, res = pcall(isnetworkowner, root)
-                owned = ok and res
-            end
-            if owned then
-                -- กองเป็นแถวโค้งหน้าเรา ห่างกันนิดหน่อยจะได้ไม่ดีดกันกระเด็น
-                local side = ((i % 5) - 2) * 1.2
-                local spot = hrp.CFrame * CFrame.new(side, 0, -d)
-                root.CFrame = CFrame.lookAt(spot.Position, hrp.Position)
-                root.AssemblyLinearVelocity = Vector3.zero
-                i += 1
-            end
-        end
-    end
-end
-local gatherConn = RunService.Heartbeat:Connect(function()
-    if auto.gather and (auto.on or aura.on) then pcall(gatherStep) end
-end)
-task.spawn(function()
-    while alive() do task.wait(1) end
-    gatherConn:Disconnect()
-end)
-
--- ล่อหมู: วาร์ปไปฟันหมูที่อยู่ห่างๆ ตัวละที ให้มันหันมาไล่เรา แล้ววาร์ปกลับจุดเดิม
--- หมูที่เกมคุมเองดึงตรงๆ ไม่ได้ แต่โดนตีแล้วจะเดินตามมาหาเอง
-local lastTag = 0
-local function tagRound()
-    if os.clock() - lastTag < 6 then return end
-    lastTag = os.clock()
-    local hrp = getRoot()
-    local tool = weaponTools()[1]
-    if not (hrp and tool and tool.Parent == LocalPlayer.Character) then return end
-    local stats = WeaponConfig.Weapons[tool.Name]
-    local home = hrp.CFrame
-    local tagged = 0
-    for _, m in ipairs(ActiveMonsters:GetChildren()) do
-        if tagged >= 8 or not (alive() and (auto.on or aura.on) and auto.gather) then break end
-        local h = m:FindFirstChildOfClass("Humanoid")
-        local root = monsterRoot(m)
-        if h and h.Health > 0 and root and wanted(m) then
-            local far = (root.Position - home.Position).Magnitude
-            if far > stats.Range + 4 and far <= auto.gatherRadius then
-                local back = (root.CFrame * CFrame.new(0, 0, math.min(3, stats.Range - 1))).Position
-                hrp.CFrame = CFrame.lookAt(back, Vector3.new(root.Position.X, back.Y, root.Position.Z))
-                hrp.AssemblyLinearVelocity = Vector3.zero
-                -- รอให้ฟันได้ (ดีเลดาบ) แล้วฟันทีเดียว
-                local t = os.clock()
-                while os.clock() - t < 1 and not swing(stats) do RunService.Heartbeat:Wait() end
-                tagged += 1
-            end
-        end
-    end
-    if tagged > 0 then
-        hrp.CFrame = home
-        hrp.AssemblyLinearVelocity = Vector3.zero
-        status = ("ล่อหมูมา %d ตัว"):format(tagged)
-    end
-end
+local aura = { on = false } -- Kill Aura
 
 local function fight(pig)
     local tool, stats = equipWeapon()
@@ -334,13 +260,7 @@ local function fight(pig)
         local d = math.clamp(auto.dist, 1, stats.Range - 0.5)
         local stand = standPoint(root, d)
         local toPig = (root.Position - hrp.Position).Magnitude
-        if auto.gather and toPig <= stats.Range - 0.3 then
-            -- รวมหมูอยู่: หมูถูกดึงมากองตรงหน้าแล้ว ยืนนิ่งๆ ฟันอย่างเดียว
-            noclip = false
-            if auto.walk then hum:MoveTo(hrp.Position) end
-            face(root.Position)
-            swing(stats)
-        elseif vertical or not auto.walk then
+        if vertical or not auto.walk then
             -- วาร์ปไปจุดยืนทุกเฟรม (หมูขยับตาม) บน/ล่างใช้วาร์ปเสมอ เดินไปไม่ได้
             noclip = vertical
             local look = vertical and root.Position or Vector3.new(root.Position.X, stand.Y, root.Position.Z)
@@ -354,14 +274,16 @@ local function fight(pig)
             else
                 hum:MoveTo(hrp.Position)
             end
-            if toPig <= stats.Range - 0.3 then
+            -- วัดระยะแนวราบ (หมูตัวใหญ่ จุดกลางตัวสูงกว่าเรา วัดตรงๆ เลยเกินระยะทั้งที่ยืนชิดแล้ว ไม่ฟันสักที)
+            local flatTo = Vector3.new(root.Position.X - hrp.Position.X, 0, root.Position.Z - hrp.Position.Z).Magnitude
+            if flatTo <= stats.Range then
                 face(root.Position)
                 swing(stats)
             end
         end
         if os.clock() - started > 60 then break end -- ตีไม่ตายใน 1 นาที (ติด/หนี) ไปตัวอื่น
         -- มีตัวเก่งกว่าโผล่มา (เช่นมินิบอส/บอสเกิด) เปลี่ยนไปตีตัวนั้นก่อน
-        if auto.gather then tagRound() end
+        if auto.sellNow then break end -- กดขายตอนนี้: ไปขายก่อน
         if os.clock() - lastCheck > 1 then
             lastCheck = os.clock()
             local top = pickPig()
@@ -386,7 +308,6 @@ local function auraLoop()
             status = "Kill Aura: ไม่มีดาบ / หยิบดาบไม่ได้"
             task.wait(1)
         elseif hrp and hum and hum.Health > 0 and not auto.on then
-            if auto.gather then tagRound() end
             local held = weaponTools()[1]
             local range = held and WeaponConfig.Weapons[held.Name].Range + 1 or 0
             local pig = pickPig(range)
@@ -451,7 +372,7 @@ end
 local function goNear(pos, within)
     local hrp = getRoot()
     if not hrp then return false end
-    if not auto.walk then
+    if not auto.sellWalk then
         local away = Vector3.new(hrp.Position.X - pos.X, 0, hrp.Position.Z - pos.Z)
         away = away.Magnitude > 0.1 and away.Unit or Vector3.new(0, 0, 1)
         local stand = pos + away * math.min(4, within - 1) + Vector3.new(0, 3, 0)
@@ -461,7 +382,7 @@ local function goNear(pos, within)
         return true
     end
     local t = os.clock()
-    while alive() and auto.on and os.clock() - t < 90 do
+    while alive() and os.clock() - t < 90 do
         hrp = getRoot()
         if not hrp then return false end
         if (Vector3.new(pos.X, hrp.Position.Y, pos.Z) - hrp.Position).Magnitude <= within then
@@ -482,7 +403,11 @@ local function sellMeat()
         status = "หาร้านขายเนื้อไม่เจอ"
         return false
     end
-    status = auto.walk and "กระเป๋าเต็ม: เดินไปขายเนื้อ..." or "กระเป๋าเต็ม: วาร์ปไปขายเนื้อ..."
+    if select(3, bagState()) <= 0 then
+        status = "ไม่มีเนื้อให้ขาย"
+        return true
+    end
+    status = auto.sellWalk and "เดินไปขายเนื้อ..." or "วาร์ปไปขายเนื้อ..."
     if not goNear(part.Position, math.min(prompt.MaxActivationDistance, SellConfig.SaleDistance or 15) - 2) then
         status = "ไปร้านขายเนื้อไม่ถึง"
         return false
@@ -531,7 +456,9 @@ local function autoLoop()
         if not (hum and hum.Health > 0) then
             status = "รอเกิดใหม่..."
             task.wait(1)
-        elseif auto.sell and bagFull() then
+        elseif auto.sellNow or (auto.sell == "เมื่อกระเป๋าเต็ม" and bagFull())
+            or (auto.sell == "ทันทีที่มีเนื้อ" and select(3, bagState()) > 0) then
+            auto.sellNow = false
             if not sellMeat() then task.wait(3) end
         elseif not equipWeapon() then
             -- ถือดาบดีสุดให้ได้ก่อน แล้วค่อยไปหาหมู
@@ -662,29 +589,40 @@ section:AddDropdown("PigSide", {
 }):OnChanged(function(v)
     auto.side = v
 end)
-section:AddToggle("PigGather", {
-    Title = "รวมหมู",
-    Description = "ดึงหมูใกล้ๆ มากองตรงหน้า + วาร์ปไปฟันหมูที่อยู่ห่างๆ ตัวละทีให้มันเดินตามมา (ใช้กับตีอัตโนมัติ / Kill Aura)",
-    Default = false,
-}):OnChanged(function(v)
-    auto.gather = v
-end)
-section:AddSlider("PigGatherRadius", {
-    Title = "รัศมีรวมหมู",
-    Default = 60,
-    Min = 10,
-    Max = 200,
-    Rounding = 0,
-}):OnChanged(function(v)
-    auto.gatherRadius = v
-end)
-section:AddToggle("PigSell", {
-    Title = "ขายเนื้อเมื่อกระเป๋าเต็ม",
-    Description = "กระเป๋าเต็ม -> ไปร้านขายเนื้อหมู ขาย Meat / Large Meat / Animal Skin ทั้งหมด -> กลับมาตีต่อ (ของที่ล็อกขายไว้ไม่ขาย)",
-    Default = false,
+local sellSection = Tabs.main:AddSection("ขายเนื้อ")
+sellSection:AddDropdown("PigSell", {
+    Title = "ขายเนื้อเมื่อไหร่",
+    Description = "ระหว่างตีอัตโนมัติ: ขาย Meat / Large Meat / Animal Skin ที่ร้านขายเนื้อหมู แล้วกลับมาตีต่อ (ของที่ล็อกขายไว้ไม่ขาย)",
+    Values = { "ไม่ขาย", "เมื่อกระเป๋าเต็ม", "ทันทีที่มีเนื้อ" },
+    Multi = false,
+    Default = 1,
 }):OnChanged(function(v)
     auto.sell = v
 end)
+sellSection:AddDropdown("PigSellMove", {
+    Title = "วิธีไปขาย",
+    Values = { "เดิน", "วาร์ป" },
+    Multi = false,
+    Default = 1,
+}):OnChanged(function(v)
+    auto.sellWalk = v ~= "วาร์ป"
+end)
+local selling = false
+sellSection:AddButton({
+    Title = "ขายเนื้อตอนนี้",
+    Description = "ไปขายเนื้อทั้งหมดเดี๋ยวนี้เลย (ตีอัตโนมัติเปิดอยู่ จะขายเสร็จแล้วกลับมาตีต่อ)",
+    Callback = function()
+        if auto.on then
+            auto.sellNow = true
+        elseif not selling then
+            selling = true
+            task.spawn(function()
+                sellMeat()
+                selling = false
+            end)
+        end
+    end,
+})
 local statusPara = section:AddParagraph({ Title = "สถานะ", Content = status })
 
 if Window then Window:SelectTab(1) end
