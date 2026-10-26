@@ -448,20 +448,30 @@ local function isMine(model)
         local v = model:GetAttribute(key)
         if v == LocalPlayer.Name or v == LocalPlayer.DisplayName then return true end
     end
-    return model == myTable
+    if model == myTable or model == env.MiningTable then return true end
+    -- ป้ายเหนือโต๊ะบอกชื่อเจ้าของ
+    for _, d in ipairs(model:GetDescendants()) do
+        if d:IsA("TextLabel") and (d.Text:find(LocalPlayer.DisplayName, 1, true) or d.Text:find(LocalPlayer.Name, 1, true)) then
+            return true
+        end
+    end
+    return false
 end
 
 local function tableAlive(model)
     if not (model and model:IsDescendantOf(Tables)) then return false end
     local exp = model:GetAttribute("ExpiresAt")
-    return not exp or exp - workspace:GetServerTimeNow() > 8 -- เหลือไม่ถึง 8 วิ วางใหม่ดีกว่า
+    return not exp or exp - workspace:GetServerTimeNow() > 3 -- ยังไม่หมดเวลา ใช้อันเดิมก่อน
 end
 
+-- โต๊ะเดิมยังไม่หมดเวลา: กลับไปใช้อันเดิมก่อน ไม่วางใหม่ (จำไว้ใน env รันสคริปต์ใหม่ก็ยังรู้)
 local function findMyTable()
+    myTable = myTable or env.MiningTable
     if tableAlive(myTable) then return myTable end
     for _, m in ipairs(Tables:GetChildren()) do
         if isMine(m) and tableAlive(m) then
             myTable = m
+            env.MiningTable = m
             return m
         end
     end
@@ -544,6 +554,7 @@ local function placeTable()
         return false
     end)
     myTable = placed or findMyTable()
+    env.MiningTable = myTable
     return myTable
 end
 
