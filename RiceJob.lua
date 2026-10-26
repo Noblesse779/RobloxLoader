@@ -453,9 +453,9 @@ local function autoLoop()
             end
             -- ปลูกให้หมดก่อน แล้วค่อยไล่เก็บ
             if #riceTools() > 0 or (LocalPlayer:GetAttribute("RiceQuestActive") == true and ensureRiceTool()) then
-                if not plantOne() then task.wait(1) end
+                if not plantOne() then task.wait(busy() and 0.2 or 1) end
             elseif ready then
-                if not harvest(ready) then task.wait(1) end
+                if not harvest(ready) then task.wait(busy() and 0.2 or 1) end
             elseif #crops == 0 and ensureRiceTool() then
                 -- ยังมีข้าวในกระเป๋า (เอาออกมาช่องลัดได้) ปลูกต่อรอบหน้า
             elseif #crops == 0 then
