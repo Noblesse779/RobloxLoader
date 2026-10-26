@@ -24,7 +24,11 @@ local AttackRemote = System:WaitForChild("Remotes"):WaitForChild("Attack")
 local ActiveMonsters = workspace:WaitForChild("Monster System"):WaitForChild("ActiveMonsters")
 
 local status = "-"
-local auto = { on = false, walk = true, target = "ทุกตัว", swings = 0, kills = 0 }
+local auto = {
+    on = false, walk = true, target = "ทุกตัว", swings = 0, kills = 0,
+    dist = 4, -- ยืนห่างหมูกี่ studs (ไม่เกินระยะดาบ ไม่งั้นเซิร์ฟเวอร์ไม่นับ)
+    side = "หลัง", -- ยืนตรงไหนของหมู: หน้า / หลัง / บน / ล่าง
+}
 
 local function getRoot()
     local char = LocalPlayer.Character
@@ -206,6 +210,30 @@ local function swing(stats)
     return true
 end
 
+-- จุดยืนรอบหมู (หน้า/หลัง ตามทิศที่หมูหันอยู่, บน/ล่าง ตรงหัว/ใต้เท้า)
+local function standPoint(root, dist)
+    if auto.side == "หน้า" then return (root.CFrame * CFrame.new(0, 0, -dist)).Position end
+    if auto.side == "บน" then return root.Position + Vector3.new(0, dist, 0) end
+    if auto.side == "ล่าง" then return root.Position - Vector3.new(0, dist, 0) end
+    return (root.CFrame * CFrame.new(0, 0, dist)).Position -- หลัง
+end
+
+-- ยืนบน/ใต้หมูต้องทะลุพื้น/ตัวหมู: ปิดชนฝั่งเราทุกเฟรมระหว่างตี (Humanoid เปิดกลับเองทุกเฟรม เลิกแล้วกลับปกติ)
+local RunService = game:GetService("RunService")
+local noclip = false
+local noclipConn = RunService.Stepped:Connect(function()
+    if not noclip then return end
+    local char = LocalPlayer.Character
+    if not char then return end
+    for _, part in ipairs(char:GetDescendants()) do
+        if part:IsA("BasePart") then part.CanCollide = false end
+    end
+end)
+task.spawn(function()
+    while alive() do task.wait(1) end
+    noclipConn:Disconnect()
+end)
+
 local function fight(pig)
     local tool, stats = equipWeapon()
     if not tool then
@@ -213,7 +241,6 @@ local function fight(pig)
         return false
     end
     local pigHum = pig:FindFirstChildOfClass("Humanoid")
-    local reach = math.max(2.5, math.min(stats.Range - 1.5, 4))
     status = ("ตี %s (%s)"):format(pig.Name, tool.Name)
     local started, lastCheck = os.clock(), os.clock()
     while alive() and auto.on and pig.Parent and pigHum and pigHum.Health > 0 do
@@ -223,21 +250,28 @@ local function fight(pig)
             tool, stats = equipWeapon()
             if not tool then break end
         end
-        local offset = Vector3.new(hrp.Position.X - root.Position.X, 0, hrp.Position.Z - root.Position.Z)
-        local dist = offset.Magnitude
-        local dir = dist > 0.1 and offset.Unit or Vector3.new(0, 0, 1)
-        if dist > stats.Range - 0.5 then
-            if auto.walk then
-                walkToward(root.Position + dir * reach)
-            else
-                local stand = root.Position + dir * reach
-                hrp.CFrame = CFrame.lookAt(stand, Vector3.new(root.Position.X, stand.Y, root.Position.Z))
-                hrp.AssemblyLinearVelocity = Vector3.zero
-            end
-        else
-            if auto.walk then hum:MoveTo(hrp.Position) end
-            face(root.Position)
+        local vertical = auto.side == "บน" or auto.side == "ล่าง"
+        local d = math.clamp(auto.dist, 1, stats.Range - 0.5)
+        local stand = standPoint(root, d)
+        local toPig = (root.Position - hrp.Position).Magnitude
+        if vertical or not auto.walk then
+            -- วาร์ปไปจุดยืนทุกเฟรม (หมูขยับตาม) บน/ล่างใช้วาร์ปเสมอ เดินไปไม่ได้
+            noclip = vertical
+            local look = vertical and root.Position or Vector3.new(root.Position.X, stand.Y, root.Position.Z)
+            hrp.CFrame = CFrame.lookAt(stand, look) -- บน/ล่าง ก้ม/เงยหน้าหาหมู ให้นับว่าหมูอยู่ข้างหน้า
+            hrp.AssemblyLinearVelocity = Vector3.zero
             swing(stats)
+        else
+            noclip = false
+            if (Vector3.new(stand.X, hrp.Position.Y, stand.Z) - hrp.Position).Magnitude > 1.5 then
+                walkToward(stand)
+            else
+                hum:MoveTo(hrp.Position)
+            end
+            if toPig <= stats.Range - 0.3 then
+                face(root.Position)
+                swing(stats)
+            end
         end
         if os.clock() - started > 60 then break end -- ตีไม่ตายใน 1 นาที (ติด/หนี) ไปตัวอื่น
         -- มีตัวเก่งกว่าโผล่มา (เช่นมินิบอส/บอสเกิด) เปลี่ยนไปตีตัวนั้นก่อน
@@ -247,8 +281,9 @@ local function fight(pig)
             local topHum = top and top:FindFirstChildOfClass("Humanoid")
             if topHum and topHum.MaxHealth > pigHum.MaxHealth then break end
         end
-        task.wait(0.05)
+        RunService.Heartbeat:Wait()
     end
+    noclip = false
     if pigHum and pigHum.Health <= 0 then
         auto.kills += 1
         return true
@@ -401,6 +436,25 @@ section:AddDropdown("PigMove", {
     Default = 1,
 }):OnChanged(function(v)
     auto.walk = v ~= "วาร์ป"
+end)
+section:AddSlider("PigDist", {
+    Title = "ระยะห่างจากหมู",
+    Description = "ไกลขึ้น = โดนหมูตีน้อยลง (ไม่เกินระยะดาบ: Katana 5 • Dark Surge/Ice Axe 15)",
+    Default = 4,
+    Min = 1,
+    Max = 20,
+    Rounding = 1,
+}):OnChanged(function(v)
+    auto.dist = v
+end)
+section:AddDropdown("PigSide", {
+    Title = "ยืนตรงไหนของหมู",
+    Description = "หลัง = หมูหันมาตีช้า • บน/ล่าง = ลอยอยู่เหนือหัว/ใต้พื้น (ใช้วาร์ปเสมอ)",
+    Values = { "หลัง", "หน้า", "บน", "ล่าง" },
+    Multi = false,
+    Default = 1,
+}):OnChanged(function(v)
+    auto.side = v
 end)
 local statusPara = section:AddParagraph({ Title = "สถานะ", Content = status })
 
