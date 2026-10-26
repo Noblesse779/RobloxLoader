@@ -257,6 +257,18 @@ local function onCooldown(rock)
     return v ~= nil and workspace:GetServerTimeNow() < v.Value
 end
 
+-- หินที่เพิ่งโดนขุด (เกมส่ง RockEffect "Hit") ใช้เช็คว่าการขุดได้ผล
+local MiningRemotes = Survival:WaitForChild("MiningRemotes")
+local lastHit = setmetatable({}, { __mode = "k" })
+local swingId = 1000000 -- รหัสท่าฟันตอนส่งรีโมทเอง (เกมเริ่มนับจาก 1 ใช้เลขสูงไม่ให้ชนกัน)
+local hitConn = MiningRemotes:WaitForChild("RockEffect").OnClientEvent:Connect(function(rock, kind)
+    if kind == "Hit" and typeof(rock) == "Instance" then lastHit[rock] = os.clock() end
+end)
+task.spawn(function()
+    while alive() do task.wait(1) end
+    hitConn:Disconnect()
+end)
+
 local function mineable(rock, tier)
     if not (rock:IsA("Model") and rock:IsDescendantOf(workspace)) or rock:GetAttribute("Harvested") then return false end
     if rock:GetAttribute("TutorialRole") then return false end
@@ -303,6 +315,7 @@ local function mineRock(rock, pick)
     end
     status = "ขุด..."
     local started = os.clock()
+    local tries, direct = 0, false
     while alive() and auto.on and mineable(rock, tier) and not env.AirdropBusy do
         if pick.Parent ~= LocalPlayer.Character and not equip(pick) then return false end
         local hrp = getRoot()
@@ -313,8 +326,20 @@ local function mineRock(rock, pick)
         local hum = getHum()
         if hum then hum:MoveTo(hrp.Position) end -- หยุดเดิน (เกมไม่ให้ขุดตอนตัวล็อก/กำลังเดินชน)
         face(pos)
-        pick:Activate() -- เกมส่ง Mine / SwingEnded เองตามจังหวะ (ดีเล 0.75)
-        task.wait(MiningConfig.SwingCooldown + 0.1)
+        if not direct then
+            pick:Activate() -- เกมส่ง Mine / SwingEnded เองตามจังหวะ (ดีเล 0.75)
+            task.wait(MiningConfig.SwingCooldown + 0.1)
+            tries += 1
+            -- กด 3 ทีแล้วหินไม่สั่นเลย (เกมไม่รับการกดจากสคริปต์): ส่งรีโมทเองแบบเดียวกับเกม
+            if tries >= 3 and lastHit[rock] == nil then direct = true end
+        else
+            swingId += 1
+            local id = swingId
+            MiningRemotes.Mine:FireServer(id)
+            task.wait(MiningConfig.HitDelay + 0.25) -- ท่าฟันจบ
+            MiningRemotes.SwingEnded:FireServer(id)
+            task.wait(math.max(0.1, MiningConfig.SwingCooldown - MiningConfig.HitDelay - 0.15))
+        end
         if os.clock() - started > 40 then return false end -- ขุดไม่แตกใน 40 วิ ไปก้อนอื่น
     end
     auto.mined += 1
