@@ -23,7 +23,7 @@ local Net = ReplicatedStorage:WaitForChild("LES_AirDrop")
 local PROMPT_RANGE = 15
 
 local status = "-"
-local auto = { on = false, walk = false, got = 0 }
+local auto = { on = false, walk = false, got = 0, type = false } -- type = พิมพ์รหัสให้
 
 local function getRoot()
     local char = LocalPlayer.Character
@@ -57,11 +57,18 @@ end
 for _, d in ipairs(workspace:GetDescendants()) do track(d) end
 local addConn = workspace.DescendantAdded:Connect(track)
 
-local session = { dropId = nil, openAt = 0, closeAt = 0, result = nil }
+local session = { dropId = nil, openAt = 0, closeAt = 0, result = nil, code = nil, roundAt = 0 }
 local conns = {
     addConn,
-    Net:WaitForChild("OpenUI").OnClientEvent:Connect(function(dropId)
+    Net:WaitForChild("OpenUI").OnClientEvent:Connect(function(dropId, _, code)
         session.dropId, session.openAt = dropId, os.clock()
+        session.code, session.roundAt = code, os.clock()
+    end),
+    -- รอบใหม่ = รหัสใหม่
+    Net:WaitForChild("NextRound").OnClientEvent:Connect(function(dropId, code)
+        if dropId == session.dropId and code then
+            session.code, session.roundAt = code, os.clock()
+        end
     end),
     Net:WaitForChild("CloseUI").OnClientEvent:Connect(function(dropId, result)
         if dropId == session.dropId then
@@ -185,7 +192,25 @@ local function handle(prompt)
         task.wait(2)
         return
     end
-    status = "พิมพ์รหัสในหน้าต่างแอร์ดรอปได้เลย (ห้ามเดินออกเกิน 15 studs)"
+    status = auto.type and "พิมพ์รหัสให้..." or "พิมพ์รหัสในหน้าต่างแอร์ดรอปได้เลย (ห้ามเดินออกเกิน 15 studs)"
+    -- พิมพ์รหัสให้: เร็วประมาณคนพิมพ์ (ตัวละ 0.15–0.25 วิ) ไม่ส่งทันทีที่เห็นรหัส ส่งรอบละครั้งพอ
+    if auto.type then
+        task.spawn(function()
+            local sent = 0
+            while alive() and auto.type and session.closeAt < askedAt and prompt:IsDescendantOf(workspace) do
+                if session.code and session.roundAt > sent then
+                    local code, round = tostring(session.code), session.roundAt
+                    task.wait(#code * (0.15 + math.random() * 0.1) + 0.3)
+                    if session.roundAt == round and session.closeAt < askedAt then
+                        Net.SubmitGuess:FireServer(session.dropId, code)
+                        status = "ส่งรหัส " .. code
+                    end
+                    sent = round
+                end
+                task.wait(0.1)
+            end
+        end)
+    end
     -- รอจนจบ: เกมปิดเอง / ผู้เล่นกดปิด / กล่องหาย / หมดเวลากล่อง (180 วิ)
     local gui = LocalPlayer.PlayerGui:FindFirstChild("LES_AirDrop_UI")
     local mini = gui and gui:FindFirstChild("AirDropMiniGame")
@@ -283,6 +308,13 @@ section:AddToggle("AirdropAuto", {
 }):OnChanged(function(v)
     auto.on = v
     if v then task.spawn(autoLoop) else env.AirdropBusy = false end
+end)
+section:AddToggle("AirdropType", {
+    Title = "พิมพ์รหัสให้",
+    Description = "ใส่รหัสที่โชว์บนจอให้ครบ 5 รอบ ด้วยความเร็วประมาณคนพิมพ์ ไม่ต้องเฝ้า",
+    Default = false,
+}):OnChanged(function(v)
+    auto.type = v
 end)
 section:AddDropdown("AirdropMove", {
     Title = "วิธีไป",
