@@ -298,7 +298,8 @@ end
 local function plantSpot()
     local z = zone()
     if not z then return nil end
-    local spacing = (Config.MinimumPlantSpacing or 3) + 0.4
+    -- เผื่อระยะ: ต้นข้าวขึ้นตรงที่ตัวเรายืน ซึ่งคลาดจากจุดที่เล็งได้นิดหน่อย
+    local spacing = (Config.MinimumPlantSpacing or 3) + 1.5
     local others = {}
     for _, m in ipairs(RiceCrops:GetChildren()) do
         local p = m:IsA("Model") and cropPart(m)
