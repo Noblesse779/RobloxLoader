@@ -269,13 +269,14 @@ local function fight(pig)
             swing(stats)
         else
             noclip = false
-            if (Vector3.new(stand.X, hrp.Position.Y, stand.Z) - hrp.Position).Magnitude > 1.5 then
-                walkToward(stand)
+            -- เดิน: ไล่ตามตัวหมูตรงๆ (ฟันแล้วหมูกระเด็นออกไป ต้องตามไปฟันต่อทันที ไม่ไปอ้อมหาจุดหลังหมู)
+            -- วัดระยะแนวราบ (หมูตัวใหญ่ จุดกลางตัวสูงกว่าเรา วัดตรงๆ เลยเกินระยะทั้งที่ยืนชิดแล้ว)
+            local flatTo = Vector3.new(root.Position.X - hrp.Position.X, 0, root.Position.Z - hrp.Position.Z).Magnitude
+            if flatTo > math.max(1.5, math.min(d, stats.Range - 1)) then
+                walkToward(root.Position)
             else
                 hum:MoveTo(hrp.Position)
             end
-            -- วัดระยะแนวราบ (หมูตัวใหญ่ จุดกลางตัวสูงกว่าเรา วัดตรงๆ เลยเกินระยะทั้งที่ยืนชิดแล้ว ไม่ฟันสักที)
-            local flatTo = Vector3.new(root.Position.X - hrp.Position.X, 0, root.Position.Z - hrp.Position.Z).Magnitude
             if flatTo <= stats.Range then
                 face(root.Position)
                 swing(stats)
