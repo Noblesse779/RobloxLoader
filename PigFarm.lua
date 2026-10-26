@@ -63,24 +63,33 @@ local function weaponTools()
     return list
 end
 
--- ดาบที่มีอยู่ในคอลเลกชั่น (LocalPlayer.CollectionState) แต่ยังไม่ได้อยู่ช่องลัด: เอาออกมาแบบปลูกข้าว
-local lastEnsure = 0
-local function ensureWeapon()
-    if #weaponTools() > 0 then return true end
-    if os.clock() - lastEnsure < 5 then return false end
-    lastEnsure = os.clock()
+-- ดาบที่ดีที่สุดที่เรามี (LocalPlayer.CollectionState = ของที่ซื้อแล้ว แบบเดียวกับร้านอาวุธใช้)
+local function bestOwnedWeapon()
     local owned = LocalPlayer:FindFirstChild("CollectionState")
-    local inv = ReplicatedStorage:FindFirstChild("InventorySystem")
-    local remote = inv and inv:FindFirstChild("Remotes") and inv.Remotes:FindFirstChild("SetHotbar")
-    if not (owned and remote) then return false end
     local best, bestDmg
-    for name, w in pairs(WeaponConfig.Weapons) do
-        local flag = owned:FindFirstChild(name)
-        if flag and flag:IsA("BoolValue") and flag.Value and (not bestDmg or w.Damage > bestDmg) then
-            best, bestDmg = name, w.Damage
+    if owned then
+        for name, w in pairs(WeaponConfig.Weapons) do
+            local flag = owned:FindFirstChild(name)
+            if flag and flag:IsA("BoolValue") and flag.Value and (not bestDmg or w.Damage > bestDmg) then
+                best, bestDmg = name, w.Damage
+            end
         end
     end
-    if not best then return false end
+    return best, bestDmg
+end
+
+-- ให้ดาบที่ดีที่สุดมาอยู่ในช่องลัด (เป็น Tool) ถ้ายังค้างในกระเป๋าเกม เอาออกมาแบบปลูกข้าว
+local lastEnsure = 0
+local function ensureWeapon()
+    local tools = weaponTools()
+    local have = tools[1] and WeaponConfig.Weapons[tools[1].Name].Damage or nil
+    local best, bestDmg = bestOwnedWeapon()
+    if have and (not bestDmg or have >= bestDmg) then return true end -- ดีสุดอยู่ในมือ/ช่องลัดแล้ว
+    if not best or os.clock() - lastEnsure < 5 then return have ~= nil end
+    lastEnsure = os.clock()
+    local inv = ReplicatedStorage:FindFirstChild("InventorySystem")
+    local remote = inv and inv:FindFirstChild("Remotes") and inv.Remotes:FindFirstChild("SetHotbar")
+    if not remote then return have ~= nil end
     local names, seen = {}, {}
     for _, holder in ipairs({ LocalPlayer.Character, LocalPlayer:FindFirstChildOfClass("Backpack") }) do
         if holder then
@@ -93,9 +102,13 @@ local function ensureWeapon()
         end
     end
     if not seen[best] then table.insert(names, best) end
-    status = "เอา " .. best .. " ออกมาไว้ช่องลัด..."
+    status = "เอา " .. best .. " (ดาบดีสุด) ออกมาไว้ช่องลัด..."
     remote:FireServer(names)
-    return waitFor(3, function() return #weaponTools() > 0 end)
+    waitFor(3, function()
+        local t = weaponTools()[1]
+        return t ~= nil and t.Name == best
+    end)
+    return #weaponTools() > 0
 end
 
 -- ถือดาบในมือ คืนค่า (tool, ค่าดาบจาก WeaponConfig)
@@ -231,7 +244,10 @@ local aura = { on = false }
 local function auraLoop()
     while alive() and aura.on do
         local hrp, hum = getRoot(), getHum()
-        if hrp and hum and hum.Health > 0 and not auto.on then
+        if hrp and hum and hum.Health > 0 and not auto.on and not equipWeapon() then
+            status = "Kill Aura: ไม่มีดาบ / หยิบดาบไม่ได้"
+            task.wait(1)
+        elseif hrp and hum and hum.Health > 0 and not auto.on then
             local best, bestDist
             for _, m in ipairs(ActiveMonsters:GetChildren()) do
                 local h = m:FindFirstChildOfClass("Humanoid")
@@ -262,6 +278,10 @@ local function autoLoop()
         local hum = getHum()
         if not (hum and hum.Health > 0) then
             status = "รอเกิดใหม่..."
+            task.wait(1)
+        elseif not equipWeapon() then
+            -- ถือดาบดีสุดให้ได้ก่อน แล้วค่อยไปหาหมู
+            status = "ไม่มีดาบ / หยิบดาบไม่ได้ (ซื้อที่ลุงน้อยขายอาวุธ)"
             task.wait(1)
         else
             local pig = nearestPig()
