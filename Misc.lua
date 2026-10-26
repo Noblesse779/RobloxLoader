@@ -183,6 +183,23 @@ local function randomOutfit()
         task.wait(0.3) -- เว้นจังหวะเหมือนกดเอง
         return ok and res
     end
+    -- ต้องเปิดเมนูแต่งตัวก่อนเหมือนกดปุ่มเสื้อ (เก็บเครื่องมือ/ลุกจากที่นั่งก่อน) แต่งเสร็จค่อยปิด
+    local prepare = remote.Parent:FindFirstChild("PrepareAvatarMenu")
+    local hum = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+    if hum then
+        hum:UnequipTools()
+        if hum.Sit or hum.SeatPart then
+            hum.Sit = false
+            hum:ChangeState(Enum.HumanoidStateType.GettingUp)
+        end
+    end
+    if prepare then
+        local ok, res = pcall(function() return prepare:InvokeServer(true) end)
+        if not (ok and res) then
+            outfit.busy = false
+            return false, "เปิดเมนูแต่งตัวไม่ได้ (ลุกจากที่นั่ง/เก็บของในมือแล้วลองใหม่)"
+        end
+    end
     if outfit.clear then call("Clear") end
     if outfit.skin then
         call("Skin", Color3.fromHSV(math.random(), math.random(10, 60) / 100, math.random(35, 100) / 100))
@@ -192,6 +209,7 @@ local function randomOutfit()
         local item = pick(slot)
         if item and call("Try", item.id, item.kind) then worn += 1 end
     end
+    if prepare then pcall(function() prepare:InvokeServer(false) end) end
     outfit.busy = false
     return true, "ใส่ได้ " .. worn .. "/" .. #SLOTS .. " ชิ้น"
 end
