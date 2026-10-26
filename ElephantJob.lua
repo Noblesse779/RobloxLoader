@@ -251,20 +251,14 @@ task.spawn(function()
     for _, r in ipairs(sys:GetDescendants()) do watchRemote(r) end
     sys.DescendantAdded:Connect(watchRemote)
 end)
--- หาในหน้าต่างคุยที่ขึ้นบนจอ (บางเกมเก็บรหัสงานไว้ใน Attribute/StringValue ของปุ่ม)
-local function uuidFromGui()
-    for _, d in ipairs(LocalPlayer.PlayerGui:GetDescendants()) do
-        local id = findUuid(d)
-        if id then return id end
-    end
-end
-
 local function sendAccept(id)
     local sys = game:GetService("ReplicatedStorage"):FindFirstChild("ElephantJobSystem")
     local remotes = sys and sys:FindFirstChild("Remotes")
     local request = remotes and remotes:FindFirstChild("Request")
     if not request then return false end
+    env.ElephantSelfAccept = true
     local ok, res = pcall(function() return request:InvokeServer("Accept", id) end)
+    env.ElephantSelfAccept = false
     return ok, res
 end
 
@@ -290,14 +284,17 @@ local function acceptJob()
     -- ทางลัด: กดคุยแล้วได้รหัสงาน -> ส่ง Accept เองเลย ไม่ต้องพึ่งหน้าต่างตัวเลือก
     local askedAt = os.clock()
     pressPrompt(prompt, true)
+    -- (ไม่เอา uuid จากหน้าจอ: เจอรหัสอื่นที่ไม่ใช่งาน แล้วสคริปต์นึกว่ารับงานแล้ว)
     local id
-    if waitFor(3, function()
-        id = (offer.at >= askedAt and offer.id) or uuidFromGui()
-        return id ~= nil
+    if waitFor(2, function()
+        id = offer.at >= askedAt and offer.id
+        return id ~= nil and id ~= false
     end) then
         status = "ได้รหัสงานแล้ว ส่งรับงาน..."
         sendAccept(id)
-        if waitFor(3, accepted) then
+        -- นับว่าสำเร็จต่อเมื่อขึ้นช้าง/ป้ายงานขึ้นจริง
+        if waitFor(4, function() return hudActive() or riding() end) then
+            env.ElephantAcceptAt = os.clock()
             status = "รับงานแล้ว"
             return true
         end
@@ -308,9 +305,9 @@ local function acceptJob()
         option = findAcceptOption()
         return option ~= nil or accepted()
     end
-    pressPrompt(prompt, false)
-    if not waitFor(3, dialog) then
-        pressPrompt(prompt, true)
+    -- กดคุยไปแล้วข้างบน หน้าต่างอาจขึ้นอยู่แล้ว (กด E ซ้ำจะปิดมัน)
+    if not waitFor(1, dialog) then
+        pressPrompt(prompt, false)
         if not waitFor(3, dialog) then
             -- ห้ามกด 1 ตอนหน้าต่างไม่ขึ้น (จะไปเปิดกระเป๋า/ช่องของแทน)
             status = "กดคุยแล้วแต่หน้าต่างตัวเลือกไม่ขึ้น"
@@ -400,7 +397,8 @@ if not env.ElephantHook2 and typeof(hookmetamethod) == "function"
             if dir then return old(self, mount, flag, dir) end
         elseif method == "InvokeServer" and self == requestRemote() then
             local action = ...
-            if action == "Accept" then env.ElephantAcceptAt = os.clock() end
+            -- นับเฉพาะตอนเกมส่งเอง (เลือกตัวเลือกแล้ว) ตัวที่สคริปต์ลองส่งเองไม่นับ
+            if action == "Accept" and not env.ElephantSelfAccept then env.ElephantAcceptAt = os.clock() end
         end
         return old(self, ...)
     end))
