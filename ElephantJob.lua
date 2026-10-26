@@ -532,9 +532,26 @@ local function driveTo(target)
     local i = 1
     local lastPos, lastMove, started = root.Position, os.clock(), os.clock()
     local lastCheck = 0
-    -- กด W ค้างไว้ด้วย: ถ้าเกมส่ง Input เฉพาะตอนกดเดิน จะได้ส่ง (แล้ว hook เปลี่ยนทิศให้)
-    VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.W, false, game)
+    -- ช้างเดินด้วย WASD ตามทิศกล้อง: หมุนกล้องให้หันไปทางจุดส่งทุกเฟรม แล้วกด W ค้าง
+    local RENDER_NAME = "ElephantAutopilotCam"
+    pcall(function() RunService:UnbindFromRenderStep(RENDER_NAME) end)
+    RunService:BindToRenderStep(RENDER_NAME, Enum.RenderPriority.Camera.Value + 1, function()
+        local dir = env.ElephantAutopilotDir
+        local cam = workspace.CurrentCamera
+        if not dir or dir.Magnitude < 0.1 or not cam or not root.Parent then return end
+        local at = root.Position
+        local from = at - dir * 22 + Vector3.new(0, 10, 0)
+        cam.CFrame = CFrame.lookAt(from, at + dir * 10)
+    end)
+    local lastKey = 0
+    local function holdW()
+        if os.clock() - lastKey > 0.5 then -- กดซ้ำเรื่อยๆ กันหลุด
+            lastKey = os.clock()
+            VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.W, false, game)
+        end
+    end
     local function releaseW()
+        pcall(function() RunService:UnbindFromRenderStep(RENDER_NAME) end)
         VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.W, false, game)
     end
     while alive() and auto.on and root.Parent do
@@ -556,6 +573,7 @@ local function driveTo(target)
         local dir = flat((points[i] or target.Position) - pos)
         dir = dir.Magnitude > 0.1 and dir.Unit or Vector3.zero
         env.ElephantAutopilotDir = dir
+        holdW()
         -- เกมส่ง Input เองรัวๆ อยู่แล้ว (hook เปลี่ยนทิศให้) ส่งเพิ่มเองด้วยถ้ารู้ว่าช้างตัวไหน
         local mount, remote = myMount(), inputRemote()
         if mount and remote then
