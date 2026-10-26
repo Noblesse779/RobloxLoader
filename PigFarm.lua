@@ -289,8 +289,10 @@ local function fight(pig)
             if not tool then break end
         end
         local vertical = auto.side == "บน" or auto.side == "ล่าง"
-        local d = math.clamp(auto.dist, 1, stats.Range - 0.5)
-        local stand = standPoint(root, d)
+        -- ระยะจากผิวตัวหมู (ตัวใหญ่จะได้ไม่ยืนจมในตัว) เลื่อนแถบแล้วเห็นตัวขยับจริง
+        -- ไกลสุดเท่าระยะดาบ เกินกว่านั้นเซิร์ฟเวอร์ไม่นับ
+        local d = math.clamp(auto.dist, 0.5, stats.Range - 0.5)
+        local stand = standPoint(root, d + bodyRadius(pig))
         local toPig = (root.Position - hrp.Position).Magnitude
         if vertical or not auto.walk then
             -- วาร์ปไปจุดยืนทุกเฟรม (หมูขยับตาม) บน/ล่างใช้วาร์ปเสมอ เดินไปไม่ได้
