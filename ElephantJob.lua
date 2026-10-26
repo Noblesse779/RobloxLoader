@@ -433,6 +433,40 @@ local function driveTo(target)
     return false
 end
 
+-- วาร์ปทั้งช้าง (ผู้เล่นขี่อยู่ติดไปด้วย) ไปยืนบนจุดส่ง
+-- วาร์ปตัวผู้เล่นอย่างเดียวตอนขี่ = ช้างโดนดึงจมดิน เลยย้ายทั้งก้อนและวางให้สูงจากพื้นเท่าเดิม
+local function groundY(pos, ignore)
+    local params = RaycastParams.new()
+    params.FilterType = Enum.RaycastFilterType.Exclude
+    params.FilterDescendantsInstances = ignore
+    local hit = workspace:Raycast(pos + Vector3.new(0, 60, 0), Vector3.new(0, -200, 0), params)
+    return hit and hit.Position.Y
+end
+
+local function teleportTo(target)
+    local hrp = getRoot()
+    if not hrp then return false end
+    local mount = myMount()
+    local root = hrp.AssemblyRootPart or hrp
+    local ignore = { LocalPlayer.Character, target }
+    if mount then table.insert(ignore, mount) end
+    local current = (mount and mount:IsA("Model")) and mount:GetPivot() or root.CFrame
+    local here, there = groundY(current.Position, ignore), groundY(target.Position, ignore)
+    local height = here and (current.Position.Y - here) or 3
+    local dest = Vector3.new(target.Position.X, (there or target.Position.Y) + height, target.Position.Z)
+    local cf = CFrame.new(dest) * current.Rotation
+    if mount and mount:IsA("Model") then
+        mount:PivotTo(cf)
+    else
+        root.CFrame = cf
+    end
+    for _, part in ipairs({ root, hrp }) do
+        part.AssemblyLinearVelocity = Vector3.zero
+        part.AssemblyAngularVelocity = Vector3.zero
+    end
+    return true
+end
+
 local function autoLoop()
     while alive() and auto.on do
         if not jobActive() then
@@ -444,8 +478,15 @@ local function autoLoop()
                 status = "ไม่เจอป้ายจุดส่งซุง รอ..."
                 task.wait(1)
             else
-                status = "เดินช้างไป " .. target.Name
-                if driveTo(target) then
+                -- วาร์ปก่อน ป้ายไม่ย้ายใน 3 วิ (เกมไม่นับ) ค่อยเดินไปเอง
+                status = "วาร์ปช้างไป " .. target.Name
+                local passed = teleportTo(target)
+                    and waitFor(3, function() return findTarget() ~= target end)
+                if not passed then
+                    status = "วาร์ปแล้วไม่นับ: เดินช้างไป " .. target.Name
+                    passed = driveTo(target)
+                end
+                if passed then
                     auto.delivered += 1 -- ผ่านจุด (เหยียบแล้วป้ายย้ายไปจุดถัดไป)
                     status = "ผ่าน " .. target.Name .. " ไปจุดถัดไป"
                 end
@@ -534,7 +575,7 @@ jobSection:AddButton({
 local autoSection = Tabs.main:AddSection("ลากซุงอัตโนมัติ")
 autoSection:AddToggle("EJAuto", {
     Title = "ลากซุงอัตโนมัติ",
-    Description = "รับงาน -> บังคับช้างเดินไปจุดส่งซุงทีละจุด (เหยียบแล้วไปจุดต่อ) -> งานต่อ วนไปเรื่อยๆ",
+    Description = "รับงาน -> วาร์ปช้างไปจุดส่งซุงทีละจุด (วาร์ปไม่นับจะเดินไปเอง) -> งานต่อ วนไปเรื่อยๆ",
     Default = false,
 }):OnChanged(function(v)
     auto.on = v
