@@ -214,6 +214,19 @@ local function acceptJob()
     return false
 end
 
+-- ลงจากช้าง = เลิกงาน (เหมือนกด Spacebar): BuffaloRideNetwork.Dismount:FireServer()
+local function dismount()
+    local net = game:GetService("ReplicatedStorage"):FindFirstChild("BuffaloRideNetwork")
+    local remote = net and net:FindFirstChild("Dismount")
+    if not remote then
+        status = "หา BuffaloRideNetwork.Dismount ไม่เจอ"
+        return false
+    end
+    remote:FireServer()
+    status = "ลงจากช้างแล้ว (เลิกงาน)"
+    return true
+end
+
 ---------------------------------------------------------------- หน้าต่าง (Fluent)
 local FLUENT_URL = "https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"
 local FLUENT_CACHE = "AutoFish/fluent.lua" -- ใช้ไฟล์เดียวกับตัวตกปลา
@@ -269,6 +282,13 @@ jobSection:AddButton({
     Description = "วาร์ปไปหา ตาโชคเลี้ยงช้าง -> กด E คุย -> เลือก 1.) รับงานลากซุง -> ขึ้นขี่ช้าง",
     Callback = function()
         task.spawn(acceptJob)
+    end,
+})
+jobSection:AddButton({
+    Title = "ลงจากช้าง (เลิกงาน)",
+    Description = "เหมือนกด Spacebar ตอนขี่ช้าง",
+    Callback = function()
+        dismount()
     end,
 })
 jobSection:AddButton({
