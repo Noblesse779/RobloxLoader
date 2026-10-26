@@ -286,22 +286,32 @@ local function pickRock(tier)
     return best
 end
 
+-- ครึ่งความกว้างก้อนหิน (แนวราบ): หินก้อนใหญ่ จุดกลางอยู่ลึก เดินชิดแล้วก็ยังห่างจุดกลางเกินระยะ
+local function rockRadius(rock)
+    local ok, size = pcall(function() return rock:GetExtentsSize() end)
+    return ok and math.clamp(math.min(size.X, size.Z) / 2, 0, 12) or 0
+end
+
 local function mineRock(rock, pick)
     local tier = tierOf(pick.Name)
     local pos = rock:GetPivot().Position
+    local within = math.max(MiningConfig.Reach - 3, rockRadius(rock) + 2.5) -- ยืนชิดผิวหิน
     status = ("ไปขุด%s"):format(rock:GetAttribute("OreNode") and (" แร่ " .. tostring(oreType(rock))) or "หิน")
-    if not goNear(pos, MiningConfig.Reach - 3, not auto.walk) then
+    if not goNear(pos, within, not auto.walk) then
         status = "ไปที่หินไม่ถึง"
         return false
     end
+    status = "ขุด..."
     local started = os.clock()
     while alive() and auto.on and mineable(rock, tier) and not env.AirdropBusy do
         if pick.Parent ~= LocalPlayer.Character and not equip(pick) then return false end
         local hrp = getRoot()
         if not hrp then return false end
-        if (Vector3.new(pos.X, hrp.Position.Y, pos.Z) - hrp.Position).Magnitude > MiningConfig.Reach - 1 then
-            if not goNear(pos, MiningConfig.Reach - 3, not auto.walk) then return false end
+        if (Vector3.new(pos.X, hrp.Position.Y, pos.Z) - hrp.Position).Magnitude > within + 2 then
+            if not goNear(pos, within, not auto.walk) then return false end
         end
+        local hum = getHum()
+        if hum then hum:MoveTo(hrp.Position) end -- หยุดเดิน (เกมไม่ให้ขุดตอนตัวล็อก/กำลังเดินชน)
         face(pos)
         pick:Activate() -- เกมส่ง Mine / SwingEnded เองตามจังหวะ (ดีเล 0.75)
         task.wait(MiningConfig.SwingCooldown + 0.1)
