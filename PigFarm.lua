@@ -29,6 +29,8 @@ local auto = {
     dist = 4, -- ยืนห่างหมูกี่ studs (ไม่เกินระยะดาบ ไม่งั้นเซิร์ฟเวอร์ไม่นับ)
     side = "หลัง", -- ยืนตรงไหนของหมู: หน้า / หลัง / บน / ล่าง
     sell = false, -- กระเป๋าเต็มแล้วไปขายเนื้อ
+    gather = false, -- ดึงหมูรอบตัวมากองตรงหน้า
+    gatherRadius = 60,
     sold = 0, -- ขายได้กี่บาทแล้ว
 }
 
@@ -204,7 +206,8 @@ end
 local lastSwing = 0
 local function swing(stats)
     -- รอครบดีเลของดาบ + เผื่อนิดหน่อย และไม่เกินจำนวนครั้ง/วิ ที่เกมยอม
-    local gap = math.max(stats.Cooldown + 0.03, 1 / (WeaponConfig.RequestsPerSecond or 5))
+    -- ถี่สุดที่เซิร์ฟเวอร์รับ: ดีเลดาบพอดี (เร็วกว่านี้เซิร์ฟเวอร์ทิ้ง ไม่โดน)
+    local gap = math.max(stats.Cooldown, 1 / (WeaponConfig.RequestsPerSecond or 5))
     if os.clock() - lastSwing < gap then return false end
     lastSwing = os.clock()
     AttackRemote:FireServer()
@@ -236,6 +239,46 @@ task.spawn(function()
     noclipConn:Disconnect()
 end)
 
+local aura = { on = false } -- Kill Aura (ประกาศไว้ก่อน ตัวรวมหมูใช้ด้วย)
+
+-- รวมหมู: หมูที่อยู่ใกล้ (ฝั่งเราคุมฟิสิกส์ของมันอยู่) ดึงมากองตรงหน้าเราในระยะดาบ ฟันทีเดียวโดนหลายตัว
+-- ตัวที่เซิร์ฟเวอร์คุมเอง (isnetworkowner = false) ดึงไม่มา ข้ามไป
+local function gatherStep()
+    local hrp = getRoot()
+    local tool = weaponTools()[1]
+    if not (hrp and tool) then return end
+    local range = WeaponConfig.Weapons[tool.Name].Range
+    local d = math.clamp(range - 1.5, 2, 4)
+    local i = 0
+    for _, m in ipairs(ActiveMonsters:GetChildren()) do
+        local h = m:FindFirstChildOfClass("Humanoid")
+        local root = monsterRoot(m)
+        if h and h.Health > 0 and root and wanted(m)
+            and (root.Position - hrp.Position).Magnitude <= auto.gatherRadius then
+            local owned = true
+            if typeof(isnetworkowner) == "function" then
+                local ok, res = pcall(isnetworkowner, root)
+                owned = ok and res
+            end
+            if owned then
+                -- กองเป็นแถวโค้งหน้าเรา ห่างกันนิดหน่อยจะได้ไม่ดีดกันกระเด็น
+                local side = ((i % 5) - 2) * 1.2
+                local spot = hrp.CFrame * CFrame.new(side, 0, -d)
+                root.CFrame = CFrame.lookAt(spot.Position, hrp.Position)
+                root.AssemblyLinearVelocity = Vector3.zero
+                i += 1
+            end
+        end
+    end
+end
+local gatherConn = RunService.Heartbeat:Connect(function()
+    if auto.gather and (auto.on or aura.on) then pcall(gatherStep) end
+end)
+task.spawn(function()
+    while alive() do task.wait(1) end
+    gatherConn:Disconnect()
+end)
+
 local function fight(pig)
     local tool, stats = equipWeapon()
     if not tool then
@@ -256,7 +299,13 @@ local function fight(pig)
         local d = math.clamp(auto.dist, 1, stats.Range - 0.5)
         local stand = standPoint(root, d)
         local toPig = (root.Position - hrp.Position).Magnitude
-        if vertical or not auto.walk then
+        if auto.gather and toPig <= stats.Range - 0.3 then
+            -- รวมหมูอยู่: หมูถูกดึงมากองตรงหน้าแล้ว ยืนนิ่งๆ ฟันอย่างเดียว
+            noclip = false
+            if auto.walk then hum:MoveTo(hrp.Position) end
+            face(root.Position)
+            swing(stats)
+        elseif vertical or not auto.walk then
             -- วาร์ปไปจุดยืนทุกเฟรม (หมูขยับตาม) บน/ล่างใช้วาร์ปเสมอ เดินไปไม่ได้
             noclip = vertical
             local look = vertical and root.Position or Vector3.new(root.Position.X, stand.Y, root.Position.Z)
@@ -294,7 +343,6 @@ local function fight(pig)
 end
 
 -- Kill Aura: ยืนอยู่กับที่ หมูตัวไหนเดินเข้ามาในระยะดาบ หันไปฟันเอง (ระยะเกินดาบเซิร์ฟเวอร์ไม่นับ)
-local aura = { on = false }
 local function auraLoop()
     while alive() and aura.on do
         local hrp, hum = getRoot(), getHum()
@@ -576,6 +624,22 @@ section:AddDropdown("PigSide", {
     Default = 1,
 }):OnChanged(function(v)
     auto.side = v
+end)
+section:AddToggle("PigGather", {
+    Title = "รวมหมู",
+    Description = "ดึงหมูรอบตัวมากองตรงหน้า ฟันทีเดียวโดนหลายตัว (ใช้กับตีอัตโนมัติ / Kill Aura) ตัวที่เกมคุมเองดึงไม่มา",
+    Default = false,
+}):OnChanged(function(v)
+    auto.gather = v
+end)
+section:AddSlider("PigGatherRadius", {
+    Title = "รัศมีรวมหมู",
+    Default = 60,
+    Min = 10,
+    Max = 200,
+    Rounding = 0,
+}):OnChanged(function(v)
+    auto.gatherRadius = v
 end)
 section:AddToggle("PigSell", {
     Title = "ขายเนื้อเมื่อกระเป๋าเต็ม",
