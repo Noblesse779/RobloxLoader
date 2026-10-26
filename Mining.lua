@@ -409,18 +409,20 @@ local function mineRock(rock, pick)
             hrp.AssemblyLinearVelocity = Vector3.zero
         end
         if not direct then
-            pick:Activate() -- เกมส่ง Mine / SwingEnded เองตามจังหวะ (ดีเล 0.75)
-            task.wait(MiningConfig.SwingCooldown + 0.1)
+            -- กดรัวๆ ทุก 0.05 วิ: เกมกันกดซ้ำเองตามดีเล 0.75 + ท่าฟันจบ เลยได้ฟันทันทีที่ฟันได้ ไม่เสียเวลารอเกิน
+            pick:Activate()
+            task.wait(0.05)
             tries += 1
-            -- กด 3 ทีแล้วหินไม่สั่นเลย (เกมไม่รับการกดจากสคริปต์): ส่งรีโมทเองแบบเดียวกับเกม
-            if tries >= 3 and lastHit[rock] == nil then direct = true end
+            -- กดมา ~3 วิแล้วหินไม่สั่นเลย (เกมไม่รับการกดจากสคริปต์): ส่งรีโมทเองแบบเดียวกับเกม
+            if tries >= 60 and lastHit[rock] == nil then direct = true end
         else
             swingId += 1
-            local id = swingId
+            local id, t0 = swingId, os.clock()
             MiningRemotes.Mine:FireServer(id)
-            task.wait(MiningConfig.HitDelay + 0.25) -- ท่าฟันจบ
+            task.wait(MiningConfig.HitDelay + 0.05) -- โดนหินแล้ว จบท่าฟัน
             MiningRemotes.SwingEnded:FireServer(id)
-            task.wait(math.max(0.1, MiningConfig.SwingCooldown - MiningConfig.HitDelay - 0.15))
+            -- ฟันครั้งต่อไปทันทีที่ครบดีเล 0.75 นับจากฟันครั้งนี้
+            task.wait(math.max(0.02, MiningConfig.SwingCooldown + 0.02 - (os.clock() - t0)))
         end
         if os.clock() - started > 40 then release(rock) return false end -- ขุดไม่แตกใน 40 วิ ไปก้อนอื่น
     end
