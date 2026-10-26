@@ -24,7 +24,7 @@ local Remotes = System:WaitForChild("Remotes")
 local RiceCrops = workspace:WaitForChild("RiceCrops")
 
 local status = "-"
-local auto = { on = false, planted = 0, harvested = 0 }
+local auto = { on = false, planted = 0, harvested = 0, walk = true } -- walk = เดินเอง (กันโดนแบน) / false = วาร์ป
 
 local function getRoot()
     local char = LocalPlayer.Character
@@ -144,12 +144,60 @@ local function groundAt(pos)
     return hit and hit.Position
 end
 
-local function moveTo(pos)
+-- เดินไปเอง (หาทางอ้อมรั้ว/สิ่งกีดขวาง) ใช้เวลานานกว่าแต่ปลอดภัยกว่าวาร์ป
+local PathfindingService = game:GetService("PathfindingService")
+local function walkTo(pos, arrive)
+    local hrp = getRoot()
+    local hum = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+    if not (hrp and hum) then return false end
+    local function close()
+        local d = Vector3.new(pos.X - hrp.Position.X, 0, pos.Z - hrp.Position.Z)
+        return d.Magnitude <= arrive
+    end
+    if close() then return true end
+    local points = { pos }
+    local path = PathfindingService:CreatePath({ AgentRadius = 2, AgentHeight = 5, AgentCanJump = true, WaypointSpacing = 4 })
+    if pcall(function() path:ComputeAsync(hrp.Position, pos) end) and path.Status == Enum.PathStatus.Success then
+        points = {}
+        for _, wp in ipairs(path:GetWaypoints()) do
+            table.insert(points, { pos = wp.Position, jump = wp.Action == Enum.PathWaypointAction.Jump })
+        end
+    else
+        points = { { pos = pos } }
+    end
+    for _, wp in ipairs(points) do
+        if not (alive() and auto.on) then return false end
+        if close() then break end
+        if wp.jump then hum.Jump = true end
+        hum:MoveTo(wp.pos)
+        local t, last, lastMove = os.clock(), hrp.Position, os.clock()
+        while alive() and auto.on and os.clock() - t < 6 do
+            local d = Vector3.new(wp.pos.X - hrp.Position.X, 0, wp.pos.Z - hrp.Position.Z)
+            if d.Magnitude < 2 or close() then break end
+            if (hrp.Position - last).Magnitude > 0.5 then
+                last, lastMove = hrp.Position, os.clock()
+            elseif os.clock() - lastMove > 1 then
+                hum.Jump = true -- ติดขอบ/รั้วเตี้ย กระโดดข้าม
+                lastMove = os.clock()
+            end
+            task.wait(0.1)
+        end
+    end
+    hum:MoveTo(hrp.Position) -- หยุด
+    return close()
+end
+
+local function moveTo(pos, arrive)
     local hrp = getRoot()
     if not hrp then return false end
     if LocalPlayer:FindFirstChild("BuffaloRideMount") and LocalPlayer.BuffaloRideMount.Value then
         status = "ลงจากช้างก่อน (กด Spacebar)"
         return false
+    end
+    if auto.walk then
+        local ok = walkTo(pos, arrive or 1.5)
+        task.wait(0.2)
+        return ok
     end
     local ground = groundAt(pos) or pos
     hrp.CFrame = CFrame.new(ground + Vector3.new(0, 3, 0)) * (hrp.CFrame - hrp.Position)
@@ -184,9 +232,17 @@ local function talk()
         local look = Vector3.new(body.CFrame.LookVector.X, 0, body.CFrame.LookVector.Z)
         look = look.Magnitude > 0.1 and look.Unit or Vector3.new(0, 0, 1)
         local stand = body.Position + look * 4
-        hrp.CFrame = CFrame.lookAt(stand, Vector3.new(body.Position.X, stand.Y, body.Position.Z))
-        hrp.AssemblyLinearVelocity = Vector3.zero
-        task.wait(0.35)
+        if auto.walk then
+            status = "เดินไปหาลุงหมา..."
+            if not walkTo(stand, 3) then
+                status = "เดินไปหาลุงหมาไม่ถึง"
+                return false
+            end
+        else
+            hrp.CFrame = CFrame.lookAt(stand, Vector3.new(body.Position.X, stand.Y, body.Position.Z))
+            hrp.AssemblyLinearVelocity = Vector3.zero
+            task.wait(0.35)
+        end
     end
     local askedAt = os.clock()
     status = "คุยกับลุงหมา..."
@@ -228,28 +284,35 @@ local function zone()
     return z and z:IsA("BasePart") and z or nil
 end
 
--- สุ่มจุดในแปลงที่ห่างต้นอื่นเกินระยะขั้นต่ำ
+-- จุดปลูก: ตารางในแปลง ห่างกันพอดีระยะขั้นต่ำ เลือกจุดว่างที่ใกล้ตัวเราที่สุด = ปลูกติดๆ กันเป็นกลุ่ม
 local function plantSpot()
     local z = zone()
     if not z then return nil end
-    local spacing = (Config.MinimumPlantSpacing or 3) + 0.8
+    local spacing = (Config.MinimumPlantSpacing or 3) + 0.4
     local others = {}
     for _, m in ipairs(RiceCrops:GetChildren()) do
         local p = m:IsA("Model") and cropPart(m)
-        if p then table.insert(others, p.Position) end
+        if p then table.insert(others, Vector3.new(p.Position.X, 0, p.Position.Z)) end
     end
-    local hx, hz = z.Size.X / 2 - 2, z.Size.Z / 2 - 2
-    for _ = 1, 60 do
-        local spot = (z.CFrame * CFrame.new(math.random() * 2 * hx - hx, 0, math.random() * 2 * hz - hz)).Position
-        local ok = true
-        for _, o in ipairs(others) do
-            if (Vector3.new(o.X, 0, o.Z) - Vector3.new(spot.X, 0, spot.Z)).Magnitude < spacing then
-                ok = false
-                break
+    local hrp = getRoot()
+    local me = hrp and hrp.Position or z.Position
+    local hx, hz = z.Size.X / 2 - 1.5, z.Size.Z / 2 - 1.5
+    local best, bestDist
+    for x = -hx, hx, spacing do
+        for zz = -hz, hz, spacing do
+            local spot = (z.CFrame * CFrame.new(x, 0, zz)).Position
+            local flatSpot = Vector3.new(spot.X, 0, spot.Z)
+            local free = true
+            for _, o in ipairs(others) do
+                if (o - flatSpot).Magnitude < spacing then free = false break end
+            end
+            if free then
+                local d = (Vector3.new(me.X, 0, me.Z) - flatSpot).Magnitude
+                if not bestDist or d < bestDist then best, bestDist = spot, d end
             end
         end
-        if ok then return spot end
     end
+    return best
 end
 
 local function plantOne()
@@ -286,7 +349,7 @@ local function harvest(crop)
     local hrp = getRoot()
     if not hrp then return false end
     if (hrp.Position - crop.part.Position).Magnitude > (Config.HarvestDistance or 7) - 2 then
-        if not moveTo(crop.part.Position + Vector3.new(2, 0, 0)) then return false end
+        if not moveTo(crop.part.Position, 3) then return false end
     end
     status = "เก็บข้าว..."
     local startedAt = os.clock()
@@ -395,6 +458,15 @@ section:AddToggle("RiceAuto", {
 }):OnChanged(function(v)
     auto.on = v
     if v then task.spawn(autoLoop) end
+end)
+section:AddDropdown("RiceMove", {
+    Title = "วิธีไป",
+    Description = "เดิน = ช้ากว่าแต่ปลอดภัย (กันโดนแบน) • วาร์ป = เร็ว",
+    Values = { "เดิน", "วาร์ป" },
+    Multi = false,
+    Default = 1,
+}):OnChanged(function(v)
+    auto.walk = v ~= "วาร์ป"
 end)
 local statusPara = section:AddParagraph({ Title = "สถานะ", Content = status })
 
