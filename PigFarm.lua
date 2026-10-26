@@ -325,9 +325,10 @@ local function auraLoop()
         elseif hrp and hum and hum.Health > 0 and not auto.on then
             local held = weaponTools()[1]
             local range = held and WeaponConfig.Weapons[held.Name].Range + 1 or 0
-            local pig = pickPig(range)
+            local pig = pickPig(range + 6) -- เผื่อตัวใหญ่ (จุดกลางตัวอยู่ลึก)
             local best = pig and monsterRoot(pig)
-            local bestDist = best and (best.Position - hrp.Position).Magnitude
+            local bestDist = best and (Vector3.new(best.Position.X - hrp.Position.X, 0, best.Position.Z - hrp.Position.Z).Magnitude
+                - bodyRadius(pig))
             local stats = best and WeaponConfig.Weapons[(weaponTools()[1] or {}).Name or ""]
             if best and stats and bestDist <= stats.Range + 1 then
                 local tool
