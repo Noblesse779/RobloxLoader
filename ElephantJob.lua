@@ -192,7 +192,12 @@ end
 local function riding()
     local char = LocalPlayer.Character
     local hum = char and char:FindFirstChildOfClass("Humanoid")
-    return hum ~= nil and (hum.SeatPart ~= nil or hum.Sit)
+    if hum and (hum.SeatPart ~= nil or hum.Sit) then return true end
+    -- แมพนี้ไม่ได้ใช้ที่นั่ง: ขี่อยู่ = เกมส่ง BuffaloRideNetwork.Input มาเมื่อกี้
+    -- หรือตัวผู้เล่นถูกเชื่อมติดกับช้าง (ชิ้นหลักของก้อนไม่ใช่ตัวเราแล้ว)
+    if env.ElephantInputAt and os.clock() - env.ElephantInputAt < 1.5 then return true end
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    return hrp ~= nil and hrp.AssemblyRootPart ~= nil and hrp.AssemblyRootPart ~= hrp
 end
 
 -- มีงานลากซุงอยู่ไหม: เพิ่งรับงาน (ดัก Request "Accept" ได้) / ป้ายบนจอ "ลากซุงไปจุด"
@@ -371,22 +376,24 @@ local function myMount()
     local hum = char and char:FindFirstChildOfClass("Humanoid")
     local seat = hum and hum.SeatPart
     if seat then return seat:FindFirstAncestorWhichIsA("Model") or seat end
+    -- ช้างที่เกมส่งไปกับ Input (Remote Spy เห็นเป็น Model ไม่มี Parent ฝั่งเรา ก็ใช้ได้)
     local m = env.ElephantMount
-    if typeof(m) == "Instance" and m:IsDescendantOf(workspace) then return m end
+    if typeof(m) == "Instance" then return m end
 end
 
 -- ติดตั้งตัวดักครั้งเดียว (รันสคริปต์ใหม่ใช้ตัวเดิม อ่านค่าจาก env)
 -- Input:FireServer(ช้าง, flag, ทิศ) = จำช้างไว้ และเปลี่ยนทิศเป็นทิศไปจุดส่ง
 -- ห้ามดัก InvokeServer: executor บางตัวรอผลใน hook ไม่ได้ ทำให้ Accept ของเกมพัง (ช้างไม่ขึ้น)
-if not env.ElephantHook3 and typeof(hookmetamethod) == "function"
+if not env.ElephantHook4 and typeof(hookmetamethod) == "function"
     and typeof(getnamecallmethod) == "function" then
-    env.ElephantHook3 = true
+    env.ElephantHook4 = true
     local wrap = typeof(newcclosure) == "function" and newcclosure or function(f) return f end
     local old
     old = hookmetamethod(game, "__namecall", wrap(function(self, ...)
         if getnamecallmethod() == "FireServer" and self == inputRemote() then
             local mount, flag = ...
             if typeof(mount) == "Instance" then env.ElephantMount = mount end
+            if not env.ElephantSelfInput then env.ElephantInputAt = os.clock() end
             local dir = env.ElephantAutopilotDir
             if dir then return old(self, mount, flag, dir) end
         end
@@ -456,6 +463,11 @@ local function driveTo(target)
     local i = 1
     local lastPos, lastMove, started = root.Position, os.clock(), os.clock()
     local lastCheck = 0
+    -- กด W ค้างไว้ด้วย: ถ้าเกมส่ง Input เฉพาะตอนกดเดิน จะได้ส่ง (แล้ว hook เปลี่ยนทิศให้)
+    VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.W, false, game)
+    local function releaseW()
+        VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.W, false, game)
+    end
     while alive() and auto.on and root.Parent do
         local pos = root.Position
         -- เหยียบจุดแล้วป้ายจะย้ายไปจุดถัดไปเอง (ไม่มี remote) = ถึงแล้ว
@@ -464,6 +476,7 @@ local function driveTo(target)
             local now = findTarget()
             if now ~= target then
                 env.ElephantAutopilotDir = nil
+                releaseW()
                 return true
             end
         end
@@ -476,7 +489,11 @@ local function driveTo(target)
         env.ElephantAutopilotDir = dir
         -- เกมส่ง Input เองรัวๆ อยู่แล้ว (hook เปลี่ยนทิศให้) ส่งเพิ่มเองด้วยถ้ารู้ว่าช้างตัวไหน
         local mount, remote = myMount(), inputRemote()
-        if mount and remote then remote:FireServer(mount, 0, dir) end
+        if mount and remote then
+            env.ElephantSelfInput = true
+            pcall(function() remote:FireServer(mount, 0, dir) end)
+            env.ElephantSelfInput = false
+        end
         -- ติด 4 วิ: คำนวณทางใหม่
         if (pos - lastPos).Magnitude > 2 then
             lastPos, lastMove = pos, os.clock()
@@ -489,6 +506,7 @@ local function driveTo(target)
         task.wait(0.1)
     end
     env.ElephantAutopilotDir = nil
+    releaseW()
     return false
 end
 
