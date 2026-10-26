@@ -360,6 +360,7 @@ end
 -- บังคับช้าง: เกมส่ง BuffaloRideNetwork.Input:FireServer(ช้าง, 0, ทิศทาง) ทุกเฟรม
 -- สคริปต์ดักการส่งนั้นแล้ว "เปลี่ยนทิศทาง" เป็นทิศไปจุดส่ง (เหมือนกดเดินไปทางนั้นเอง)
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local PathfindingService = game:GetService("PathfindingService")
 local RunService = game:GetService("RunService")
 
 local auto = { on = false, delivered = 0, dir = nil }
@@ -433,6 +434,18 @@ local function flat(v)
     return Vector3.new(v.X, 0, v.Z)
 end
 
+-- จุดทางเดิน (หลบสิ่งกีดขวาง) ถ้าหาทางไม่ได้ เดินตรงไปเลย
+local function computePath(from, to)
+    local path = PathfindingService:CreatePath({ AgentRadius = 5, AgentHeight = 10, AgentCanJump = false })
+    local ok = pcall(function() path:ComputeAsync(from, to) end)
+    if ok and path.Status == Enum.PathStatus.Success then
+        local pts = {}
+        for _, wp in ipairs(path:GetWaypoints()) do table.insert(pts, wp.Position) end
+        return pts
+    end
+    return { to }
+end
+
 local function deliveryCount()
     for _, d in ipairs(LocalPlayer.PlayerGui:GetDescendants()) do
         if d:IsA("TextLabel") then
@@ -442,61 +455,65 @@ local function deliveryCount()
     end
 end
 
--- เลื่อนช้างไปหาจุดส่งทีละนิดทุกเฟรม (ทะลุสิ่งกีดขวาง) ไม่ใช่วาร์ปทีเดียว
--- (วาร์ปทีเดียวเกมไม่นับ / บังคับผ่าน Input แล้วช้างไม่ขยับ)
--- ย้ายชิ้นหลักของก้อน (ช้าง+ผู้เล่นที่ติดกัน) ความสูงจากพื้นคงเดิม กันจมดิน
-local GLIDE_SPEED = 24 -- studs/วิ
-local function groundY(pos, ignore)
-    local params = RaycastParams.new()
-    params.FilterType = Enum.RaycastFilterType.Exclude
-    params.FilterDescendantsInstances = ignore
-    params.RespectCanCollide = true
-    local hit = workspace:Raycast(pos + Vector3.new(0, 25, 0), Vector3.new(0, -120, 0), params)
-    return hit and hit.Position.Y
-end
-
+-- บังคับช้างผ่าน BuffaloRideNetwork.Input (เซิร์ฟเวอร์เป็นคนเดินช้าง)
+-- เลื่อนช้างฝั่งเราเอง (ลอย/วาร์ป) เซิร์ฟเวอร์ไม่เห็น ถึงจุดแล้วก็ไม่นับ
 local function driveTo(target)
-    local hrp = getRoot()
-    if not hrp then return false end
-    local root = hrp.AssemblyRootPart or hrp
-    local ignore = { LocalPlayer.Character, target }
-    local model = root:FindFirstAncestorWhichIsA("Model")
-    if model and model ~= workspace then table.insert(ignore, model) end
-    local g = groundY(root.Position, ignore)
-    local height = g and (root.Position.Y - g) or 0
-    local started, lastCheck = os.clock(), 0
-    local result = false
+    if not myMount() then
+        status = "ขยับช้างเองนิดนึงก่อน (กด W) ให้สคริปต์จำช้างได้"
+        return false
+    end
+    -- ตำแหน่งใช้ตัวผู้เล่น (ขี่อยู่บนช้าง ไปด้วยกัน) ไม่ต้องรู้ว่าช้างคือชิ้นไหน
+    local root = getRoot()
+    if not root then return false end
+    local points = computePath(root.Position, target.Position)
+    local i = 1
+    local lastPos, lastMove, started = root.Position, os.clock(), os.clock()
+    local lastCheck = 0
+    -- กด W ค้างไว้ด้วย: ถ้าเกมส่ง Input เฉพาะตอนกดเดิน จะได้ส่ง (แล้ว hook เปลี่ยนทิศให้)
+    VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.W, false, game)
+    local function releaseW()
+        VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.W, false, game)
+    end
     while alive() and auto.on and root.Parent do
-        -- เหยียบจุดแล้วป้ายย้ายไปจุดถัดไป = ถึงแล้ว
-        if os.clock() - lastCheck > 0.3 then
+        local pos = root.Position
+        -- เหยียบจุดแล้วป้ายจะย้ายไปจุดถัดไปเอง (ไม่มี remote) = ถึงแล้ว
+        if os.clock() - lastCheck > 0.5 then
             lastCheck = os.clock()
-            if findTarget() ~= target then
-                result = true
-                break
+            local now = findTarget()
+            if now ~= target then
+                env.ElephantAutopilotDir = nil
+                releaseW()
+                return true
             end
         end
-        local dt = RunService.Heartbeat:Wait()
-        local pos = root.Position
-        local to = flat(target.Position - pos)
-        local step = math.min(GLIDE_SPEED * dt, to.Magnitude)
-        if to.Magnitude > 0.5 then
-            local dir = to.Unit
-            env.ElephantAutopilotDir = dir -- ให้เกมเห็นว่ากำลังเดินทางนี้ (ท่าเดิน)
-            local nextPos = pos + dir * step
-            local gy = groundY(nextPos, ignore)
-            if gy then nextPos = Vector3.new(nextPos.X, gy + height, nextPos.Z) end
-            root.CFrame = CFrame.lookAt(nextPos, nextPos + dir)
-        else
-            -- ยืนบนจุดแล้วแต่ยังไม่นับ: ขยับไปมานิดหน่อย
-            root.CFrame = root.CFrame * CFrame.new(math.random(-2, 2), 0, math.random(-2, 2))
-            task.wait(0.3)
+        -- ถึงจุดทางเดินนี้แล้ว ไปจุดถัดไป
+        while points[i] and flat(points[i] - pos).Magnitude < 6 and i < #points do
+            i += 1
         end
-        root.AssemblyLinearVelocity = Vector3.zero
-        root.AssemblyAngularVelocity = Vector3.zero
-        if os.clock() - started > 120 then break end -- กันวนไม่จบ
+        local dir = flat((points[i] or target.Position) - pos)
+        dir = dir.Magnitude > 0.1 and dir.Unit or Vector3.zero
+        env.ElephantAutopilotDir = dir
+        -- เกมส่ง Input เองรัวๆ อยู่แล้ว (hook เปลี่ยนทิศให้) ส่งเพิ่มเองด้วยถ้ารู้ว่าช้างตัวไหน
+        local mount, remote = myMount(), inputRemote()
+        if mount and remote then
+            env.ElephantSelfInput = true
+            pcall(function() remote:FireServer(mount, 0, dir) end)
+            env.ElephantSelfInput = false
+        end
+        -- ติด 4 วิ: คำนวณทางใหม่
+        if (pos - lastPos).Magnitude > 2 then
+            lastPos, lastMove = pos, os.clock()
+        elseif os.clock() - lastMove > 4 then
+            points, i = computePath(pos, target.Position), 1
+            lastMove = os.clock()
+            status = "ช้างติด หาทางใหม่"
+        end
+        if os.clock() - started > 180 then break end -- กันวนไม่จบ
+        task.wait(0.1)
     end
     env.ElephantAutopilotDir = nil
-    return result
+    releaseW()
+    return false
 end
 
 -- รับงานแล้วแต่ยังไม่ได้ขึ้นช้าง: หาปุ่มขี่ช้าง (ProximityPrompt) ใกล้ๆ แล้วกด
