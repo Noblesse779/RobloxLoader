@@ -312,12 +312,37 @@ local function rockStand(rock, from)
     local ok, size = pcall(function() return rock:GetExtentsSize() end)
     size = ok and size or Vector3.new(4, 4, 4)
     local d = math.clamp(auto.dist, 0.5, MiningConfig.Reach - 1)
-    if auto.side == "บน" then return pos + Vector3.new(0, size.Y / 2 + d + 1.5, 0), true end
-    if auto.side == "ล่าง" then return pos - Vector3.new(0, size.Y / 2 + d + 1.5, 0), true end
+    -- บน/ล่าง: ไม่เกินระยะขุดจากจุดกลางหิน (เซิร์ฟเวอร์น่าจะวัดจากจุดกลาง)
+    local up = math.min(size.Y / 2 + d + 1.5, MiningConfig.Reach - 0.5)
+    if auto.side == "บน" then return pos + Vector3.new(0, up, 0), true end
+    if auto.side == "ล่าง" then return pos - Vector3.new(0, up, 0), true end
     local away = Vector3.new(from.X - pos.X, 0, from.Z - pos.Z)
     away = away.Magnitude > 0.1 and away.Unit or Vector3.new(0, 0, 1)
-    return pos + away * (math.min(size.X, size.Z) / 2 + d), false
+    local stand = pos + away * (math.min(size.X, size.Z) / 2 + d)
+    -- ยืนบนพื้นจริง (จุดกลางหินอาจจมดิน/ลอย) ไม่งั้นตัวไปค้างในดินแล้วตกแมพ
+    local params = RaycastParams.new()
+    params.FilterType = Enum.RaycastFilterType.Exclude
+    params.FilterDescendantsInstances = { LocalPlayer.Character, rock }
+    local hit = workspace:Raycast(stand + Vector3.new(0, 30, 0), Vector3.new(0, -80, 0), params)
+    if hit then stand = Vector3.new(stand.X, hit.Position.Y + 3, stand.Z) end
+    return stand, false
 end
+
+-- ค้างตัวไว้ที่จุดยืนทุกเฟรม (ไม่ Anchored เพราะเกมไม่ให้ขุดตอนตัว Anchored) กันร่วง/ไหลออกจากระยะ
+local holdCF
+local holdConn = RunService.Heartbeat:Connect(function()
+    if not holdCF then return end
+    local hrp = getRoot()
+    if hrp then
+        hrp.CFrame = holdCF
+        hrp.AssemblyLinearVelocity = Vector3.zero
+    end
+end)
+task.spawn(function()
+    while alive() do task.wait(1) end
+    holdConn:Disconnect()
+    holdCF = nil
+end)
 
 -- ยืนบน/ใต้หินต้องทะลุหิน/พื้น: ปิดชนฝั่งเราทุกเฟรมระหว่างขุด (เลิกแล้วกลับปกติเอง)
 local noclip = false
@@ -334,6 +359,23 @@ task.spawn(function()
     noclipConn:Disconnect()
 end)
 
+-- เลิกค้างตัว: ถ้ามุดดิน/ลอยอยู่ วางกลับขึ้นพื้นข้างหินก่อนเปิดชนคืน (ไม่งั้นตกแมพ)
+local function release(rock)
+    if holdCF and noclip and rock then
+        local side = auto.side
+        auto.side = "ข้าง"
+        local ok, stand = pcall(rockStand, rock, holdCF.Position + Vector3.new(3, 0, 0))
+        auto.side = side
+        local hrp = getRoot()
+        if ok and hrp then
+            hrp.CFrame = CFrame.new(stand)
+            hrp.AssemblyLinearVelocity = Vector3.zero
+        end
+    end
+    holdCF = nil
+    noclip = false
+end
+
 local function mineRock(rock, pick)
     local tier = tierOf(pick.Name)
     local pos = rock:GetPivot().Position
@@ -347,9 +389,9 @@ local function mineRock(rock, pick)
     local started = os.clock()
     local tries, direct = 0, false
     while alive() and auto.on and mineable(rock, tier) and not env.AirdropBusy do
-        if pick.Parent ~= LocalPlayer.Character and not equip(pick) then return false end
+        if pick.Parent ~= LocalPlayer.Character and not equip(pick) then release(rock) return false end
         local hrp = getRoot()
-        if not hrp then return false end
+        if not hrp then release(rock) return false end
         if auto.walk and (Vector3.new(pos.X, hrp.Position.Y, pos.Z) - hrp.Position).Magnitude > within + 2 then
             if not goNear(pos, within, not auto.walk) then return false end
         end
@@ -360,9 +402,10 @@ local function mineRock(rock, pick)
             face(pos)
         else
             -- วาร์ปขุด: ยืนตามระยะ/ด้านที่เลือก หันหน้า (ก้ม/เงย) เข้าหาหิน
-            local stand, vertical = rockStand(rock, hrp.Position)
+            local stand, vertical = rockStand(rock, holdCF and holdCF.Position or hrp.Position)
             noclip = vertical
-            hrp.CFrame = CFrame.lookAt(stand, vertical and pos or Vector3.new(pos.X, stand.Y, pos.Z))
+            holdCF = CFrame.lookAt(stand, vertical and pos or Vector3.new(pos.X, stand.Y, pos.Z))
+            hrp.CFrame = holdCF
             hrp.AssemblyLinearVelocity = Vector3.zero
         end
         if not direct then
@@ -379,9 +422,9 @@ local function mineRock(rock, pick)
             MiningRemotes.SwingEnded:FireServer(id)
             task.wait(math.max(0.1, MiningConfig.SwingCooldown - MiningConfig.HitDelay - 0.15))
         end
-        if os.clock() - started > 40 then noclip = false return false end -- ขุดไม่แตกใน 40 วิ ไปก้อนอื่น
+        if os.clock() - started > 40 then release(rock) return false end -- ขุดไม่แตกใน 40 วิ ไปก้อนอื่น
     end
-    noclip = false
+    release(rock)
     auto.mined += 1
     return true
 end
