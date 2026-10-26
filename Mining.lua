@@ -572,10 +572,9 @@ local function sellable()
     return n
 end
 
--- จุดยืนหน้าร้าน: ที่ผู้เล่นบันทึกไว้ หรือหน้าตัวลุงหมาน (ทิศที่ลุงหันอยู่) ห่าง 5 studs บนพื้น
+-- จุดยืนหน้าร้าน: หน้าตัวลุงหมาน (ทิศที่ลุงหันอยู่) ห่าง 5 studs บนพื้น
 -- ห้ามเดิน/วาร์ปไปข้างร้าน เพราะเข้าไปแล้วติดออกไม่ได้
 local function shopFront(part)
-    if env.MiningShopSpot then return env.MiningShopSpot end
     local npc = workspace:FindFirstChild(OreShop.Title)
     local root = npc and (npc:FindFirstChild("HumanoidRootPart") or npc.PrimaryPart)
     local base = root or part
@@ -825,17 +824,6 @@ sellSection:AddDropdown("MineSell", {
 }):OnChanged(function(v)
     auto.sell = v
 end)
-sellSection:AddButton({
-    Title = "บันทึกจุดยืนหน้าร้าน",
-    Description = "ไปยืนหน้าร้านลุงหมานตรงที่กด E ขายแร่ได้ แล้วกดปุ่มนี้ สคริปต์จะไปยืนตรงนี้ทุกครั้งที่ขาย",
-    Callback = function()
-        local hrp = getRoot()
-        if hrp then
-            env.MiningShopSpot = hrp.Position
-            Fluent:Notify({ Title = "บันทึกแล้ว", Content = "จุดยืนหน้าร้านลุงหมาน", Duration = 4 })
-        end
-    end,
-})
 local selling = false
 sellSection:AddButton({
     Title = "ขายแร่ตอนนี้",
