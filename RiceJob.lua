@@ -335,12 +335,22 @@ local function plantOne()
         status = "หาที่ว่างในแปลงไม่เจอ"
         return false
     end
-    if not moveTo(spot) then return false end
+    -- ถือข้าวก่อนออกเดิน (เหมือนผู้เล่น) แล้วค่อยไปที่จุดปลูก
     local hum = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
     if not hum then return false end
     if tool.Parent ~= LocalPlayer.Character then
         hum:EquipTool(tool)
         task.wait(0.3)
+    end
+    status = auto.walk and "เดินไปปลูก..." or "วาร์ปไปปลูก..."
+    -- เดินไปไม่ถึงตรงเป๊ะก็ปลูกตรงที่ยืนได้ (ยังอยู่ในนาใกล้ๆ จุดนั้น)
+    if not moveTo(spot, 2.5) then
+        local hrp = getRoot()
+        local z = zone()
+        if not (hrp and z and isPaddy(hrp.Position, z)) then
+            status = "เดินไปจุดปลูกไม่ถึง"
+            return false
+        end
     end
     local before = #riceTools()
     status = "ปลูกข้าว..."
@@ -379,32 +389,6 @@ local function harvest(crop)
     status = "เก็บแล้ว"
     return true
 end
-
----------------------------------------------------------------- เร่งท่าปลูก/ก้มเก็บ
--- ท่าก้ม (Config.AnimationId) เล่นบนตัวเรา: ตอนเปิดออโต้ให้เล่นเร็ว 5 เท่า
--- ถ้าเซิร์ฟเวอร์จับเวลาเอง (RiceActionBusy ยังค้าง) ก็จะไม่เร็วขึ้น แค่ท่าดูเร็ว
-local ANIM_ID = tostring(Config.AnimationId):match("%d+")
-local ANIM_SPEED = 5
-local animConn
-local function hookAnimator(char)
-    if animConn then animConn:Disconnect() animConn = nil end
-    local hum = char and char:WaitForChild("Humanoid", 10)
-    local animator = hum and hum:WaitForChild("Animator", 10)
-    if not animator then return end
-    animConn = animator.AnimationPlayed:Connect(function(track)
-        local id = track.Animation and track.Animation.AnimationId:match("%d+")
-        if auto.on and id == ANIM_ID then
-            track:AdjustSpeed(ANIM_SPEED)
-        end
-    end)
-end
-task.spawn(hookAnimator, LocalPlayer.Character)
-local charConn = LocalPlayer.CharacterAdded:Connect(hookAnimator)
-task.spawn(function()
-    while alive() do task.wait(1) end
-    charConn:Disconnect()
-    if animConn then animConn:Disconnect() end
-end)
 
 ---------------------------------------------------------------- วนอัตโนมัติ
 local function autoLoop()
