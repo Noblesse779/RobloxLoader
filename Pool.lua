@@ -28,6 +28,11 @@ local settings = {
     auto = false,
     group = "อัตโนมัติ",
     powerScale = 1,
+    banks = true, -- ให้ลูกเป้าเด้งขอบลงหลุม
+    kicks = true, -- ให้ลูกขาวเด้งขอบไปชน
+    bounce = 0.85, -- ขอบเด้งกลับกี่ส่วน (แรงตั้งฉากกับขอบ)
+    spinX = 0, -- สปินซ้าย/ขวา
+    spinY = 0, -- สปินบน (ตาม) / ล่าง (ดึงกลับ)
 }
 local status = "-"
 local lastPlan = "-"
@@ -123,6 +128,76 @@ local function powerFor(dist)
     return math.clamp((0.3 + 0.045 * dist) * settings.powerScale, 0.2, 1)
 end
 
+-- เส้นทางจาก s ไป q: ตรง หรือเด้งขอบ 1 ครั้ง (ขอบ 4 ด้าน)
+-- ขอบไม่เด้งเต็มที่: แรงตั้งฉากกับขอบเหลือ e เท่า -> จุดเป้า "ในกระจก" อยู่ลึก c/e
+local CX, CY = RAIL_X - BALL_R, RAIL_Y - BALL_R -- เส้นที่จุดศูนย์กลางลูกแตะขอบ
+local RAILS = {
+    { axis = "Y", at = CY }, { axis = "Y", at = -CY },
+    { axis = "X", at = CX }, { axis = "X", at = -CX },
+}
+local function routes(s, q, allowBank)
+    local list = { { first = q - s, last = q - s, len = (q - s).Magnitude, banks = 0, segs = { { s, q } } } }
+    if not allowBank then return list end
+    local e = settings.bounce
+    for _, r in ipairs(RAILS) do
+        local sv = r.axis == "Y" and s.Y or s.X
+        local qv = r.axis == "Y" and q.Y or q.X
+        local a, c = math.abs(r.at - sv), math.abs(r.at - qv)
+        -- q ต้องอยู่ฝั่งในโต๊ะเหมือน s (หลุมที่อยู่บนขอบนี้เด้งเข้าไม่ได้)
+        if a > 0.05 and c > 0.2 and (r.at - sv) * (r.at - qv) > 0 then
+            local t = a / (a + c / e)
+            local bounce
+            if r.axis == "Y" then
+                bounce = Vector2.new(s.X + (q.X - s.X) * t, r.at)
+            else
+                bounce = Vector2.new(r.at, s.Y + (q.Y - s.Y) * t)
+            end
+            -- จุดเด้งต้องอยู่บนขอบ ไม่ใช่ปากหลุม
+            local okBounce
+            if r.axis == "Y" then
+                okBounce = math.abs(bounce.X) < CX - 0.5 and math.abs(bounce.X) > 0.6
+            else
+                okBounce = math.abs(bounce.Y) < CY - 0.5
+            end
+            if okBounce then
+                table.insert(list, {
+                    first = bounce - s, last = q - bounce,
+                    len = (bounce - s).Magnitude + (q - bounce).Magnitude / e,
+                    banks = 1, segs = { { s, bounce }, { bounce, q } },
+                })
+            end
+        end
+    end
+    return list
+end
+
+local function routeClear(route, balls, skip)
+    for _, seg in ipairs(route.segs) do
+        if not pathClear(seg[1], seg[2], balls, skip) then return false end
+    end
+    return true
+end
+
+-- ลูกขาวหลังชน (ไม่มีสปิน) วิ่งตามเส้นสัมผัส ถ้าเส้นนั้นพุ่งเข้าหลุม = เสี่ยงลูกขาวลง
+local function scratchRisk(ghost, arrive, objDir)
+    local d = arrive.Unit
+    local tangent = d - objDir * d:Dot(objDir)
+    local dir, reach
+    if tangent.Magnitude < 0.15 then
+        dir, reach = objDir, 1.5 -- ตรงๆ ลูกขาวไหลตามไปนิดหน่อย
+    else
+        dir, reach = tangent.Unit, 5
+    end
+    for _, pocket in ipairs(POCKETS) do
+        local rel = pocket - ghost
+        local along = rel:Dot(dir)
+        if along > 0 and along < reach and (rel - dir * along).Magnitude < 0.45 then
+            return true
+        end
+    end
+    return false
+end
+
 local function planShot()
     local balls, cue = {}, nil
     for _, b in ipairs(state.balls or {}) do
@@ -152,26 +227,39 @@ local function planShot()
     local best, bestScore, bestText
     for _, b in ipairs(balls) do
         if legal[b.id] then
+            local skip = { [0] = true, [b.id] = true }
             for pi, pocket in ipairs(POCKETS) do
-                local toPocket = pocket - b.p
-                local dir = toPocket.Unit
-                -- หลุมกลางเข้าได้แค่มุมไม่เฉียงเกิน
-                local okSide = pi <= 4 or math.abs(dir.Y) > 0.6
-                local ghost = b.p - dir * (BALL_R * 2)
-                local aim = ghost - cue.p
-                if okSide and aim.Magnitude > 0.01 and insideTable(ghost) then
-                    local cut = aim.Unit:Dot(dir) -- 1 = ตรง, 0 = เฉียด 90 องศา
-                    if cut > 0.26 -- เฉียงไม่เกิน ~75 องศา
-                        and pathClear(cue.p, ghost, balls, { [0] = true, [b.id] = true })
-                        and pathClear(b.p, pocket, balls, { [0] = true, [b.id] = true }) then
-                        local score = aim.Magnitude + toPocket.Magnitude + (1 - cut) * 12
-                        if not bestScore or score < bestScore then
-                            bestScore = score
-                            best = {
-                                angle = math.atan2(aim.Y, aim.X),
-                                power = powerFor(aim.Magnitude + toPocket.Magnitude / math.max(cut, 0.4)),
-                            }
-                            bestText = ("ลูก %d -> หลุม %d (เฉียง %d°)"):format(b.id, pi, math.deg(math.acos(math.clamp(cut, -1, 1))))
+                for _, ballRoute in ipairs(routes(b.p, pocket, settings.banks)) do
+                    local dir = ballRoute.first.Unit
+                    local lastDir = ballRoute.last.Unit
+                    -- หลุมกลางเข้าได้แค่มุมไม่เฉียงเกิน
+                    local okSide = pi <= 4 or math.abs(lastDir.Y) > 0.6
+                    local ghost = b.p - dir * (BALL_R * 2)
+                    if okSide and insideTable(ghost) and routeClear(ballRoute, balls, skip) then
+                        for _, cueRoute in ipairs(routes(cue.p, ghost, settings.kicks)) do
+                            if cueRoute.len > 0.01 then
+                                local arrive = cueRoute.last.Unit
+                                local cut = arrive:Dot(dir) -- 1 = ตรง, 0 = เฉียด 90 องศา
+                                if cut > 0.26 and routeClear(cueRoute, balls, skip) then
+                                    local banks = ballRoute.banks + cueRoute.banks
+                                    local scratch = scratchRisk(ghost, cueRoute.last, dir)
+                                    local score = cueRoute.len + ballRoute.len + (1 - cut) * 12
+                                        + banks * 4 + (scratch and 8 or 0)
+                                    if not bestScore or score < bestScore then
+                                        bestScore = score
+                                        best = {
+                                            angle = math.atan2(cueRoute.first.Y, cueRoute.first.X),
+                                            power = powerFor(cueRoute.len + ballRoute.len / math.max(cut, 0.4)),
+                                        }
+                                        local kind = (ballRoute.banks > 0 and "เด้งขอบลงหลุม" or "")
+                                            .. (cueRoute.banks > 0 and " ลูกขาวเด้งขอบ" or "")
+                                        bestText = ("ลูก %d -> หลุม %d (เฉียง %d°)%s%s"):format(b.id, pi,
+                                            math.deg(math.acos(math.clamp(cut, -1, 1))),
+                                            kind ~= "" and " " .. kind or "",
+                                            scratch and " เสี่ยงลูกขาวลง" or "")
+                                    end
+                                end
+                            end
                         end
                     end
                 end
@@ -180,19 +268,24 @@ local function planShot()
     end
     if best then return best, bestText end
 
-    -- ไม่มีทางลงหลุม: ตีโดนลูกฝั่งเราลูกที่ใกล้สุดที่ทางโล่ง (กันฟาวล์)
-    local near, nd
+    -- ไม่มีทางลงหลุม: ตีให้โดนลูกฝั่งเรา (ตรง หรือเด้งขอบ) กันฟาวล์
+    local near, nearScore
     for _, b in ipairs(balls) do
         if legal[b.id] then
-            local d = (b.p - cue.p).Magnitude
-            if pathClear(cue.p, b.p, balls, { [0] = true, [b.id] = true }) and (not nd or d < nd) then
-                near, nd = b, d
+            for _, r in ipairs(routes(cue.p, b.p, true)) do
+                if routeClear(r, balls, { [0] = true, [b.id] = true }) then
+                    local score = r.len + r.banks * 3
+                    if not nearScore or score < nearScore then
+                        near, nearScore = { route = r, id = b.id }, score
+                    end
+                end
             end
         end
     end
     if near then
-        local d = near.p - cue.p
-        return { angle = math.atan2(d.Y, d.X), power = powerFor(d.Magnitude + 3) }, ("ไม่มีทางลง: ตีโดนลูก %d"):format(near.id)
+        local r = near.route
+        return { angle = math.atan2(r.first.Y, r.first.X), power = powerFor(r.len + 3) },
+            ("ไม่มีทางลง: ตีโดนลูก %d%s"):format(near.id, r.banks > 0 and " (เด้งขอบ)" or "")
     end
     return nil, "ไม่มีทางตีโดนลูกฝั่งเรา"
 end
@@ -214,7 +307,7 @@ local function shoot()
     end
     channel:FireServer("shot", {
         tableId = state.tableId,
-        spin = Vector2.new(0, 0),
+        spin = Vector2.new(settings.spinX, settings.spinY),
         power = shot.power,
         angle = shot.angle,
         round = state.round,
@@ -321,6 +414,52 @@ shotSection:AddSlider("PoolPower", {
 }):OnChanged(function(v)
     settings.powerScale = v
 end)
+local proSection = Tabs.main:AddSection("แทงแบบโปร")
+proSection:AddToggle("PoolBanks", {
+    Title = "ลูกเป้าเด้งขอบลงหลุม",
+    Description = "ไม่มีมุมตรง ให้ลูกเป้าเด้งขอบ 1 ครั้งแล้วลง",
+    Default = true,
+}):OnChanged(function(v)
+    settings.banks = v
+end)
+proSection:AddToggle("PoolKicks", {
+    Title = "ลูกขาวเด้งขอบไปชน",
+    Description = "มีลูกขวางทางตรง ให้ลูกขาวเด้งขอบอ้อมไปชน",
+    Default = true,
+}):OnChanged(function(v)
+    settings.kicks = v
+end)
+proSection:AddSlider("PoolBounce", {
+    Title = "ขอบเด้ง",
+    Description = "เด้งขอบแล้วไปสั้นกว่าหลุม (ชนขอบก่อนหลุม) = ลด, เลยหลุม = เพิ่ม",
+    Default = 0.85,
+    Min = 0.5,
+    Max = 1,
+    Rounding = 2,
+}):OnChanged(function(v)
+    settings.bounce = v
+end)
+proSection:AddSlider("PoolSpinY", {
+    Title = "สปิน บน(+)/ล่าง(-)",
+    Description = "บน = ลูกขาวตามไปข้างหน้า, ล่าง = ดึงกลับ (สปินทำให้เด้งขอบคลาดได้)",
+    Default = 0,
+    Min = -1,
+    Max = 1,
+    Rounding = 2,
+}):OnChanged(function(v)
+    settings.spinY = v
+end)
+proSection:AddSlider("PoolSpinX", {
+    Title = "สปิน ซ้าย(-)/ขวา(+)",
+    Description = "ปล่อย 0 ไว้ดีที่สุด สปินข้างทำให้มุมเพี้ยน",
+    Default = 0,
+    Min = -1,
+    Max = 1,
+    Rounding = 2,
+}):OnChanged(function(v)
+    settings.spinX = v
+end)
+
 shotSection:AddButton({
     Title = "คัดลอกข้อมูลโต๊ะล่าสุด",
     Description = "ส่งให้คนทำสคริปต์ดูตอนเลือกฝั่ง/ตาเล่นผิด",
