@@ -279,38 +279,11 @@ local function buildPath(from, to)
     return { from, to }
 end
 
--- เดินตรงจาก a ไป b ได้ไหม (กวาดลูกกลมกว้างเท่าช้างที่ระดับลำตัว ไม่นับพื้น/ของที่ทะลุได้)
-local function clearLine(a, b, mount)
-    local params = RaycastParams.new()
-    params.FilterType = Enum.RaycastFilterType.Exclude
-    params.FilterDescendantsInstances = { LocalPlayer.Character, mount, workspace:FindFirstChild("ElephantJobLocalGuidance") }
-    params.RespectCanCollide = true
-    for _, h in ipairs({ 2.5, 6 }) do
-        local from = a + Vector3.new(0, h, 0)
-        local to = Vector3.new(b.X, a.Y + h, b.Z)
-        -- พื้นสูงขึ้นระหว่างทาง (เนิน) / ราวสะพานเตี้ยๆ ก็ถือว่าชน ใช้ทางตามถนนแทน
-        local ok, hit = pcall(function() return workspace:Spherecast(from, 3, to - from, params) end)
-        if ok and hit then return false end
-    end
-    -- ต้องมีพื้นให้เหยียบตลอดทาง: ไม่ใช่น้ำ ไม่ใช่ขอบสะพาน/ตลิ่งที่ตกลงไป
-    local flatDist = Vector3.new(b.X - a.X, 0, b.Z - a.Z)
-    local steps = math.max(1, math.floor(flatDist.Magnitude / 4))
-    for i = 1, steps do
-        local p = a + flatDist * (i / steps)
-        local hit = workspace:Raycast(p + Vector3.new(0, 6, 0), Vector3.new(0, -14, 0), params)
-        if not hit or hit.Material == Enum.Material.Water or math.abs(hit.Position.Y - a.Y) > 3 then
-            return false
-        end
-    end
-    return true
-end
-
 -- ขับช้างไป pos จนกว่า done() จริง (เกมนับแล้ว) หรือถึงระยะ arrive (ถ้า done = nil)
 local function driveTo(pos, arrive, done)
     local path, pathAt = nil, 0
     local lastPos, lastMove, started, lastSend = nil, os.clock(), os.clock(), 0
-    local reverseUntil, detourUntil, side = 0, 0, 1
-    local noShortcut = false -- ติดแล้วเลิกตัดโค้ง เดินตามถนนอย่างเดียวจนถึงจุดนี้
+    local reverseUntil = 0
     local result = false
     while alive() and auto.on do
         if done and done() then result = true break end
@@ -323,58 +296,30 @@ local function driveTo(pos, arrive, done)
             pathAt = os.clock()
             path = buildPath(ground, pos)
         end
-        -- ตัดโค้ง: เล็งจุดบนเส้นทางที่ไกลที่สุดที่เดินตรงไปได้โดยไม่ชนอะไร
-        -- (ช้างวิ่งเร็วสุดเท่าที่เซิร์ฟเวอร์ให้อยู่แล้ว ทางลัดคือทางเดียวที่ทำให้ถึงไวขึ้น)
+        -- จุดถัดไปบนเส้นทางที่ห่างเกิน 6 studs (ใกล้เป้าแล้วเล็งเป้าตรงๆ)
         local wp = pos
         if dist > 8 then
-            wp = nil
-            for i = (noShortcut and 1 or math.min(#path, 40)), 2, -1 do
-                if flat(path[i] - ground).Magnitude > 6 and clearLine(ground, path[i], mount) then
-                    wp = path[i]
-                    break
-                end
+            for i = 2, #path do
+                if flat(path[i] - ground).Magnitude > 6 then wp = path[i] break end
             end
-            if not wp then
-                for i = 2, #path do
-                    if flat(path[i] - ground).Magnitude > 6 then wp = path[i] break end
-                end
-            end
-            wp = wp or pos
         end
         local d = flat(wp - ground)
         local dir = d.Magnitude > 0.05 and d.Unit or flat(root.CFrame.LookVector).Unit
-        local function turned(deg)
-            return CFrame.Angles(0, math.rad(deg), 0):VectorToWorldSpace(dir)
-        end
         local throttle = 1
-        if os.clock() < reverseUntil then
-            throttle = -1
-        elseif os.clock() < detourUntil then
-            -- หลังถอย: เบี่ยงออกข้างก่อนแล้วค่อยกลับเข้าทาง
-            dir = turned(70 * side)
-        elseif dist > 8 and not clearLine(ground, ground + dir * 12, mount) then
-            -- มีของขวางข้างหน้า (เช่น Airdrop ตกกลางถนน): หาทิศที่โล่งใกล้ทิศเดิมที่สุด
-            for _, deg in ipairs({ 25, 50, 75, 100 }) do
-                local a, b = turned(deg * side), turned(-deg * side)
-                if clearLine(ground, ground + a * 12, mount) then dir = a break end
-                if clearLine(ground, ground + b * 12, mount) then dir = b break end
-            end
-        end
+        if os.clock() < reverseUntil then throttle = -1 end
+        -- ถึงกลางจุดส่งแล้วแต่เกมยังไม่นับ: ค่อยๆ เดินหน้าช้าๆ ผ่านจุด
         env.ElephantDrive = { remote = InputRemote, throttle = throttle, dir = dir }
         if os.clock() - lastSend > 0.1 then
             lastSend = os.clock()
             pcall(function() InputRemote:FireServer(mount, throttle, dir) end)
         end
-        -- ติด 2.5 วิ: ถอย 1.5 วิ แล้วเบี่ยงออกข้าง 2 วิ (ติดซ้ำสลับไปอีกข้าง)
+        -- ติด 3 วิ: ถอยหลัง 1 วิแล้วไปต่อ
         if not lastPos or (root.Position - lastPos).Magnitude > 1.5 then
             lastPos, lastMove = root.Position, os.clock()
-        elseif os.clock() - lastMove > 2.5 then
+        elseif os.clock() - lastMove > 3 then
             lastMove = os.clock()
-            reverseUntil = os.clock() + 1.5
-            detourUntil = reverseUntil + 2
-            side = -side
-            noShortcut = true
-            status = "ช้างติด ถอยแล้วเดินตามถนน"
+            reverseUntil = os.clock() + 1
+            status = "ช้างติด ถอยแล้วไปใหม่"
         end
         if os.clock() - started > 300 then break end -- กันวนไม่จบ
         RunService.Heartbeat:Wait()
