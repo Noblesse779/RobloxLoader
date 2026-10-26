@@ -410,9 +410,18 @@ local function sellMeat()
     end
     local shopId = opened.shopId
     local before = select(3, bagState())
-    local ok, res = pcall(function()
-        return SellRemotes.Request:InvokeServer("SellAll", nil, nil, HttpService:GenerateGUID(false), shopId)
-    end)
+    -- เกมเก็บของในมือก่อนขายเสมอ (ถือดาบอยู่อาจขายไม่ได้) แล้วลองส่งซ้ำได้ 3 ครั้ง ด้วยรหัสเดิม
+    local hum = getHum()
+    if hum then hum:UnequipTools() end
+    local guid = HttpService:GenerateGUID(false)
+    local ok, res
+    for _ = 1, 3 do
+        ok, res = pcall(function()
+            return SellRemotes.Request:InvokeServer("SellAll", nil, nil, guid, shopId)
+        end)
+        if ok then break end
+        task.wait(0.3)
+    end
     pcall(function() SellRemotes.Request:InvokeServer("Close", nil, nil, nil, shopId) end)
     pcall(function() -- ปิดหน้าต่างร้านบนจอ (เกมเปิดให้ตอนกดปุ่ม)
         local gui = LocalPlayer.PlayerGui:FindFirstChild("SellHubGui")
