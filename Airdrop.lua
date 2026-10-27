@@ -261,7 +261,9 @@ end
 local function autoLoop()
     while alive() and auto.on do
         local prompt = currentDrop()
-        if prompt and not riding() then
+        if prompt and env.BingoActive then
+            status = "แอร์ดรอปมา แต่กำลังเล่นบิงโกรอบรางวัลอยู่ (คุ้มกว่า) ไม่ลุกไป"
+        elseif prompt and not riding() then
             handle(prompt)
         elseif prompt then
             status = "แอร์ดรอปมาแล้ว แต่ขี่ช้างอยู่ (ไม่วาร์ปตอนขี่ ช้างจะจม)"
