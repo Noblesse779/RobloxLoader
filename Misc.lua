@@ -291,10 +291,23 @@ local function loadFluent(useCache)
     return loadstring(source)()
 end
 -- เปิดผ่านตัวรวม (BaanLung.lua) จะส่งแท็บ + Fluent มาให้: ใช้แท็บนั้น ไม่สร้างหน้าต่างเอง
+-- ตัวรวมส่งมาได้ 2 แบบ: แท็บเดียว (ใส่ทุกหมวดในแท็บนั้น) หรือตาราง { cam, outfit, guard, tools } แยกแท็บละหมวด
+local TAB_KEYS = {
+    { key = "cam", title = "กล้อง", icon = "camera" },
+    { key = "outfit", title = "แต่งตัว", icon = "shirt" },
+    { key = "guard", title = "กันหลุด", icon = "shield" },
+    { key = "tools", title = "อ่านระบบ", icon = "file-search" },
+}
 local HUB_TAB, HUB_FLUENT = ...
 local Fluent, Window, Tabs
 if HUB_TAB then
-    Fluent, Tabs = HUB_FLUENT, { main = HUB_TAB }
+    Fluent = HUB_FLUENT
+    if typeof(HUB_TAB) == "table" and HUB_TAB.cam then
+        Tabs = HUB_TAB
+    else
+        Tabs = {}
+        for _, t in ipairs(TAB_KEYS) do Tabs[t.key] = HUB_TAB end
+    end
 else
     local ok
     ok, Fluent = pcall(loadFluent, true)
@@ -315,17 +328,18 @@ else
         Title = "ทั่วไป",
         SubTitle = "Misc",
         TabWidth = 150,
-        Size = UDim2.fromOffset(540, 320),
+        Size = UDim2.fromOffset(560, 360),
         Acrylic = false,
         Theme = "Darker",
         MinimizeKey = Enum.KeyCode.H,
     })
-    Tabs = {
-        main = Window:AddTab({ Title = "หลัก", Icon = "home" }),
-    }
+    Tabs = {}
+    for _, t in ipairs(TAB_KEYS) do
+        Tabs[t.key] = Window:AddTab({ Title = t.title, Icon = t.icon })
+    end
 end
 
-local section = Tabs.main:AddSection("ฟรีแคม")
+local section = Tabs.cam:AddSection("ฟรีแคม")
 local freecamToggle = section:AddToggle("MiscFreecam", {
     Title = "ฟรีแคม",
     Description = "WASD เลื่อนกล้อง • Q/E ลง/ขึ้น • คลิกขวาค้างหมุนกล้อง • Shift เร็วขึ้น (ตัวละครอยู่ที่เดิม งานอื่นทำต่อได้)",
@@ -357,7 +371,7 @@ section:AddSlider("MiscFreecamSpeed", {
     cam.speed = v
 end)
 
-local outfitSection = Tabs.main:AddSection("สุ่มชุด")
+local outfitSection = Tabs.outfit:AddSection("สุ่มชุด")
 outfitSection:AddButton({
     Title = "สุ่มชุดเลย",
     Description = "ลองชุดสุ่มจากร้านในเกม (ผม หมวก เครื่องประดับ เสื้อ กางเกง รองเท้า สีผิว) คนอื่นเห็นด้วย",
@@ -396,7 +410,7 @@ outfitSection:AddSlider("MiscOutfitEvery", {
     outfit.every = v
 end)
 
-local guardSection = Tabs.main:AddSection("กันหลุด")
+local guardSection = Tabs.guard:AddSection("กันหลุด")
 guardSection:AddToggle("MiscAntiAfk", {
     Title = "กันโดนเตะตอนยืนนิ่ง (AFK)",
     Description = "ยืนนิ่งเกิน 20 นาทีเกมจะเตะ เปิดไว้จะไม่โดน",
@@ -419,7 +433,7 @@ guardSection:AddToggle("MiscRejoinReload", {
     guard.reload = v
 end)
 
-local dumpSection = Tabs.main:AddSection("อ่านระบบเซิฟ")
+local dumpSection = Tabs.tools:AddSection("อ่านระบบเซิฟ")
 local dumping = false
 dumpSection:AddButton({
     Title = "อ่านระบบเซิฟนี้",
