@@ -1,15 +1,23 @@
--- ตัวรวมแมพบ้านลุง: หน้าต่างเดียว แท็บละงาน (ลากซุง / ปลูกข้าว / ตีหมู / แอร์ดรอป / ขุดเหมือง / ตัดไม้ / ขายของ / ทั่วไป)
--- แต่ละงานยังเป็นไฟล์ของมันเอง (ElephantJob.lua / RiceJob.lua) ตัวนี้แค่โหลดมาใส่แท็บ
+-- ตัวรวมแมพบ้านลุง: หน้าต่างเดียว แบ่งหมวด
+--   งานหาเงิน: ลากซุง / ปลูกข้าว / ตีหมู / ขุดเหมือง / ตัดไม้
+--   เก็บของ & ขาย: แอร์ดรอป / ขายของ
+--   ทั่วไป: กล้อง / แต่งตัว / กันหลุด / อ่านระบบ (ไฟล์ Misc.lua ไฟล์เดียว แยกแท็บ)
+-- แต่ละงานยังเป็นไฟล์ของมันเอง ตัวนี้แค่โหลดมาใส่แท็บ
 local BASE = "https://raw.githubusercontent.com/Noblesse779/RobloxLoader/main/"
 local JOBS = {
     { file = "ElephantJob.lua", title = "ลากซุง", icon = "truck" },
     { file = "RiceJob.lua", title = "ปลูกข้าว", icon = "leaf" },
     { file = "PigFarm.lua", title = "ตีหมู", icon = "sword" },
-    { file = "Airdrop.lua", title = "แอร์ดรอป", icon = "package" },
     { file = "Mining.lua", title = "ขุดเหมือง", icon = "pickaxe" },
     { file = "Woodcut.lua", title = "ตัดไม้", icon = "axe" },
+    { file = "Airdrop.lua", title = "แอร์ดรอป", icon = "package" },
     { file = "Seller.lua", title = "ขายของ", icon = "shopping-cart" },
-    { file = "Misc.lua", title = "ทั่วไป", icon = "settings" },
+    { file = "Misc.lua", tabs = {
+        { key = "cam", title = "กล้อง", icon = "camera" },
+        { key = "outfit", title = "แต่งตัว", icon = "shirt" },
+        { key = "guard", title = "กันหลุด", icon = "shield" },
+        { key = "tools", title = "อ่านระบบ", icon = "file-search" },
+    } },
 }
 
 local env = (typeof(getgenv) == "function" and getgenv()) or _G
@@ -55,16 +63,26 @@ env.BaanLungFluent = Fluent
 
 local Window = Fluent:CreateWindow({
     Title = "บ้านลุง",
-    SubTitle = "ลากซุง • ปลูกข้าว • ตีหมู",
+    SubTitle = "งานหาเงิน • ขายของ • ทั่วไป",
     TabWidth = 150,
-    Size = UDim2.fromOffset(560, 400),
+    Size = UDim2.fromOffset(580, 460),
     Acrylic = false,
     Theme = "Darker",
     MinimizeKey = Enum.KeyCode.H,
 })
 
 for _, job in ipairs(JOBS) do
-    local tab = Window:AddTab({ Title = job.title, Icon = job.icon })
+    -- ไฟล์ที่มีหลายหมวด (tabs) ได้ตารางแท็บ { key = tab } ไป ที่เหลือได้แท็บเดียว
+    local tab
+    if job.tabs then
+        tab = {}
+        for _, t in ipairs(job.tabs) do
+            tab[t.key] = Window:AddTab({ Title = t.title, Icon = t.icon })
+        end
+    else
+        tab = Window:AddTab({ Title = job.title, Icon = job.icon })
+    end
+    local title = job.title or job.file
     -- แต่ละงานรอของในแมพ (WaitForChild) แยกกัน งานหนึ่งช้าไม่ถ่วงอีกงาน
     task.spawn(function()
         local loaded, err = pcall(function()
@@ -73,7 +91,7 @@ for _, job in ipairs(JOBS) do
         end)
         if not loaded then
             warn("[BaanLung] โหลด " .. job.file .. " ไม่ได้: " .. tostring(err))
-            Fluent:Notify({ Title = "โหลดไม่ได้", Content = job.title .. ": " .. tostring(err), Duration = 8 })
+            Fluent:Notify({ Title = "โหลดไม่ได้", Content = title .. ": " .. tostring(err), Duration = 8 })
         end
     end)
 end

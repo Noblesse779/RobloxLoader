@@ -1,6 +1,8 @@
 -- ทั่วไป: ฟรีแคม (ตั้งปุ่มเปิด/ปิดได้) ใช้ได้ทุกแมพ + สุ่มชุด (เฉพาะแมพที่มีร้านลองชุด OurCatalog)
 -- ฟรีแคม: กล้องลอยอิสระ ตัวละครอยู่ที่เดิม งานอื่นทำต่อได้ปกติ
 -- สุ่มชุด: ใช้ปุ่ม "ลอง" ของร้านในเกมเอง (AvatarAction "Try") ไม่ได้ซื้อของ
+-- กันหลุด: กันโดนเตะตอนยืนนิ่ง 20 นาที + หลุดแล้วเข้าเซิฟใหม่เอง
+-- อ่านระบบเซิฟ: รัน Dump.lua เซฟรีโมท/ค่าผู้เล่น/โค้ดฝั่งเรา ลงโฟลเดอร์ GameDump
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -8,6 +10,9 @@ local UserInputService = game:GetService("UserInputService")
 local ContextActionService = game:GetService("ContextActionService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local AvatarEditorService = game:GetService("AvatarEditorService")
+local VirtualUser = game:GetService("VirtualUser")
+local GuiService = game:GetService("GuiService")
+local TeleportService = game:GetService("TeleportService")
 local LocalPlayer = Players.LocalPlayer
 
 local env = (typeof(getgenv) == "function" and getgenv()) or _G
@@ -225,6 +230,44 @@ task.spawn(function()
     end
 end)
 
+---------------------------------------------------------------- กันหลุด
+local BASE = "https://raw.githubusercontent.com/Noblesse779/RobloxLoader/main/"
+local guard = { afk = true, rejoin = false, reload = true, rejoining = false }
+
+-- เกมเตะคนที่ไม่ขยับ 20 นาที: พอ Roblox ส่งสัญญาณว่านิ่งนาน ให้กดเมาส์ปลอมหนึ่งที
+conns[#conns + 1] = LocalPlayer.Idled:Connect(function()
+    if not guard.afk then return end
+    pcall(function()
+        VirtualUser:CaptureController()
+        VirtualUser:ClickButton2(Vector2.new())
+    end)
+end)
+
+local function queueReload()
+    local queue = (typeof(queue_on_teleport) == "function" and queue_on_teleport)
+        or (typeof(syn) == "table" and syn.queue_on_teleport)
+    if guard.reload and queue then
+        pcall(queue, 'loadstring(game:HttpGet("' .. BASE .. 'BaanLung.lua"))()')
+    end
+end
+
+-- หลุด/โดนเตะ (ขึ้นกล่องแจ้ง error) = เข้าเซิฟเดิมก่อน ไม่ได้ค่อยหาเซิฟใหม่
+conns[#conns + 1] = GuiService.ErrorMessageChanged:Connect(function(msg)
+    if not guard.rejoin or guard.rejoining or msg == "" then return end
+    guard.rejoining = true
+    task.spawn(function()
+        queueReload()
+        task.wait(2)
+        pcall(function() TeleportService:TeleportToPlaceInstance(game.PlaceId, game.JobId, LocalPlayer) end)
+        for _ = 1, 30 do
+            task.wait(10)
+            queueReload()
+            pcall(function() TeleportService:Teleport(game.PlaceId, LocalPlayer) end)
+        end
+        guard.rejoining = false
+    end)
+end)
+
 ---------------------------------------------------------------- หน้าต่าง (Fluent)
 local FLUENT_URL = "https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"
 local FLUENT_CACHE = "AutoFish/fluent.lua" -- ใช้ไฟล์เดียวกับตัวตกปลา
@@ -248,10 +291,23 @@ local function loadFluent(useCache)
     return loadstring(source)()
 end
 -- เปิดผ่านตัวรวม (BaanLung.lua) จะส่งแท็บ + Fluent มาให้: ใช้แท็บนั้น ไม่สร้างหน้าต่างเอง
+-- ตัวรวมส่งมาได้ 2 แบบ: แท็บเดียว (ใส่ทุกหมวดในแท็บนั้น) หรือตาราง { cam, outfit, guard, tools } แยกแท็บละหมวด
+local TAB_KEYS = {
+    { key = "cam", title = "กล้อง", icon = "camera" },
+    { key = "outfit", title = "แต่งตัว", icon = "shirt" },
+    { key = "guard", title = "กันหลุด", icon = "shield" },
+    { key = "tools", title = "อ่านระบบ", icon = "file-search" },
+}
 local HUB_TAB, HUB_FLUENT = ...
 local Fluent, Window, Tabs
 if HUB_TAB then
-    Fluent, Tabs = HUB_FLUENT, { main = HUB_TAB }
+    Fluent = HUB_FLUENT
+    if typeof(HUB_TAB) == "table" and HUB_TAB.cam then
+        Tabs = HUB_TAB
+    else
+        Tabs = {}
+        for _, t in ipairs(TAB_KEYS) do Tabs[t.key] = HUB_TAB end
+    end
 else
     local ok
     ok, Fluent = pcall(loadFluent, true)
@@ -272,17 +328,18 @@ else
         Title = "ทั่วไป",
         SubTitle = "Misc",
         TabWidth = 150,
-        Size = UDim2.fromOffset(540, 320),
+        Size = UDim2.fromOffset(560, 360),
         Acrylic = false,
         Theme = "Darker",
         MinimizeKey = Enum.KeyCode.H,
     })
-    Tabs = {
-        main = Window:AddTab({ Title = "หลัก", Icon = "home" }),
-    }
+    Tabs = {}
+    for _, t in ipairs(TAB_KEYS) do
+        Tabs[t.key] = Window:AddTab({ Title = t.title, Icon = t.icon })
+    end
 end
 
-local section = Tabs.main:AddSection("ฟรีแคม")
+local section = Tabs.cam:AddSection("ฟรีแคม")
 local freecamToggle = section:AddToggle("MiscFreecam", {
     Title = "ฟรีแคม",
     Description = "WASD เลื่อนกล้อง • Q/E ลง/ขึ้น • คลิกขวาค้างหมุนกล้อง • Shift เร็วขึ้น (ตัวละครอยู่ที่เดิม งานอื่นทำต่อได้)",
@@ -314,7 +371,7 @@ section:AddSlider("MiscFreecamSpeed", {
     cam.speed = v
 end)
 
-local outfitSection = Tabs.main:AddSection("สุ่มชุด")
+local outfitSection = Tabs.outfit:AddSection("สุ่มชุด")
 outfitSection:AddButton({
     Title = "สุ่มชุดเลย",
     Description = "ลองชุดสุ่มจากร้านในเกม (ผม หมวก เครื่องประดับ เสื้อ กางเกง รองเท้า สีผิว) คนอื่นเห็นด้วย",
@@ -352,6 +409,49 @@ outfitSection:AddSlider("MiscOutfitEvery", {
 }):OnChanged(function(v)
     outfit.every = v
 end)
+
+local guardSection = Tabs.guard:AddSection("กันหลุด")
+guardSection:AddToggle("MiscAntiAfk", {
+    Title = "กันโดนเตะตอนยืนนิ่ง (AFK)",
+    Description = "ยืนนิ่งเกิน 20 นาทีเกมจะเตะ เปิดไว้จะไม่โดน",
+    Default = true,
+}):OnChanged(function(v)
+    guard.afk = v
+end)
+guardSection:AddToggle("MiscRejoin", {
+    Title = "หลุดแล้วเข้าเซิฟใหม่เอง",
+    Description = "ขึ้นกล่องหลุด/โดนเตะ = เข้าเซิฟเดิม ถ้าเต็มหรือปิดไปแล้วจะหาเซิฟใหม่",
+    Default = false,
+}):OnChanged(function(v)
+    guard.rejoin = v
+end)
+guardSection:AddToggle("MiscRejoinReload", {
+    Title = "เข้าใหม่แล้วเปิดสคริปต์ให้เอง",
+    Description = "ต้องกดเปิดงานเองอีกรอบ (ทุกอย่างเริ่มปิด)",
+    Default = true,
+}):OnChanged(function(v)
+    guard.reload = v
+end)
+
+local dumpSection = Tabs.tools:AddSection("อ่านระบบเซิฟ")
+local dumping = false
+dumpSection:AddButton({
+    Title = "อ่านระบบเซิฟนี้",
+    Description = "เซฟรีโมท ค่าในตัวเรา ปุ่ม E ในแมพ และโค้ดฝั่งเรา ไว้ที่โฟลเดอร์ GameDump/<PlaceId> (ใช้เวลาเป็นนาที)",
+    Callback = function()
+        if dumping then return end
+        dumping = true
+        task.spawn(function()
+            local ok, err = pcall(function()
+                loadstring(game:HttpGet(BASE .. "Dump.lua"))()
+            end)
+            if not ok then
+                Fluent:Notify({ Title = "อ่านระบบเซิฟ", Content = "ไม่สำเร็จ: " .. tostring(err), Duration = 6 })
+            end
+            dumping = false
+        end)
+    end,
+})
 
 if Window then Window:SelectTab(1) end
 
