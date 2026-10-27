@@ -4,7 +4,10 @@
 --   ทั่วไป: กล้อง / ลดแลค / แต่งตัว / กันหลุด & เซิฟ / อ่านระบบ
 -- แต่ละงานยังเป็นไฟล์ของมันเอง ตัวนี้สร้างแท็บตามลำดับก่อน แล้วโหลดไฟล์มาใส่
 -- ไฟล์ที่มีหลายหมวดได้ตาราง { ชื่อหมวดในไฟล์ = แท็บ } ไป (หลายไฟล์ใช้แท็บเดียวกันได้)
+-- แมพอื่น (ไม่ใช่บ้านลุง): โหลดเฉพาะแท็บที่ใช้ได้ทุกแมพ (any = true) งานของบ้านลุงจะรอของในแมพที่ไม่มีวันมา
 local BASE = "https://raw.githubusercontent.com/Noblesse779/RobloxLoader/main/"
+local BAANLUNG_GAME = 10610397754 -- GameId ของบ้านลุง (ทุกเซิฟ/ทุกเพลซในเกมเดียวกัน)
+local inBaanLung = game.GameId == BAANLUNG_GAME
 local TABS = {
     { key = "elephant", title = "ลากซุง", icon = "truck" },
     { key = "rice", title = "ปลูกข้าว", icon = "leaf" },
@@ -15,11 +18,11 @@ local TABS = {
     { key = "sell", title = "ขายของ", icon = "shopping-cart" },
     { key = "daily", title = "เงินฟรี", icon = "gift" },
     { key = "upgrade", title = "อัปเกรด", icon = "trending-up" },
-    { key = "cam", title = "กล้อง", icon = "camera" },
-    { key = "perf", title = "ลดแลค", icon = "gauge" },
-    { key = "outfit", title = "แต่งตัว", icon = "shirt" },
-    { key = "guard", title = "กันหลุด & เซิฟ", icon = "shield" },
-    { key = "tools", title = "อ่านระบบ", icon = "file-search" },
+    { key = "cam", title = "กล้อง", icon = "camera", any = true },
+    { key = "perf", title = "ลดแลค", icon = "gauge", any = true },
+    { key = "outfit", title = "แต่งตัว", icon = "shirt", any = true },
+    { key = "guard", title = "กันหลุด & เซิฟ", icon = "shield", any = true },
+    { key = "tools", title = "อ่านระบบ", icon = "file-search", any = true },
 }
 local JOBS = {
     { file = "ElephantJob.lua", tab = "elephant" },
@@ -30,7 +33,7 @@ local JOBS = {
     { file = "Airdrop.lua", tab = "airdrop" },
     { file = "Seller.lua", tab = "sell" },
     { file = "Upgrade.lua", tabs = { daily = "daily", upgrade = "upgrade", server = "guard" } },
-    { file = "Misc.lua", tabs = { cam = "cam", perf = "perf", outfit = "outfit", guard = "guard", tools = "tools" } },
+    { file = "Misc.lua", any = true, tabs = { cam = "cam", perf = "perf", outfit = "outfit", guard = "guard", tools = "tools" } },
 }
 
 local env = (typeof(getgenv) == "function" and getgenv()) or _G
@@ -84,7 +87,7 @@ env.BaanLungFluent = Fluent
 
 local Window = Fluent:CreateWindow({
     Title = "บ้านลุง",
-    SubTitle = "งานหาเงิน • ขาย & อัปเกรด • ทั่วไป",
+    SubTitle = inBaanLung and "งานหาเงิน • ขาย & อัปเกรด • ทั่วไป" or "ทั่วไป (แมพนี้ไม่ใช่บ้านลุง)",
     TabWidth = 150,
     Size = UDim2.fromOffset(580, 460),
     Acrylic = false,
@@ -94,11 +97,14 @@ local Window = Fluent:CreateWindow({
 
 local tabs, titles = {}, {}
 for _, t in ipairs(TABS) do
-    tabs[t.key] = Window:AddTab({ Title = t.title, Icon = t.icon })
-    titles[t.key] = t.title
+    if inBaanLung or t.any then
+        tabs[t.key] = Window:AddTab({ Title = t.title, Icon = t.icon })
+        titles[t.key] = t.title
+    end
 end
 
 for _, job in ipairs(JOBS) do
+    if not (inBaanLung or job.any) then continue end
     local tab, title
     if job.tabs then
         tab = {}
