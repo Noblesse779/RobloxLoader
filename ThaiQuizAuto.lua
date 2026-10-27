@@ -1,4 +1,4 @@
--- ThaiQuizAuto V6 | WindUI by Footagesus (MIT), native UI fallback
+-- ThaiQuizAuto V7 | WindUI by Footagesus (MIT), native UI fallback
 -- https://github.com/Footagesus/WindUI
 -- Dictionary-based answers; server decides validity. No Time Attack support.
 local RS = game:GetService("ReplicatedStorage")
@@ -41,7 +41,7 @@ local shell = make("ScreenGui", {
 }, player:WaitForChild("PlayerGui"))
 local launcher = make("TextButton", {
     Size = UDim2.fromOffset(180, 40), Position = UDim2.new(0, 18, 0.18, 0),
-    Text = "ก–ฮ V6 • กำลังโหลด UI", TextSize = 15,
+    Text = "ก–ฮ V7 • กำลังโหลด UI", TextSize = 15,
     Font = Enum.Font.Gotham, TextColor3 = Color3.fromRGB(255,255,255),
     BackgroundColor3 = Color3.fromRGB(28, 38, 57), BorderSizePixel = 0,
 }, shell)
@@ -200,7 +200,7 @@ else
     pcall(function()WindUI:SetParent(player.PlayerGui)end)
     hint.Text="พร้อมใช้งาน • แตะปุ่มเพื่อเปิดเมนู"
 end
-launcher.Text="ก–ฮ V6 • เปิดเมนู"
+launcher.Text="ก–ฮ V7 • เปิดเมนู"
 
 
 local words = {
@@ -438,7 +438,7 @@ end
 local curated={
     worldcity="หาดใหญ่ หางโจว",
     sport="หมากรุก หมากล้อม หมากฮอส หมากเก็บ",
-    thaifood="ห่อหมก หมูปิ้ง หอยทอด หมูสะเต๊ะ ห่อหมกปลา หมูทอด หมูกรอบ หมูแดดเดียว หมูย่าง หอยจ๊อ หลนเต้าเจี้ยว ห่อหมกทะเล หอยลายผัดพริกเผา แกงส้ม กะเพราหมู กุ้งอบวุ้นเส้น ไก่ย่าง ข้าวผัด ข้าวมันไก่ ข้าวขาหมู ขนมจีน ข้าวซอย คอหมูย่าง คั่วกลิ้ง คะน้าหมูกรอบ งบปลา จิ้มจุ่ม ฉู่ฉี่ปลา ฉู่ฉี่กุ้ง ชะอมทอด ซุปหน่อไม้ ซี่โครงหมูทอด ซี่โครงหมูตุ๋น ดักแด้ทอด ดอกขจรผัดไข่ ต้มยำกุ้ง ต้มข่าไก่ ต้มจืด ถุงทอง ถั่วงอกผัดเต้าหู้ ถั่วผัดพริกแกง ทอดมันปลา ทอดมันกุ้ง น้ำพริก น้ำตกหมู น้ำเงี้ยว เนื้อแดดเดียว บะหมี่เกี๊ยว บะหมี่หมูแดง ปลาราดพริก ปูผัดผงกะหรี่ เป็ดพะโล้ ผัดไทย ผัดซีอิ๊ว ผัดกะเพรา ผัดผักบุ้ง พะแนง พะโล้ ฟักทองผัดไข่ ฟักเขียวต้มไก่ มัสมั่น ม้าฮ่อ เมี่ยงคำ มาม่าผัด ยำวุ้นเส้น ยำหมูยอ ยำปลาดุกฟู ราดหน้า โรตี ลาบ ลาบหมู วุ้นเส้นผัดไข่ วุ้นเส้นอบกุ้ง ส้มตำ สาคูไส้หมู เสือร้องไห้ ไส้อั่ว อ่อมไก่ อ่องปู ออส่วน",
+    thaifood="จับฉ่าย จอผักกาด แจ่วฮ้อน แจ่วบอง แจงลอน จังลอน จ๊อปู จ้อปู จิ้นส้ม จิ๊นส้ม ห่อหมก หมูปิ้ง หอยทอด หมูสะเต๊ะ ห่อหมกปลา หมูทอด หมูกรอบ หมูแดดเดียว หมูย่าง หอยจ๊อ หลนเต้าเจี้ยว ห่อหมกทะเล หอยลายผัดพริกเผา แกงส้ม กะเพราหมู กุ้งอบวุ้นเส้น ไก่ย่าง ข้าวผัด ข้าวมันไก่ ข้าวขาหมู ขนมจีน ข้าวซอย คอหมูย่าง คั่วกลิ้ง คะน้าหมูกรอบ งบปลา จิ้มจุ่ม ฉู่ฉี่ปลา ฉู่ฉี่กุ้ง ชะอมทอด ซุปหน่อไม้ ซี่โครงหมูทอด ซี่โครงหมูตุ๋น ดักแด้ทอด ดอกขจรผัดไข่ ต้มยำกุ้ง ต้มข่าไก่ ต้มจืด ถุงทอง ถั่วงอกผัดเต้าหู้ ถั่วผัดพริกแกง ทอดมันปลา ทอดมันกุ้ง น้ำพริก น้ำตกหมู น้ำเงี้ยว เนื้อแดดเดียว บะหมี่เกี๊ยว บะหมี่หมูแดง ปลาราดพริก ปูผัดผงกะหรี่ เป็ดพะโล้ ผัดไทย ผัดซีอิ๊ว ผัดกะเพรา ผัดผักบุ้ง พะแนง พะโล้ ฟักทองผัดไข่ ฟักเขียวต้มไก่ มัสมั่น ม้าฮ่อ เมี่ยงคำ มาม่าผัด ยำวุ้นเส้น ยำหมูยอ ยำปลาดุกฟู ราดหน้า โรตี ลาบ ลาบหมู วุ้นเส้นผัดไข่ วุ้นเส้นอบกุ้ง ส้มตำ สาคูไส้หมู เสือร้องไห้ ไส้อั่ว อ่อมไก่ อ่องปู ออส่วน",
     fruit="จัน จันทน์ ซาลัก เดื่อ ดิวเบอร์รี ยอ ยอบ้าน ยอป่า",
     thaidessert="จ่ามงกุฎ จาวตาลเชื่อม นางเล็ด นิ่มนวล พระพาย พุทราเชื่อม ยิ้มเสน่ห์",
     snack="ช็อกโกแลต ชีสบอล ชูโรส ซาลาเปา ซูชิ โดนัท ดองผลไม้ เต้าหู้ทอด ตือฮวน ถั่วทอด ถั่วลิสงอบ ถั่วลิสงต้ม ทอดมัน ทาโกะยากิ โรตี โรตีกรอบ วาฟเฟิล หอยทอด หมูปิ้ง หมูสะเต๊ะ ไส้กรอก อัลมอนด์อบ",
@@ -551,7 +551,7 @@ end
 
 answer=function()
     cancel()
-    if legacyRunning then setStatus("มีสคริปต์รุ่นเก่าทำงานอยู่ — เข้าเกมใหม่ก่อนใช้ V6");return end
+    if legacyRunning then setStatus("มีสคริปต์รุ่นเก่าทำงานอยู่ — เข้าเกมใหม่ก่อนใช้ V7");return end
     if not isOpen()then setStatus("รอช่วงตอบคำถามของรอบใหม่");return end
     local token=generation
     local roundLetter,roundCategories=letter,categories
@@ -650,7 +650,7 @@ answer=function()
     end)
 end
 
-statusCard = Main:Paragraph({ Title = "สถานะ • V6", Desc = statusText })
+statusCard = Main:Paragraph({ Title = "สถานะ • V7", Desc = statusText })
 roundCard = Main:Paragraph({ Title = "รอบปัจจุบัน", Desc = "รอเริ่มรอบ" })
 Main:Toggle({
     Title = "ตอบคำถามอัตโนมัติ",
@@ -799,8 +799,8 @@ if current and current.canType and type(current.categories) == "table"
     setStatus("พบรอบที่กำลังเล่น — เปิดสวิตช์เพื่อเริ่มตอบ")
 end
 player:SetAttribute("__ThaiQuizAutoRunning", true)
-log("เปิดหน้าต่าง V6 แล้ว — เปิดสวิตช์เพื่อใช้งาน")
-if legacyRunning then setStatus("มีสคริปต์รุ่นเก่าทำงานอยู่ — เข้าเกมใหม่ก่อนใช้ V6")end
+log("เปิดหน้าต่าง V7 แล้ว — เปิดสวิตช์เพื่อใช้งาน")
+if legacyRunning then setStatus("มีสคริปต์รุ่นเก่าทำงานอยู่ — เข้าเกมใหม่ก่อนใช้ V7")end
 startVocabulary()
 return controller
 
