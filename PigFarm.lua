@@ -194,11 +194,19 @@ local function pickPig(maxDist)
 end
 
 ---------------------------------------------------------------- เดิน / วาร์ป
+-- เดินแล้วไม่ขยับเกิน 1 วิ (ติดโต๊ะ/ร่ม/รั้ว) = กระโดด แล้วหาทางอ้อมแม้หมูอยู่ใกล้
+local stuckAt, lastWalkPos, lastWalkMove = 0, nil, 0
 local function walkToward(pos)
     local hum, hrp = getHum(), getRoot()
     if not (hum and hrp) then return end
-    -- ไกล: หาทางอ้อม ใกล้: เดินตรงเข้าไป (หมูขยับตลอด หาทางใหม่บ่อยๆ ไม่คุ้ม)
-    if (pos - hrp.Position).Magnitude > 25 then
+    if not lastWalkPos or (hrp.Position - lastWalkPos).Magnitude > 1 then
+        lastWalkPos, lastWalkMove = hrp.Position, os.clock()
+    elseif os.clock() - lastWalkMove > 1 then
+        hum.Jump = true
+        stuckAt, lastWalkMove = os.clock(), os.clock()
+    end
+    -- ไกล หรือเพิ่งติด: หาทางอ้อม  ใกล้: เดินตรงเข้าไป (หมูขยับตลอด หาทางใหม่บ่อยๆ ไม่คุ้ม)
+    if (pos - hrp.Position).Magnitude > 25 or os.clock() - stuckAt < 2 then
         local path = PathfindingService:CreatePath({ AgentRadius = 2, AgentHeight = 5, AgentCanJump = true, WaypointSpacing = 6 })
         if pcall(function() path:ComputeAsync(hrp.Position, pos) end) and path.Status == Enum.PathStatus.Success then
             local wps = path:GetWaypoints()
@@ -521,9 +529,32 @@ local function sellMeat()
     return select(3, bagState()) < before
 end
 
+-- เกิดใหม่ (ตาย/รีตัว): เดินตรงไปข้างหน้าก่อน พ้นโต๊ะ/ร่มหน้าร้านอาวุธตรงจุดเกิด ค่อยไปหาหมู
+local lastChar = LocalPlayer.Character
+local function leaveSpawn()
+    local char = LocalPlayer.Character
+    if char == lastChar then return end
+    lastChar = char
+    if not auto.walk then return end
+    local hum, hrp = getHum(), getRoot()
+    if not (hum and hrp and hum.Health > 0) then return end
+    status = "เพิ่งเกิด เดินตรงออกจากจุดเกิดก่อน..."
+    local look = Vector3.new(hrp.CFrame.LookVector.X, 0, hrp.CFrame.LookVector.Z)
+    if look.Magnitude < 0.1 then return end
+    local goal = hrp.Position + look.Unit * 20
+    hum:MoveTo(goal)
+    local t = os.clock()
+    while alive() and auto.on and os.clock() - t < 4 do
+        hrp = getRoot()
+        if not hrp or Vector3.new(goal.X - hrp.Position.X, 0, goal.Z - hrp.Position.Z).Magnitude < 3 then break end
+        task.wait(0.1)
+    end
+end
+
 local function autoLoop()
     while alive() and auto.on do
         local hum = getHum()
+        if not env.AirdropBusy then pcall(leaveSpawn) end
         -- สลับกับลากซุง (BossState.Phase: Warning = ป้ายนับถอยหลังบอสจะเกิด / Active = บอสอยู่ / Recovery = พักสนาม)
         --   ป้ายเตือนขึ้น หรือบอสเลือดยังเกิน 20% = ไปลากซุง
         --   บอสเลือดเหลือ 20% = ลงช้างมาช่วยตีบอส / บอสตาย = ลงช้างมาตีหมูต่อ
