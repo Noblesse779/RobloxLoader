@@ -32,6 +32,7 @@ local auto = {
     sellWalk = true, -- เดินไปขาย (false = วาร์ปไปขาย)
     sellNow = false, -- กดปุ่ม ขายตอนนี้
     sold = 0, -- ขายได้กี่บาทแล้ว
+    bossSwitch = false, -- บอสเกิด = ปล่อยให้แท็บลากซุงทำงาน บอสหาย = กลับมาตีหมู
 }
 
 local function getRoot()
@@ -523,7 +524,16 @@ end
 local function autoLoop()
     while alive() and auto.on do
         local hum = getHum()
-        if env.AirdropBusy then
+        -- สลับกับลากซุง: บอกแท็บลากซุงว่าหมูต้องการเวลาไหม (ไม่มีบอส = หมูทำ / มีบอส = ช้างทำ)
+        local bossUp = boss() ~= nil
+        env.PigWantsTime = auto.bossSwitch and not bossUp
+        if auto.bossSwitch and bossUp then
+            status = "ราชาหมูเกิด ไปลากซุงก่อน (บอสหายแล้วกลับมาตีหมู)"
+            task.wait(1)
+        elseif auto.bossSwitch and env.ElephantDelivering then
+            status = "บอสหายแล้ว รอส่งซุงเที่ยวนี้ให้เสร็จก่อน..."
+            task.wait(1)
+        elseif env.AirdropBusy then
             status = "พักให้แอร์ดรอป..."
             task.wait(0.5)
         elseif not (hum and hum.Health > 0) then
@@ -556,6 +566,7 @@ local function autoLoop()
         end
         task.wait(0.1)
     end
+    env.PigWantsTime = false
     local hum, hrp = getHum(), getRoot()
     if hum and hrp and auto.walk then hum:MoveTo(hrp.Position) end
 end
@@ -625,6 +636,14 @@ section:AddToggle("PigAuto", {
 }):OnChanged(function(v)
     auto.on = v
     if v then task.spawn(autoLoop) end
+end)
+section:AddToggle("PigBossSwitch", {
+    Title = "บอสเกิด -> ไปลากซุง, บอสหาย -> กลับมาตีหมู",
+    Description = "เปิดคู่กับ ตีหมูอัตโนมัติ + ลากซุงอัตโนมัติ (แท็บลากซุง) ส่งซุงเที่ยวที่ขับอยู่ให้เสร็จก่อนค่อยกลับมา",
+    Default = false,
+}):OnChanged(function(v)
+    auto.bossSwitch = v
+    if not v then env.PigWantsTime = false end
 end)
 section:AddToggle("PigAura", {
     Title = "Kill Aura",
