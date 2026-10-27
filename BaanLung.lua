@@ -1,6 +1,6 @@
 -- ตัวรวมแมพบ้านลุง: หน้าต่างเดียว แท็บเรียงตามหมวด
 --   งานหาเงิน: ลากซุง / ปลูกข้าว / ตีหมู / เล็งมอน / ขุดเหมือง / ตัดไม้
---   ขาย & อัปเกรด: แอร์ดรอป / ขายของ / เงินฟรี / อัปเกรด
+--   ขาย & อัปเกรด: แอร์ดรอป / ขายของ / เงินฟรี / อัปเกรด / มินิเกม
 --   ทั่วไป: กล้อง / ลดแลค / แต่งตัว / กันหลุด & เซิฟ / อ่านระบบ
 -- แต่ละงานยังเป็นไฟล์ของมันเอง ตัวนี้สร้างแท็บตามลำดับก่อน แล้วโหลดไฟล์มาใส่
 -- ไฟล์ที่มีหลายหมวดได้ตาราง { ชื่อหมวดในไฟล์ = แท็บ } ไป (หลายไฟล์ใช้แท็บเดียวกันได้)
@@ -19,6 +19,7 @@ local TABS = {
     { key = "sell", title = "ขายของ", icon = "shopping-cart" },
     { key = "daily", title = "เงินฟรี", icon = "gift" },
     { key = "upgrade", title = "อัปเกรด", icon = "trending-up" },
+    { key = "minigame", title = "มินิเกม", icon = "gamepad-2" },
     { key = "cam", title = "กล้อง", icon = "camera", any = true },
     { key = "perf", title = "ลดแลค", icon = "gauge", any = true },
     { key = "outfit", title = "แต่งตัว", icon = "shirt", any = true },
@@ -34,6 +35,7 @@ local JOBS = {
     { file = "Airdrop.lua", tab = "airdrop" },
     { file = "Seller.lua", tab = "sell" },
     { file = "Upgrade.lua", tabs = { daily = "daily", upgrade = "upgrade", server = "guard" } },
+    { file = "Minigames.lua", tab = "minigame" },
     { file = "Misc.lua", any = true, tabs = { cam = "cam", perf = "perf", outfit = "outfit", guard = "guard", tools = "tools" } },
 }
 
@@ -78,7 +80,7 @@ if not ok or typeof(Fluent) ~= "table" then
 end
 
 -- ปิดหน้าต่างเก่าทั้งหมด (ตัวรวมรอบก่อน / ตัวเดี่ยวที่เปิดค้าง)
-for _, key in ipairs({ "BaanLungFluent", "ElephantFluent", "RiceFluent", "PigFluent", "AirdropFluent", "MiningFluent", "WoodFluent", "SellerFluent", "UpgradeFluent", "MiscFluent" }) do
+for _, key in ipairs({ "BaanLungFluent", "ElephantFluent", "RiceFluent", "PigFluent", "AirdropFluent", "MiningFluent", "WoodFluent", "SellerFluent", "UpgradeFluent", "MinigameFluent", "MiscFluent" }) do
     if env[key] then
         pcall(function() env[key]:Destroy() end)
         env[key] = nil
