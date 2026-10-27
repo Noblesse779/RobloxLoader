@@ -23,7 +23,7 @@ local Net = ReplicatedStorage:WaitForChild("LES_AirDrop")
 local PROMPT_RANGE = 15
 
 local status = "-"
-local auto = { on = false, walk = false, got = 0, type = false } -- type = พิมพ์รหัสให้
+local auto = { on = false, walk = false, got = 0, type = false, reset = true } -- type = พิมพ์รหัสให้ / reset = จบแล้วรีตัว
 
 local function getRoot()
     local char = LocalPlayer.Character
@@ -225,6 +225,19 @@ local function handle(prompt)
     else
         status = "จบแอร์ดรอป (" .. tostring(session.result or "ออกเอง") .. ") กลับไปทำงานต่อ"
     end
+    -- รีตัว: ตายแล้วเกิดใหม่ที่จุดเกิด (ไม่ยืนค้างที่กล่อง) งานอื่นรอจนเกิดใหม่ก่อน
+    local oldChar = LocalPlayer.Character
+    if auto.reset and oldChar and not riding() then
+        status = status .. " (รีตัว)"
+        local hum = getHum()
+        if hum then hum.Health = 0 end
+        pcall(function() oldChar:BreakJoints() end)
+        waitFor(15, function()
+            local c = LocalPlayer.Character
+            return c ~= oldChar and c ~= nil and c:FindFirstChild("HumanoidRootPart") ~= nil
+        end)
+        task.wait(1)
+    end
     env.AirdropBusy = false
 end
 
@@ -315,6 +328,13 @@ section:AddToggle("AirdropType", {
     Default = false,
 }):OnChanged(function(v)
     auto.type = v
+end)
+section:AddToggle("AirdropReset", {
+    Title = "เก็บเสร็จแล้วรีตัว",
+    Description = "จบแอร์ดรอปแล้วตายเกิดใหม่ที่จุดเกิด งานอื่นรอจนเกิดใหม่ค่อยทำต่อ",
+    Default = true,
+}):OnChanged(function(v)
+    auto.reset = v
 end)
 section:AddDropdown("AirdropMove", {
     Title = "วิธีไป",

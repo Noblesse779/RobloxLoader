@@ -240,6 +240,12 @@ end
 ---------------------------------------------------------------- ลากซุงอัตโนมัติ
 local auto = { on = false, delivered = 0 }
 
+-- ตีหมูขอเวลา (เปิด "บอสเกิด -> ไปลากซุง" ในแท็บตีหมู และไม่มีบอส) = พักลากซุง
+-- ส่งซุงเที่ยวที่ขับอยู่ให้เสร็จก่อน (env.ElephantDelivering) แล้วค่อยลงจากช้างให้หมูทำต่อ
+local function paused()
+    return env.PigWantsTime == true
+end
+
 -- เกมส่ง Input เองทุก 0.05-0.1 วิ (คันเร่งจากปุ่ม W/S) ถ้าไม่ดักไว้ มันจะส่ง "หยุด" ทับของเรา
 -- ตอนขับเอง: เปลี่ยนเป็น คันเร่ง/ทิศ ของสคริปต์ (env.ElephantDrive) ไม่ดัก = ส่งตามปกติ
 if not env.ElephantHook5 and typeof(hookmetamethod) == "function"
@@ -287,6 +293,7 @@ local function driveTo(pos, arrive, done)
     local result = false
     while alive() and auto.on do
         if done and done() then result = true break end
+        if paused() and not env.ElephantDelivering then break end -- ขากลับ: หมูขอเวลาแล้ว ไม่ต้องขี่กลับ
         local mount, root = myMount()
         if not root then break end
         local ground = root.Position - Vector3.new(0, (mount:GetAttribute("GroundOffset") or 6.91) - 0.2, 0)
@@ -378,7 +385,11 @@ end
 local function autoLoop()
     while alive() and auto.on do
         local st = jobState.status
-        if not jobActive() and not riding() then
+        if paused() and not (riding() and st == "Active") then
+            if riding() then dismount() end
+            status = "พักให้ตีหมู (รอราชาหมูเกิดค่อยมาลากซุง)"
+            task.wait(1)
+        elseif not jobActive() and not riding() then
             status = "ยังไม่มีงาน: ไปรับงาน"
             if not acceptJob() then task.wait(3) end
         elseif not riding() then
@@ -387,9 +398,12 @@ local function autoLoop()
         elseif st == "Active" and jobState.cframe then
             local idx = jobState.index
             status = "ขับช้างไปจุดส่ง " .. tostring(idx)
-            if driveTo(jobState.cframe.Position, 0, function()
+            env.ElephantDelivering = true
+            local delivered = driveTo(jobState.cframe.Position, 0, function()
                 return jobState.status ~= "Active" or jobState.index ~= idx
-            end) then
+            end)
+            env.ElephantDelivering = false
+            if delivered then
                 auto.delivered += 1
                 status = "ส่งจุด " .. tostring(idx) .. " แล้ว"
             end
@@ -401,13 +415,14 @@ local function autoLoop()
                 status = "ส่งซุงแล้ว ขี่กลับไปหาตาโชค"
                 driveTo(back, 10, nil)
             end
-            if auto.on and alive() and jobState.status ~= "Active" then
+            if auto.on and alive() and jobState.status ~= "Active" and not paused() then
                 if not acceptJob() then task.wait(2) end
             end
         end
         task.wait(0.2)
     end
     env.ElephantDrive = nil
+    env.ElephantDelivering = false
 end
 
 ---------------------------------------------------------------- หน้าต่าง (Fluent)
