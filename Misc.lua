@@ -2,6 +2,7 @@
 -- ฟรีแคม: กล้องลอยอิสระ ตัวละครอยู่ที่เดิม งานอื่นทำต่อได้ปกติ
 -- สุ่มชุด: ใช้ปุ่ม "ลอง" ของร้านในเกมเอง (AvatarAction "Try") ไม่ได้ซื้อของ
 -- กันหลุด: กันโดนเตะตอนยืนนิ่ง 20 นาที + หลุดแล้วเข้าเซิฟใหม่เอง
+-- ลดแลค: ปิดเงา/เอฟเฟกต์/พื้นผิว/อนุภาค ลดคุณภาพภาพ จำกัด FPS ปิดภาพ 3D ได้ (ทุกอย่างคืนค่าเดิมได้ตอนปิด)
 -- อ่านระบบเซิฟ: รัน Dump.lua เซฟรีโมท/ค่าผู้เล่น/โค้ดฝั่งเรา ลงโฟลเดอร์ GameDump
 
 local Players = game:GetService("Players")
@@ -268,6 +269,148 @@ conns[#conns + 1] = GuiService.ErrorMessageChanged:Connect(function(msg)
     end)
 end)
 
+---------------------------------------------------------------- ลดแลค
+local Lighting = game:GetService("Lighting")
+local perf = { low = false, hide = false, cap = 0, no3d = false }
+local saved = setmetatable({}, { __mode = "k" }) -- ค่าเดิม { [ของ] = { prop = ค่า } } ไว้คืนตอนปิด
+local savedLighting, savedQuality
+
+local function remember(inst, props)
+    local t = saved[inst]
+    if not t then t = {}; saved[inst] = t end
+    for prop, value in pairs(props) do
+        if t[prop] == nil then
+            local ok, old = pcall(function() return inst[prop] end)
+            if ok then t[prop] = old end
+        end
+        pcall(function() inst[prop] = value end)
+    end
+end
+
+-- ลดภาระของแต่ละชิ้น: พื้นผิวเรียบ ไม่มีเงา ปิดรูปแปะ/อนุภาค
+local function lighten(inst)
+    -- ไม่เปลี่ยน Material เพราะมีผลกับแรงเสียดทาน/น้ำหนัก (ตัวละคร ช้าง รถ) คุณภาพภาพระดับ 1 ลดพื้นผิวให้อยู่แล้ว
+    if inst:IsA("BasePart") then
+        remember(inst, { CastShadow = false, Reflectance = 0 })
+    elseif inst:IsA("Decal") or inst:IsA("Texture") then
+        remember(inst, { Transparency = 1 })
+    elseif inst:IsA("ParticleEmitter") or inst:IsA("Trail") or inst:IsA("Beam") or inst:IsA("Smoke")
+        or inst:IsA("Fire") or inst:IsA("Sparkles") then
+        remember(inst, { Enabled = false })
+    elseif inst:IsA("PointLight") or inst:IsA("SpotLight") or inst:IsA("SurfaceLight") then
+        remember(inst, { Shadows = false })
+    end
+end
+
+local function restoreAll()
+    for inst, props in pairs(saved) do
+        for prop, value in pairs(props) do
+            pcall(function() inst[prop] = value end)
+        end
+    end
+    table.clear(saved)
+end
+
+local function setLow(on)
+    if on then
+        savedLighting = savedLighting or {
+            GlobalShadows = Lighting.GlobalShadows, FogEnd = Lighting.FogEnd,
+            Brightness = Lighting.Brightness, EnvironmentDiffuseScale = Lighting.EnvironmentDiffuseScale,
+            EnvironmentSpecularScale = Lighting.EnvironmentSpecularScale,
+        }
+        Lighting.GlobalShadows = false
+        Lighting.FogEnd = 1e9
+        Lighting.EnvironmentDiffuseScale = 0
+        Lighting.EnvironmentSpecularScale = 0
+        for _, e in ipairs(Lighting:GetDescendants()) do
+            if e:IsA("PostEffect") or e:IsA("Atmosphere") or e:IsA("Clouds") then
+                if e:IsA("Atmosphere") then
+                    remember(e, { Density = 0, Haze = 0, Glare = 0 })
+                else
+                    remember(e, { Enabled = false })
+                end
+            end
+        end
+        local terrain = workspace:FindFirstChildOfClass("Terrain")
+        if terrain then
+            remember(terrain, { WaterWaveSize = 0, WaterWaveSpeed = 0, WaterReflectance = 0, WaterTransparency = 0.9, Decoration = false })
+        end
+        pcall(function()
+            savedQuality = savedQuality or settings().Rendering.QualityLevel
+            settings().Rendering.QualityLevel = Enum.QualityLevel.Level01
+        end)
+        -- ของในแมพเยอะ ทำทีละชุดไม่ให้ค้าง
+        task.spawn(function()
+            for i, inst in ipairs(workspace:GetDescendants()) do
+                if not perf.low or not alive() then return end
+                lighten(inst)
+                if i % 400 == 0 then task.wait() end
+            end
+        end)
+    else
+        if savedLighting then
+            for k, v in pairs(savedLighting) do pcall(function() Lighting[k] = v end) end
+            savedLighting = nil
+        end
+        if savedQuality then
+            pcall(function() settings().Rendering.QualityLevel = savedQuality end)
+            savedQuality = nil
+        end
+        restoreAll()
+    end
+end
+
+conns[#conns + 1] = workspace.DescendantAdded:Connect(function(inst)
+    if perf.low then lighten(inst) end
+end)
+
+-- ซ่อนผู้เล่นอื่น (เฉพาะจอเรา) ไม่ต้องวาดตัวละคร/ชุด/เอฟเฟกต์ของคนอื่น
+local function hideCharacter(char, on)
+    for _, d in ipairs(char:GetDescendants()) do
+        if d:IsA("BasePart") or d:IsA("Decal") then
+            d.LocalTransparencyModifier = on and 1 or 0
+        end
+    end
+end
+-- เช็คทุก 1 วิ พอ (ทุกเฟรมจะกินเครื่องเอง) จับคนเกิดใหม่/ใส่ของใหม่ด้วย
+task.spawn(function()
+    while alive() do
+        if perf.hide then
+            for _, plr in ipairs(Players:GetPlayers()) do
+                if plr ~= LocalPlayer and plr.Character then hideCharacter(plr.Character, true) end
+            end
+        end
+        task.wait(1)
+    end
+end)
+local function setHide(on)
+    perf.hide = on
+    if not on then
+        for _, plr in ipairs(Players:GetPlayers()) do
+            if plr ~= LocalPlayer and plr.Character then hideCharacter(plr.Character, false) end
+        end
+    end
+end
+
+local function setCap(n)
+    perf.cap = n
+    if typeof(setfpscap) == "function" then pcall(setfpscap, n > 0 and n or 0) end
+end
+
+local function set3d(off)
+    perf.no3d = off
+    pcall(function() RunService:Set3dRenderingEnabled(not off) end)
+end
+
+-- รันใหม่/ปิด = คืนทุกอย่าง
+task.spawn(function()
+    while alive() do task.wait(1) end
+    if perf.low then perf.low = false; setLow(false) end
+    setHide(false)
+    if perf.cap > 0 then setCap(0) end
+    if perf.no3d then set3d(false) end
+end)
+
 ---------------------------------------------------------------- หน้าต่าง (Fluent)
 local FLUENT_URL = "https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"
 local FLUENT_CACHE = "AutoFish/fluent.lua" -- ใช้ไฟล์เดียวกับตัวตกปลา
@@ -294,6 +437,7 @@ end
 -- ตัวรวมส่งมาได้ 2 แบบ: แท็บเดียว (ใส่ทุกหมวดในแท็บนั้น) หรือตาราง { cam, outfit, guard, tools } แยกแท็บละหมวด
 local TAB_KEYS = {
     { key = "cam", title = "กล้อง", icon = "camera" },
+    { key = "perf", title = "ลดแลค", icon = "gauge" },
     { key = "outfit", title = "แต่งตัว", icon = "shirt" },
     { key = "guard", title = "กันหลุด", icon = "shield" },
     { key = "tools", title = "อ่านระบบ", icon = "file-search" },
@@ -370,6 +514,36 @@ section:AddSlider("MiscFreecamSpeed", {
 }):OnChanged(function(v)
     cam.speed = v
 end)
+
+local perfSection = (Tabs.perf or Tabs.cam):AddSection("บูท FPS / ลดแลค (เห็นแค่จอเรา ปิดแล้วกลับเหมือนเดิม)")
+perfSection:AddToggle("MiscLowGfx", {
+    Title = "กราฟิกต่ำสุด",
+    Description = "ปิดเงา หมอก เอฟเฟกต์แสง น้ำกระเพื่อม หญ้า พื้นผิว รูปแปะ อนุภาค ควัน ไฟ + คุณภาพภาพระดับ 1",
+    Default = false,
+}):OnChanged(function(v)
+    if perf.low == v then return end
+    perf.low = v
+    setLow(v)
+end)
+perfSection:AddToggle("MiscHidePlayers", {
+    Title = "ซ่อนผู้เล่นอื่น",
+    Description = "ไม่วาดตัวละคร ชุด และเอฟเฟกต์ของคนอื่น (คนเยอะเซิฟจะลื่นขึ้นมาก)",
+    Default = false,
+}):OnChanged(setHide)
+perfSection:AddDropdown("MiscFpsCap", {
+    Title = "จำกัด FPS",
+    Description = "ยิ่งต่ำยิ่งกินเครื่องน้อย เครื่องไม่ร้อน (ต้องใช้ตัวรันที่มี setfpscap)",
+    Values = { "ไม่จำกัด", "60", "30", "15" },
+    Multi = false,
+    Default = 1,
+}):OnChanged(function(v)
+    setCap(tonumber(v) or 0)
+end)
+perfSection:AddToggle("MiscNo3D", {
+    Title = "ปิดภาพ 3D (จอดำ) สำหรับฟาร์ม AFK",
+    Description = "ไม่วาดแมพเลย กินเครื่องน้อยที่สุด สคริปต์ฟาร์มยังทำงานปกติ เมนูยังกดได้",
+    Default = false,
+}):OnChanged(set3d)
 
 local outfitSection = Tabs.outfit:AddSection("สุ่มชุด")
 outfitSection:AddButton({
