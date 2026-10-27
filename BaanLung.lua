@@ -4,6 +4,7 @@
 --   ทั่วไป: กล้อง / ลดแลค / แต่งตัว / กันหลุด & เซิฟ / อ่านระบบ
 -- แต่ละงานยังเป็นไฟล์ของมันเอง ตัวนี้สร้างแท็บตามลำดับก่อน แล้วโหลดไฟล์มาใส่
 -- ไฟล์ที่มีหลายหมวดได้ตาราง { ชื่อหมวดในไฟล์ = แท็บ } ไป (หลายไฟล์ใช้แท็บเดียวกันได้)
+-- แมพตกปลา (มี PlayerGui.FishingHud): เปิด AutoFish.lua แทน
 -- แมพอื่น (ไม่ใช่บ้านลุง): โหลดเฉพาะแท็บที่ใช้ได้ทุกแมพ (any = true) งานของบ้านลุงจะรอของในแมพที่ไม่มีวันมา
 local BASE = "https://raw.githubusercontent.com/Noblesse779/RobloxLoader/main/"
 local BAANLUNG_GAME = 10610397754 -- GameId ของบ้านลุง (ทุกเซิฟ/ทุกเพลซในเกมเดียวกัน)
@@ -70,6 +71,19 @@ local function loadFluent(useCache)
     end
     return loadstring(source)()
 end
+-- แมพตกปลา (มีหน้าจอ FishingHud): เปิดตัวตกปลา AutoFish.lua ของแมพนั้นแทน (หน้าต่างของมันเอง)
+if not inBaanLung then
+    local gui = game:GetService("Players").LocalPlayer:WaitForChild("PlayerGui")
+    if gui:FindFirstChild("FishingHud") or gui:WaitForChild("FishingHud", 3) then
+        if env.BaanLungFluent then
+            pcall(function() env.BaanLungFluent:Destroy() end)
+            env.BaanLungFluent = nil
+        end
+        loadstring(env.BaanLungGet("AutoFish.lua"))()
+        return
+    end
+end
+
 local ok, Fluent = pcall(loadFluent, true)
 if not ok or typeof(Fluent) ~= "table" then
     ok, Fluent = pcall(loadFluent, false)
