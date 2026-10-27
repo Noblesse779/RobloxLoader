@@ -1,0 +1,49 @@
+-- Auto-Guess Script for GTC
+local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local LocalPlayer = Players.LocalPlayer
+local GuessTheColor = ReplicatedStorage:WaitForChild("GuessTheColor")
+local Remotes = require(GuessTheColor:WaitForChild("Remotes"))
+local Characters = require(GuessTheColor:WaitForChild("Characters"))
+
+local AutoGuessEnabled = false
+local USE_ACTUAL_COLOR = true
+
+local function getCharacterColor(charName)
+    if not charName then return nil end
+    for _, char in ipairs(Characters) do
+        if string.lower(char.name) == string.lower(charName) then
+            return char.color
+        end
+    end
+    return nil
+end
+
+Remotes.RoundStart.OnClientEvent:Connect(function(data)
+    if not AutoGuessEnabled or type(data) ~= "table" then return end
+    local currentToken = data.token or data.Token
+    local charName = data.name or data.character
+    local targetColor = USE_ACTUAL_COLOR and getCharacterColor(charName) or Color3.fromHSV(0.85, 0.8, 0.8)
+    task.wait(0.5)
+    Remotes.SubmitGuess:FireServer(targetColor, currentToken)
+end)
+
+local Window = Rayfield:CreateWindow({
+    Name = "GTC Auto-Guess",
+    LoadingTitle = "Loading...",
+    LoadingSubtitle = "by You",
+    ConfigurationSaving = { Enabled = false },
+    KeySystem = false
+})
+
+local MainTab = Window:CreateTab("Main", nil)
+MainTab:CreateToggle({
+    Name = "Enable Auto-Guess",
+    CurrentValue = false,
+    Flag = "AutoGuessToggle",
+    Callback = function(Value)
+        AutoGuessEnabled = Value
+    end,
+})
