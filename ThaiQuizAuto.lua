@@ -1,4 +1,4 @@
--- ThaiQuizAuto V3 | WindUI by Footagesus (MIT), native UI fallback
+-- ThaiQuizAuto V4 | WindUI by Footagesus (MIT), native UI fallback
 -- https://github.com/Footagesus/WindUI
 -- Dictionary-based answers; server decides validity. No Time Attack support.
 local RS = game:GetService("ReplicatedStorage")
@@ -10,10 +10,12 @@ end
 local player = Players.LocalPlayer
 if not player then error("Run on the client") end
 local env = type(getgenv) == "function" and getgenv() or _G
+local legacyRunning=false
 local previous = env.__ThaiQuizAutoUI
 if previous and type(previous.Destroy) == "function" then
     previous.Destroy()
 elseif player:GetAttribute("__ThaiQuizAutoRunning") then
+    legacyRunning=true
     warn("[ThaiQuizAuto] Old non-UI script detected; rejoin once to avoid two responders")
 end
 
@@ -39,7 +41,7 @@ local shell = make("ScreenGui", {
 }, player:WaitForChild("PlayerGui"))
 local launcher = make("TextButton", {
     Size = UDim2.fromOffset(180, 40), Position = UDim2.new(0, 18, 0.18, 0),
-    Text = "ก–ฮ V3 • กำลังโหลด UI", TextSize = 15,
+    Text = "ก–ฮ V4 • กำลังโหลด UI", TextSize = 15,
     Font = Enum.Font.Gotham, TextColor3 = Color3.fromRGB(255,255,255),
     BackgroundColor3 = Color3.fromRGB(28, 38, 57), BorderSizePixel = 0,
 }, shell)
@@ -198,7 +200,7 @@ else
     pcall(function()WindUI:SetParent(player.PlayerGui)end)
     hint.Text="พร้อมใช้งาน • แตะปุ่มเพื่อเปิดเมนู"
 end
-launcher.Text="ก–ฮ V3 • เปิดเมนู"
+launcher.Text="ก–ฮ V4 • เปิดเมนู"
 
 
 local words = {
@@ -432,9 +434,49 @@ for cat,list in pairs(extra)do
     for word in list:gmatch("%S+")do addCandidate(cat,word)end
 end
 
-local function checked(cat,l,word,token)
+-- Additional real-word candidates. Every candidate still requires game validation.
+local curated={
+    fruit="จัน จันทน์ ซาลัก เดื่อ ดิวเบอร์รี ยอ ยอบ้าน ยอป่า",
+    thaidessert="จ่ามงกุฎ จาวตาลเชื่อม นางเล็ด นิ่มนวล พระพาย พุทราเชื่อม ยิ้มเสน่ห์",
+    snack="ช็อกโกแลต ชีสบอล ชูโรส ซาลาเปา ซูชิ โดนัท ดองผลไม้ เต้าหู้ทอด ตือฮวน ถั่วทอด ถั่วลิสงอบ ถั่วลิสงต้ม ทอดมัน ทาโกะยากิ โรตี โรตีกรอบ วาฟเฟิล หอยทอด หมูปิ้ง หมูสะเต๊ะ ไส้กรอก อัลมอนด์อบ",
+    landanimal="ดอร์เมาส์ เดกู ไดโนเสาร์",
+    bird="ยูง ยูงไทย ยูงเขียว ยูงอินเดีย",
+    flower="ถั่วผี เถาวัลย์หลง ถั่วพู ถั่วแปบ",
+    job="ซินแส ซีอีโอ เซลส์ ซอมเมอลิเยร์ ดารา ดีเจ เด็กเสิร์ฟ เถ้าแก่",
+    body="ชายโครง ซี่โครง ดวงตา ดั้ง ถุงน้ำดี ถุงอัณฑะ ทวารหนัก ท่อปัสสาวะ ท่อน้ำดี บ่า เบ้าตา พุง พังผืด เยื่อหุ้มสมอง เยื่อแก้วหู รังไข่ รูจมูก ริมฝีปาก วัลวา อก อัณฑะ",
+    family="ซ้อ ทวด ทายาท ราชบุตร ราชธิดา วงศ์ญาติ วงศาคณาญาติ วงศ์วาน",
+    folktale="ก้านกล้วย กระต่ายกับเต่า กบเจ้าชาย ขุนช้าง ขุนแผน ขวานฟ้าหน้าดำ คาวี ไกรทอง จันทโครพ จันทกุมาร จาฟาร์ จัสมิน ฉางเอ๋อ ชาละวัน ชูชก ซินเดอเรลลา ซินเดอเรลล่า ซุนหงอคง ซินแบด ดัมโบ ตะเภาแก้ว ตะเภาทอง ติ๊งเกอร์เบลล์ ถังซำจั๋ง ทศกัณฐ์ ท้าวแสนปม ท้าวสามล ท้าวยศวิมล นางเงือก นางสิบสอง นางรจนา นางสีดา นางวันทอง นางแก้วหน้าม้า บัวแก้ว บัวทอง บาลี ปลาบู่ทอง ปีเตอร์แพน ปิน็อกคิโอ ผีเสื้อสมุทร พินอคคิโอ พระอภัยมณี พระสังข์ พระลอ พระสุธน พลายแก้ว พลายงาม ภูริทัต มณโฑ มโนราห์ มู่หลาน เมาคลี ไมยราพ ยักษ์ ยักษ์วัดแจ้ง รจนา ราพันเซล รามสูร ลักษณวงศ์ ลิตเติลเมอร์เมด ลูกหมูสามตัว วันทอง วานร ศรีธนญชัย สโนว์ไวท์ สังข์ทอง สินสมุทร สุดสาคร สุพรรณมัจฉา หนูน้อยหมวกแดง หนุมาน หมีพูห์ อาละดิน อาลีบาบา อุสา ฮันเซล เกรเทล เงาะป่า เจ้าชายน้อย เจ้าหญิงนิทรา เจ้าหญิงถั่วลันเตา",
+    house="ถังขยะ ถังน้ำ ถุงขยะ ถาด ถุงพลาสติก ถ้วยชาม ถ้วย ขัน ขวด ขวดน้ำ เขียง ค้อน ครก คีม ด้าย ดอกกุญแจ ด้ามไม้กวาด ทัพพี ทิชชู่ ที่นอน ที่เปิดขวด น้ำยาล้างจาน น้ำยาถูพื้น บันได บัวรดน้ำ ปลอกหมอน ปลั๊กไฟ ปฏิทิน แปรง แปรงสีฟัน ผ้าขนหนู ฝาชี ฝาหม้อ พรม มุ้ง ม่าน ยาสีฟัน ยาฆ่าแมลง ราวตากผ้า รองเท้าแตะ รีโมต ลิ้นชัก ลูกบิดประตู ลวด วอลเปเปอร์ วงกบ อ่างล้างจาน อ่างอาบน้ำ อ่างล้างหน้า โอ่ง",
+    school="เข็มทิศ ขาตั้งกระดาน เครื่องคิดเลข คอมพิวเตอร์ จานสี จิ๊กซอว์ ซองเอกสาร ซองดินสอ ถุงดินสอ ถาดสี น้ำหมึก น้ำยาลบคำผิด บอร์ด บัตรนักเรียน ผ้าลบกระดาน แผนที่ พู่กัน แฟ้ม พจนานุกรม รองเท้านักเรียน ลูกโลก ลวดเสียบกระดาษ อุปกรณ์เรขาคณิต อุปกรณ์ทดลอง",
+    vehicle="ขบวนรถไฟ ชอปเปอร์ ซาเล้ง ไซด์คาร์ ซูเปอร์คาร์ โดรน นาวา ปิกอัพ ปิคอัพ ลีมูซีน ล้อเลื่อน เวสป้า หัวรถจักร หัวลาก",
+    appliance="ชาร์จเจอร์ ไดร์เป่าผม โน้ตบุ๊ก แบตเตอรี่ เบรกเกอร์ ปลั๊กพ่วง ปั๊มน้ำ แผงโซลาร์เซลล์ ยูพีเอส รีโมต ลำโพง สแกนเนอร์ สเตอริโอ สว่านไฟฟ้า อะแดปเตอร์ อ่างน้ำวน",
+    instrument="เถิดเทิง โทน โปงลาง แคน ซอด้วง ซออู้ ซอสามสาย สะล้อ สังข์ หีบเพลง หีบเพลงปาก หีบเพลงชัก",
+    color="จำปา ซีเปีย ตองอ่อน ตะกั่ว ตับม้า เถ้า บานเย็น บรอนซ์ เบจ เปลือกไข่ พีช เลือดหมู ลาเวนเดอร์ ไวน์แดง อิฐ อำพัน อินดิโก โอลด์โรส",
+    subject="ขับร้อง ขับร้องประสานเสียง จริยศึกษา จิตวิทยา จุลชีววิทยา โซลเฟจ ตรีโกณมิติ ตรรกศาสตร์ ถ่ายภาพ ทัศนศิลป์ เทคโนโลยี ทักษะชีวิต ทฤษฎีดนตรี ธรรมศึกษา ธรณีวิทยา บัลเลต์ บัญชี บรรณารักษศาสตร์ บริหารธุรกิจ ผดุงครรภ์ พลศึกษา พฤกษศาสตร์ พีชคณิต แพทยศาสตร์ มานุษยวิทยา ยุทธศาสตร์ ละคร ลีลาศ ลอจิก หัตถศึกษา หัตถกรรม อังกฤษ อาชีวอนามัย อิเล็กทรอนิกส์ อุตสาหกรรมศึกษา",
+    festival="เทศกาลไหว้พระจันทร์ วันเด็ก วันครู วันพ่อ วันแม่ วันสงกรานต์ วันลอยกระทง วันขึ้นปีใหม่ วันมาฆบูชา วันวิสาขบูชา วันอาสาฬหบูชา วันเข้าพรรษา วันออกพรรษา วันจักรี วันแรงงาน วันรัฐธรรมนูญ วันปิยมหาราช วันภาษาไทย วันสุนทรภู่ วันอนามัยโลก วันสิ่งแวดล้อมโลก วันฮาโลวีน หยวนเซียว เช็งเม้ง ฮาโลวีน คริสต์มาส ตรุษจีน อีสเตอร์ อีดิ้ลฟิตรี",
+}
+for cat,list in pairs(curated)do
+    local preferred={}
+    for word in list:gmatch("%S+")do
+        addCandidate(cat,word)
+        local l=firstConsonant(word)
+        preferred[l]=preferred[l] or {}
+        if seenCandidates[cat] and seenCandidates[cat][word] then table.insert(preferred[l],word)end
+    end
+    for l,wordsForLetter in pairs(preferred)do
+        local unique,ordered={},{}
+        for _,word in ipairs(wordsForLetter)do if not unique[word]then unique[word]=true;table.insert(ordered,word)end end
+        for _,word in ipairs(bank[cat][l] or {})do if not unique[word]then unique[word]=true;table.insert(ordered,word)end end
+        bank[cat][l]=ordered
+    end
+end
+
+local checksThisRound=0
+local function checked(cat,l,word,token,fresh)
     local key=cat.."/"..l.."/"..word
-    if validationCache[key] then return validationCache[key] end
+    if not fresh and validationCache[key] then return validationCache[key] end
+    if checksThisRound>=80 then return "rate_limited" end
+    checksThisRound=checksThisRound+1
     if not requestRemote then return "unavailable" end
     local done=false
     local status="unavailable"
@@ -506,60 +548,108 @@ end
 
 answer=function()
     cancel()
-    if not isOpen() then setStatus("รอช่วงตอบคำถามของรอบใหม่");return end
+    if legacyRunning then setStatus("มีสคริปต์รุ่นเก่าทำงานอยู่ — เข้าเกมใหม่ก่อนใช้ V4");return end
+    if not isOpen()then setStatus("รอช่วงตอบคำถามของรอบใหม่");return end
     local token=generation
     local roundLetter,roundCategories=letter,categories
     task.spawn(function()
-        task.wait(0.15)
+        task.wait(0.1)
         if not alive or generation~=token or not isOpen()then return end
         local state=discoverState()
         cacheText=state and "เชื่อมข้อมูลคำตอบในเกมแล้ว" or "เชื่อมข้อมูลไม่ได้ — เกมอาจเขียนทับคำตอบตอนจบรอบ"
         setDesc(cacheCard,cacheText)
-        setStatus("กำลังตรวจและส่งคำตอบ...")
-        local lines={}
-        for index,cat in ipairs(roundCategories)do
-            if not alive or generation~=token or not isOpen()then return end
-            local id=type(cat)=="table" and cat.id or cat
-            local name=type(cat)=="table" and (cat.name or id) or id
-            if not sentByCategory[index]then
-                local list=bank[id] and bank[id][roundLetter] or {}
-                local selected
-                for attempt=1,math.min(#list,8)do
-                    if not alive or generation~=token or not isOpen()then return end
-                    local word=list[attempt]
-                    setStatus("ตรวจ "..tostring(name)..": "..word)
-                    local status=checked(id,roundLetter,word,token)
-                    if not alive or generation~=token or not isOpen()then return end
-                    if status=="valid" then selected=word;break end
-                    if status=="unavailable" or status=="rate_limited" then
-                        log("ตรวจคำไม่ได้: "..tostring(name).." / "..status);break
-                    end
-                    task.wait(delaySeconds)
-                end
-                if selected then
-                    if state and state.letter==roundLetter and state.canType then state.answers[index]=selected end
-                    local sentOK,err=pcall(function()input:FireServer({type="answer",cat=index,text=selected})end)
-                    if sentOK then sentByCategory[index]=selected;log(tostring(name).." → "..selected.." ✓")
-                    else log("ส่งไม่สำเร็จ: "..tostring(err))end
-                else log("ยังไม่มีคำที่เกมยืนยัน: "..tostring(name).." / "..tostring(roundLetter))end
+        local cursor={}
+        local function active()return alive and generation==token and isOpen()end
+        local function key(id,word)return id.."/"..roundLetter.."/"..word end
+        local function renderResults()
+            local lines,n={},0
+            for i,cat in ipairs(roundCategories)do
+                local name=type(cat)=="table" and (cat.name or cat.id) or cat
+                if sentByCategory[i]then n=n+1 end
+                lines[#lines+1]=tostring(name)..": "..(sentByCategory[i] or "กำลังหาคำที่ผ่านตรวจ")
             end
-            lines[#lines+1]=tostring(name)..": "..(sentByCategory[index] or "ยังไม่มีคำที่ผ่านตรวจ")
-            resultText=table.concat(lines,"\n")
-            setDesc(resultCard,resultText)
-            task.wait(delaySeconds)
+            resultText=table.concat(lines,"\n");setDesc(resultCard,resultText)
+            return n
         end
-        if alive and generation==token then
-            local n=0;for _,_ in pairs(sentByCategory)do n=n+1 end
-            setStatus(string.format("ผ่านตรวจและส่งแล้ว %d/%d หมวด • กดหยุด/ส่งในเกมเมื่อพร้อม",n,#roundCategories))
+        -- Recheck our earlier answers; a prior successful check is not permanent.
+        for index,cat in ipairs(roundCategories)do
+            if not active()then return end
+            local old=sentByCategory[index]
+            if old then
+                local id=type(cat)=="table" and cat.id or cat
+                local status=checked(id,roundLetter,old,token,true)
+                if not active()then return end
+                if status~="valid" and status~="unavailable" then
+                    sentByCategory[index]=nil
+                    validationCache[key(id,old)]=status
+                    if state and state.answers[index]==old then state.answers[index]="" end
+                    input:FireServer({type="answer",cat=index,text=""})
+                    log("ถอนคำที่ไม่ผ่าน: "..old)
+                end
+                task.wait(delaySeconds)
+            end
+        end
+        -- Give every category a candidate before trying a second candidate.
+        for pass=1,16 do
+            if not active()then return end
+            local pending=false
+            for index,cat in ipairs(roundCategories)do
+                if not active()then return end
+                if not sentByCategory[index]then
+                    local id=type(cat)=="table" and cat.id or cat
+                    local name=type(cat)=="table" and (cat.name or id) or id
+                    local list=bank[id] and bank[id][roundLetter] or {}
+                    cursor[index]=cursor[index] or 1
+                    local word=list[cursor[index]]
+                    cursor[index]=cursor[index]+1
+                    if word then
+                        pending=true
+                        setStatus("ตรวจ "..tostring(name)..": "..word)
+                        local status=checked(id,roundLetter,word,token)
+                        if not active()then return end
+                        if status=="valid" then
+                            if state and state.letter==roundLetter and state.canType then state.answers[index]=word end
+                            local sentOK,err=pcall(function()input:FireServer({type="answer",cat=index,text=word})end)
+                            if sentOK then
+                                task.wait(0.3)
+                                if not active()then return end
+                                local final=checked(id,roundLetter,word,token,true)
+                                if not active()then return end
+                                if final=="valid" or final=="unavailable" then
+                                    sentByCategory[index]=word
+                                    log(tostring(name).." → "..word..(final=="valid" and " ✓" or " • ส่งแล้ว รอตรวจซ้ำ"))
+                                else
+                                    validationCache[key(id,word)]=final
+                                    if state and state.answers[index]==word then state.answers[index]="" end
+                                    input:FireServer({type="answer",cat=index,text=""})
+                                    log("เกมไม่รับ "..word.." — จะลองคำถัดไป")
+                                end
+                            else log("ส่งไม่สำเร็จ: "..tostring(err))end
+                        elseif status=="rate_limited" or status=="unavailable" then
+                            log("ตรวจคำยังไม่สำเร็จ: "..tostring(name).." / "..status)
+                            cursor[index]=cursor[index]-1
+                            task.wait(0.6)
+                        end
+                        renderResults()
+                        task.wait(delaySeconds)
+                    end
+                end
+            end
+            if renderResults()==#roundCategories or not pending then break end
+        end
+        if active()then
+            local n=renderResults()
+            setStatus(string.format("ส่งแล้ว %d/%d หมวด • %s",n,#roundCategories,
+                n==#roundCategories and "กดหยุด/ส่งในเกมเมื่อพร้อม" or "ยังมีหมวดที่ไม่พบคำผ่านตรวจ"))
         end
     end)
 end
 
-statusCard = Main:Paragraph({ Title = "สถานะ", Desc = statusText })
+statusCard = Main:Paragraph({ Title = "สถานะ • V4", Desc = statusText })
 roundCard = Main:Paragraph({ Title = "รอบปัจจุบัน", Desc = "รอเริ่มรอบ" })
 Main:Toggle({
     Title = "ตอบคำถามอัตโนมัติ",
-    Desc = "เลือกคำตามหมวดและตัวอักษรเมื่อเริ่มรอบ",
+    Desc = "ตรวจคำก่อนและหลังส่ง ถ้าเกมไม่รับจะลองคำถัดไป",
     Value = false,
     Callback = function(value)
         enabled = value == true
@@ -641,6 +731,8 @@ Window:OnDestroy(controller.Destroy)
 
 local function readRound(data, roundMode)
     sentByCategory={}
+    validationCache={}
+    checksThisRound=0
     letter = data.letter
     categories = type(data.categories) == "table" and data.categories or {}
     endsAt = tonumber(data.endsAt) or 0
@@ -702,7 +794,8 @@ if current and current.canType and type(current.categories) == "table"
     setStatus("พบรอบที่กำลังเล่น — เปิดสวิตช์เพื่อเริ่มตอบ")
 end
 player:SetAttribute("__ThaiQuizAutoRunning", true)
-log("เปิดหน้าต่างแล้ว — เปิดสวิตช์เพื่อใช้งาน")
+log("เปิดหน้าต่าง V4 แล้ว — เปิดสวิตช์เพื่อใช้งาน")
+if legacyRunning then setStatus("มีสคริปต์รุ่นเก่าทำงานอยู่ — เข้าเกมใหม่ก่อนใช้ V4")end
 startVocabulary()
 return controller
 
