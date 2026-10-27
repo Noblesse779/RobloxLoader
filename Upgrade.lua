@@ -278,11 +278,18 @@ local function pickaxeNeeds(p)
     return miss
 end
 
+-- ปลดล็อกเฉพาะของที่ตัวนี้ล็อกเอง ของที่ผู้เล่นล็อกไว้เองไม่ยุ่ง
+local lockedByUs = {}
 local function setLock(name, on)
     local inv = LocalPlayer:FindFirstChild("InventoryState")
     local v = inv and inv:FindFirstChild(name)
-    if not v or (v:GetAttribute("SaleLocked") == true) == on then return end
-    pcall(function() SetSaleLock:InvokeServer(name, on) end)
+    if not v then return end
+    local locked = v:GetAttribute("SaleLocked") == true
+    if on and not locked then
+        if pcall(function() SetSaleLock:InvokeServer(name, true) end) then lockedByUs[name] = true end
+    elseif not on and locked and lockedByUs[name] then
+        if pcall(function() SetSaleLock:InvokeServer(name, false) end) then lockedByUs[name] = nil end
+    end
 end
 
 -- ล็อกของที่ต้องใช้คราฟพลั่วตัวถัดไปไว้ไม่ให้ขาย คราฟเสร็จ/ปิดสวิตช์ = ปลดล็อก
