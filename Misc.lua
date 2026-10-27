@@ -521,7 +521,8 @@ findSection:AddButton({
         if finding then return end
         finding = true
         task.spawn(function()
-            local ok, msg = pcall(findCode, findWords)
+            local ok, _, msg = pcall(findCode, findWords)
+            if not ok then msg = _ end
             Fluent:Notify({ Title = "ค้นโค้ด", Content = tostring(msg), Duration = 6 })
             finding = false
         end)
