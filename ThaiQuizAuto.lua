@@ -1,4 +1,4 @@
--- ThaiQuizAuto UI | UI: WindUI by Footagesus (MIT)
+-- ThaiQuizAuto V3 | WindUI by Footagesus (MIT), native UI fallback
 -- https://github.com/Footagesus/WindUI
 -- Dictionary-based answers; server decides validity. No Time Attack support.
 local RS = game:GetService("ReplicatedStorage")
@@ -14,8 +14,7 @@ local previous = env.__ThaiQuizAutoUI
 if previous and type(previous.Destroy) == "function" then
     previous.Destroy()
 elseif player:GetAttribute("__ThaiQuizAutoRunning") then
-    warn("[ThaiQuizAuto] Rejoin once to stop the old non-UI script, then run this version")
-    return
+    warn("[ThaiQuizAuto] Old non-UI script detected; rejoin once to avoid two responders")
 end
 
 local R = RS:WaitForChild("Remotes", 15)
@@ -25,15 +24,182 @@ local match = R:WaitForChild("Match", 10)
 local solo = R:WaitForChild("Solo", 10)
 if not input or not match or not solo then error("Required remotes missing") end
 
-local okLibrary, WindUI = pcall(function()
-    local code = game:HttpGet("https://github.com/Footagesus/WindUI/releases/download/1.6.66/main.lua")
-    local chunk, compileError = loadstring(code)
-    if not chunk then error(compileError) end
-    return chunk()
-end)
-if not okLibrary then
-    error("[ThaiQuizAuto] Cannot load WindUI: " .. tostring(WindUI))
+-- Small local fallback if the shared UI library cannot load.
+local UserInputService = game:GetService("UserInputService")
+local function make(className, props, parent)
+    local object = Instance.new(className)
+    for key, value in pairs(props) do object[key] = value end
+    object.Parent = parent
+    return object
 end
+local shell = make("ScreenGui", {
+    Name = "ThaiQuizAutoLauncherV3", ResetOnSpawn = false,
+    IgnoreGuiInset = true, DisplayOrder = 10000,
+    ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
+}, player:WaitForChild("PlayerGui"))
+local launcher = make("TextButton", {
+    Size = UDim2.fromOffset(180, 40), Position = UDim2.new(0, 18, 0.18, 0),
+    Text = "ก–ฮ V3 • กำลังโหลด UI", TextSize = 15,
+    Font = Enum.Font.Gotham, TextColor3 = Color3.fromRGB(255,255,255),
+    BackgroundColor3 = Color3.fromRGB(28, 38, 57), BorderSizePixel = 0,
+}, shell)
+make("UICorner", { CornerRadius = UDim.new(0, 10) }, launcher)
+local hint = make("TextLabel", {
+    Position = UDim2.new(0, 18, 0.18, 44), Size = UDim2.fromOffset(340, 44),
+    Text = "กำลังโหลดหน้าต่าง...", TextSize = 13, TextWrapped = true,
+    Font = Enum.Font.Gotham, TextXAlignment = Enum.TextXAlignment.Left,
+    TextColor3 = Color3.fromRGB(255,255,255), BackgroundTransparency = 0.25,
+    BackgroundColor3 = Color3.fromRGB(20,24,32), BorderSizePixel = 0,
+}, shell)
+local function nativeLibrary()
+    local library = {}
+    function library:CreateWindow(config)
+        local W = { dead = false }
+        local viewport = workspace.CurrentCamera and workspace.CurrentCamera.ViewportSize
+            or Vector2.new(1000, 700)
+        local width = math.min(720, viewport.X - 24)
+        local height = math.min(490, viewport.Y - 72)
+        local frame = make("Frame", {
+            Size = UDim2.fromOffset(width,height), AnchorPoint = Vector2.new(0.5,0.5),
+            Position = UDim2.fromScale(0.5,0.5), BackgroundColor3 = Color3.fromRGB(22,25,33),
+            BackgroundTransparency = 0.12, BorderSizePixel = 0, Active = true,
+        }, shell)
+        make("UICorner", { CornerRadius=UDim.new(0,14) },frame)
+        local title = make("TextLabel", {
+            Size=UDim2.new(1,-65,0,44),Position=UDim2.fromOffset(18,0),
+            Text=config.Title .. " • สำรอง",TextSize=17,Font=Enum.Font.GothamBold,
+            TextColor3=Color3.fromRGB(255,255,255),TextXAlignment=Enum.TextXAlignment.Left,
+            BackgroundTransparency=1,Active=true,
+        },frame)
+        local close = make("TextButton", {
+            Position=UDim2.new(1,-45,0,7),Size=UDim2.fromOffset(34,30),Text="−",TextSize=24,
+            TextColor3=Color3.fromRGB(255,255,255),BackgroundTransparency=1,
+        },frame)
+        close.Activated:Connect(function() frame.Visible=false end)
+        local sidebar=make("Frame",{Position=UDim2.fromOffset(10,52),Size=UDim2.new(0,145,1,-62),BackgroundTransparency=1},frame)
+        make("UIListLayout",{Padding=UDim.new(0,8)},sidebar)
+        local pages={}
+        function W:Open() frame.Visible=true end
+        function W:Toggle() frame.Visible=not frame.Visible end
+        function W:ToggleTransparency(value) frame.BackgroundTransparency=value and 0.12 or 0 end
+        function W:OnDestroy(fn) self.callback=fn end
+        function W:Destroy()
+            if self.dead then return end
+            self.dead=true
+            frame:Destroy()
+            if self.callback then self.callback() end
+        end
+        function W:Tab(opts)
+            local page=make("ScrollingFrame",{
+                Position=UDim2.fromOffset(165,52),Size=UDim2.new(1,-177,1,-64),
+                BackgroundTransparency=1,BorderSizePixel=0,ScrollBarThickness=4,
+                AutomaticCanvasSize=Enum.AutomaticSize.Y,CanvasSize=UDim2.new(),Visible=#pages==0,
+            },frame)
+            make("UIListLayout",{Padding=UDim.new(0,8),SortOrder=Enum.SortOrder.LayoutOrder},page)
+            pages[#pages+1]=page
+            local tabButton=make("TextButton",{
+                Size=UDim2.new(1,0,0,42),Text=opts.Title,TextSize=14,Font=Enum.Font.Gotham,
+                TextColor3=Color3.fromRGB(240,240,245),BackgroundColor3=Color3.fromRGB(37,42,55),BorderSizePixel=0,
+            },sidebar)
+            make("UICorner",{CornerRadius=UDim.new(0,8)},tabButton)
+            tabButton.Activated:Connect(function()for _,p in ipairs(pages)do p.Visible=p==page end end)
+            local T={order=0}
+            local function card(text)
+                T.order=T.order+1
+                local f=make("Frame",{Size=UDim2.new(1,-8,0,0),AutomaticSize=Enum.AutomaticSize.Y,
+                    BackgroundColor3=Color3.fromRGB(37,42,55),BackgroundTransparency=0.12,
+                    BorderSizePixel=0,LayoutOrder=T.order},page)
+                make("UICorner",{CornerRadius=UDim.new(0,8)},f)
+                make("UIPadding",{PaddingTop=UDim.new(0,12),PaddingBottom=UDim.new(0,12),PaddingLeft=UDim.new(0,12),PaddingRight=UDim.new(0,12)},f)
+                local label=make("TextLabel",{Size=UDim2.new(1,0,0,0),AutomaticSize=Enum.AutomaticSize.Y,
+                    Text=text,TextSize=14,Font=Enum.Font.Gotham,TextWrapped=true,
+                    TextXAlignment=Enum.TextXAlignment.Left,TextYAlignment=Enum.TextYAlignment.Top,
+                    TextColor3=Color3.fromRGB(235,238,245),BackgroundTransparency=1},f)
+                return f,label
+            end
+            function T:Paragraph(o)
+                local _,label=card(o.Title.."\n"..(o.Desc or ""))
+                local item={title=o.Title}
+                function item:SetDesc(s)label.Text=self.title.."\n"..s end
+                return item
+            end
+            function T:Button(o)
+                local f,label=card(o.Title..(o.Desc and "\n"..o.Desc or ""))
+                local b=make("TextButton",{Text="",BackgroundTransparency=1,Size=UDim2.fromScale(1,1),ZIndex=3},f)
+                b.Activated:Connect(o.Callback)
+                return {SetTitle=function(_,s)label.Text=s end}
+            end
+            function T:Toggle(o)
+                local value=o.Value==true
+                local f,label=card("")
+                local function paint()label.Text=(value and "● เปิด  " or "○ ปิด  ")..o.Title..(o.Desc and "\n"..o.Desc or "")end
+                paint()
+                local b=make("TextButton",{Text="",BackgroundTransparency=1,Size=UDim2.fromScale(1,1),ZIndex=3},f)
+                local item={}
+                function item:Set(v)value=v==true;paint();o.Callback(value)end
+                b.Activated:Connect(function()item:Set(not value)end)
+                return item
+            end
+            function T:Slider(o)
+                local value=o.Value.Default
+                local f,label=card(o.Title.."\n"..tostring(value))
+                local item={}
+                function item:Set(v)value=math.clamp(v,o.Value.Min,o.Value.Max);label.Text=o.Title.."\n"..string.format("%.2f  (แตะเพื่อปรับ)",value);o.Callback(value)end
+                local b=make("TextButton",{Text="",BackgroundTransparency=1,Size=UDim2.fromScale(1,1),ZIndex=3},f)
+                b.Activated:Connect(function()local n=value+o.Step;if n>o.Value.Max then n=o.Value.Min end;item:Set(n)end)
+                return item
+            end
+            return T
+        end
+        -- Native drag gesture, including touch.
+        local dragging,origin,start
+        local movement=UserInputService.InputChanged:Connect(function(i)
+            if dragging and (i.UserInputType==Enum.UserInputType.MouseMovement or i.UserInputType==Enum.UserInputType.Touch) then
+                local delta=i.Position-origin
+                frame.Position=UDim2.new(start.X.Scale,start.X.Offset+delta.X,start.Y.Scale,start.Y.Offset+delta.Y)
+            end
+        end)
+        title.InputBegan:Connect(function(i)
+            if i.UserInputType==Enum.UserInputType.MouseButton1 or i.UserInputType==Enum.UserInputType.Touch then
+                dragging=true;origin=i.Position;start=frame.Position
+            end
+        end)
+        local ending=UserInputService.InputEnded:Connect(function(i)
+            if i.UserInputType==Enum.UserInputType.MouseButton1 or i.UserInputType==Enum.UserInputType.Touch then dragging=false end
+        end)
+        shell.Destroying:Connect(function()movement:Disconnect();ending:Disconnect()end)
+        return W
+    end
+    return library
+end
+
+local WindUI
+local nativeInUse=false
+local completed=false
+local libraryTask=task.spawn(function()
+    local ok,result=pcall(function()
+        local source=game:HttpGet("https://github.com/Footagesus/WindUI/releases/download/1.6.66/main.lua")
+        local chunk,err=loadstring(source)
+        if not chunk then error(err) end
+        return chunk()
+    end)
+    if ok and type(result)=="table" then WindUI=result end
+    completed=true
+end)
+local deadline=os.clock()+8
+while not completed and os.clock()<deadline do task.wait(0.1) end
+if not completed then pcall(task.cancel,libraryTask) end
+if not WindUI then
+    nativeInUse=true
+    WindUI=nativeLibrary()
+    hint.Text="ใช้หน้าต่างสำรอง • โหลด WindUI ไม่สำเร็จ"
+else
+    -- Use PlayerGui so the window is not hidden in a protected UI container.
+    pcall(function()WindUI:SetParent(player.PlayerGui)end)
+    hint.Text="พร้อมใช้งาน • แตะปุ่มเพื่อเปิดเมนู"
+end
+launcher.Text="ก–ฮ V3 • เปิดเมนู"
+
 
 local words = {
     fruit = "กล้วย ขนุน เงาะ ชมพู่ แตงโม ทุเรียน น้อยหน่า มะม่วง ลำไย ส้ม องุ่น",
@@ -85,7 +251,9 @@ for category, list in pairs(words) do
     for word in list:gmatch("%S+") do
         local letter = firstConsonant(word)
         if letter and not bank[category][letter] then
-            bank[category][letter] = word
+            bank[category][letter] = {word}
+        elseif letter then
+            table.insert(bank[category][letter],word)
         end
     end
 end
@@ -135,9 +303,11 @@ local resultText = "ยังไม่มีคำตอบ"
 local cacheText = "รอตรวจเมื่อเริ่มรอบ"
 local statusCard, roundCard, resultCard, logCard, cacheCard
 local controller = {}
+
 env.__ThaiQuizAutoUI = controller
 
-local Window = WindUI:CreateWindow({
+local function createWindow(ui)
+return ui:CreateWindow({
     Title = "ก–ฮ | ตอบอัตโนมัติ",
     Author = "Noblesse779 • WindUI",
     Folder = "ThaiQuizAutoUI",
@@ -157,6 +327,27 @@ local Window = WindUI:CreateWindow({
         OnlyMobile = false,
     },
 })
+end
+local windowOK,Window,windowDone=false,nil,false
+local windowTask=task.spawn(function()
+    windowOK,Window=pcall(createWindow,WindUI)
+    windowDone=true
+end)
+local windowDeadline=os.clock()+8
+while not windowDone and os.clock()<windowDeadline do task.wait(0.1)end
+if not windowDone then pcall(task.cancel,windowTask)end
+if not windowOK then
+    nativeInUse=true
+    WindUI=nativeLibrary()
+    Window=createWindow(WindUI)
+    hint.Text="ใช้หน้าต่างสำรอง • WindUI สร้างหน้าต่างไม่สำเร็จ"
+end
+launcher.Activated:Connect(function()pcall(function()Window:Open()end)end)
+pcall(function()Window:Open()end)
+task.delay(7,function()if shell.Parent then hint.Visible=false end end)
+connections[#connections+1]=UserInputService.InputBegan:Connect(function(i,processed)
+    if nativeInUse and not processed and i.KeyCode==Enum.KeyCode.RightShift then pcall(function()Window:Toggle()end)end
+end)
 local Main = Window:Tab({ Title = "ตอบอัตโนมัติ", Icon = "bot" })
 local Logs = Window:Tab({ Title = "คำตอบล่าสุด", Icon = "list" })
 local Settings = Window:Tab({ Title = "ตั้งค่า", Icon = "settings" })
@@ -198,56 +389,168 @@ local function isOpen()
         and (endsAt <= 0 or workspace:GetServerTimeNow() < endsAt)
 end
 
-local function answer()
-    cancel()
-    if not isOpen() then
-        setStatus("รอช่วงตอบคำถามของรอบใหม่")
-        return
+local answer
+-- Derived data: VOLUBILIS by Belisan, CC BY-SA 4.0. See ThaiQuizData/v3/README.md.
+local HttpService = game:GetService("HttpService")
+local dataBase="https://raw.githubusercontent.com/Noblesse779/RobloxLoader/main/ThaiQuizData/v3/"
+local vocabularyTotal=0
+local vocabularyState="กำลังโหลดคลังคำ..."
+local vocabularyCard
+local sentByCategory={}
+local validationCache={}
+local requestRemote=R:FindFirstChild("Request")
+
+local extra={
+    country="เยเมน ยูกันดา เยอรมนี ยูเครน เยอรมัน สหรัฐอเมริกา สหราชอาณาจักร ออสเตรเลีย ออสเตรีย อาร์เจนตินา อิตาลี อิหร่าน อิรัก อิสราเอล อินโดนีเซีย ไอซ์แลนด์ ไอร์แลนด์ แคนาดา เกาหลีใต้ เกาหลีเหนือ กรีซ กานา กาตาร์ กินี คิวบา เคนยา โครเอเชีย จอร์แดน จาเมกา เช็ก ชาด ซาอุดีอาระเบีย ซีเรีย ซูดาน ซูรินาม เซเนกัล เซอร์เบีย แซมเบีย ตุรกี ตูนิเซีย ตองกา ทาจิกิสถาน แทนซาเนีย นอร์เวย์ นิวซีแลนด์ นามิเบีย ไนจีเรีย เนเธอร์แลนด์ บังกลาเทศ บาห์เรน เบลเยียม เบลารุส ปากีสถาน ปานามา โปรตุเกส โปแลนด์ ฝรั่งเศส ฟินแลนด์ ฟิลิปปินส์ เม็กซิโก โมร็อกโก มองโกเลีย มัลดีฟส์ รวันดา โรมาเนีย ลัตเวีย ลิทัวเนีย เลบานอน เวเนซุเอลา สเปน สวีเดน สวิตเซอร์แลนด์ สโลวาเกีย สโลวีเนีย หวานูอาตู ฮังการี เฮติ ฮอนดูรัส",
+    worldcity="ย่างกุ้ง ยอกยาการ์ตา ยะโฮร์บาห์รู เยรูซาเลม เยเรวาน ยอนโกปิง กรุงเทพ กัวลาลัมเปอร์ กาฐมาณฑุ กวางโจว ขอนแก่น คุนหมิง โคเปนเฮเกน เคปทาวน์ แคนเบอร์รา ไคโร จาร์กาตา จาการ์ตา เจนีวา ชิคาโก เชียงใหม่ ซัปโปโร ซิดนีย์ ซูริก ดับลิน ดูไบ ดานัง เดลี โดฮา ตรัง ตูลูส เตหะราน ไทเป เทียนจิน เทลอาวีฟ นครปฐม นครราชสีมา นางาซากิ นาโกยา นิวยอร์ก นิวเดลี นีซ บางกอก บาร์เซโลนา บรัสเซลส์ บอสตัน บูดาเปสต์ เบอร์ลิน ปักกิ่ง ปราก ปารีส ปูซาน ปีนัง พนมเปญ พัทยา พอร์ตแลนด์ ฟลอเรนซ์ มอสโก มิลาน มุมไบ มะนิลา เมลเบิร์น มิวนิก รอตเทอร์ดาม ริโอเดจาเนโร ริยาด ลิสบอน ลียง ลิมา ลอสแอนเจลิส วอร์ซอ วอชิงตัน เวียนนา เวียงจันทน์ สตอกโฮล์ม สิงคโปร์ เสิ่นเจิ้น โซล หางโจว หาดใหญ่ ฮานอย ฮ่องกง ฮัมบูร์ก เฮลซิงกิ ออสโล อัมสเตอร์ดัม อังการา โอซากา",
+    sport="ยิมนาสติก ยิงปืน ยิงธนู ยกน้ำหนัก ยูโด โยคะ โยธวาทิต กระโดดน้ำ กรีฑา กาบัดดี กังฟู ขี่ม้า ขว้างจักร คริกเก็ต เคนโด จานร่อน ชักเย่อ ซอฟต์บอล เซปักตะกร้อ ดำน้ำ ดาบสากล ตะกร้อ เทควันโด เทเบิลเทนนิส ทุ่มน้ำหนัก บิลเลียด เปตอง ปิงปอง โปโล พายเรือ ฟันดาบ มวยปล้ำ มาราธอน รักบี้ เรือใบ ลีลาศ วิ่ง วอลเลย์บอล วอลเลย์บอลชายหาด สเกตบอร์ด สกี สนุกเกอร์ หมากรุก หมากล้อม ฮอกกี้ แฮนด์บอล อเมริกันฟุตบอล",
+    vehicle="บอลลูน บัลลูน บีทีเอส บิ๊กไบค์ บัส บั๊กกี้ รถบัส รถไฟ รถราง รถตู้ รถถัง รถเก๋ง รถกระบะ รถจักรยานยนต์ รถสามล้อ รถเมล์ รถไฟฟ้า เรือใบ เรือยนต์ เรือแจว เรือพาย เรือดำน้ำ เรือสำเภา เรือยอชต์ ยานยนต์ ยานอวกาศ ยานพาหนะ ยานบิน เครื่องร่อน เกวียน กระเช้า จรวด เจ็ตสกี แท็กซี่ มอเตอร์ไซค์ สกู๊ตเตอร์ สามล้อ สเกตบอร์ด เฮลิคอปเตอร์ โฮเวอร์คราฟต์ อากาศยาน",
+    cityplace="บริษัท บ้านพัก บาร์ บ่อน บ่อน้ำพุ บึง บูธ บางลำพู กรมการขนส่ง กองบัญชาการ กระทรวง กองไปรษณีย์ เขต คลังสินค้า คุก คาเฟ่ คอนโด คลินิก โบสถ์ จวนผู้ว่าราชการจังหวัด จุดจอดรถ ชุมชน ซอย ซูเปอร์มาร์เก็ต ซูเปอร์เซ็นเตอร์ ด่านตรวจ ตลาดนัด ตึก ตู้ไปรษณีย์ ถนน ท่าเรือ ที่ว่าการอำเภอ ธนาคาร นิคมอุตสาหกรรม น้ำพุ ประตูเมือง ป้อมตำรวจ ปั๊มน้ำมัน ผับ แผงลอย พิพิธภัณฑ์ พาณิชย์จังหวัด มหาวิทยาลัย มัสยิด มูลนิธิ แยก ย่านการค้า โรงแรม โรงเรียน โรงหนัง โรงพยาบาล ร้านอาหาร ร้านกาแฟ ลานจอดรถ วัด วงเวียน ศาล ศาลากลางจังหวัด ศูนย์การค้า สถานีตำรวจ สถานีรถไฟ สวนสาธารณะ สนามบิน ห้างสรรพสินค้า ห้องสมุด หอพัก อนุสาวรีย์ อู่ซ่อมรถ ฮอลล์",
+    family="ญาติ ยาย ย่า ยายทวด ย่าทวด ปู่ทวด ตาทวด บิดา บุตร บุตรสาว บุตรชาย สามี ภรรยา สะใภ้ เขย คู่สมรส พ่อเลี้ยง แม่เลี้ยง พี่สะใภ้ น้องเขย",
+    vegetable="บวบ บรอกโคลี บีตรูต ใบย่านาง ย่านาง ยอดมะพร้าว ยอดฟักแม้ว ยอดกระถิน กะเพรา โหระพา กระชาย กระเทียม ข่า ขมิ้น ข้าวโพด คื่นฉ่าย คะน้า แครอต ชะอม ชะพลู ต้นหอม แตงกวา ถั่วงอก ถั่วพู ถั่วลันเตา น้ำเต้า ปวยเล้ง ผักกาด ผักชี ผักคะน้า เผือก พริกไทย ฟักทอง ฟักเขียว มะระ มะนาว มะกรูด มะรุม มันเทศ มันฝรั่ง สะตอ หน่อไม้ หัวไชเท้า หอมแดง อัญชัน",
+    instrument="ขิม แคน จ้องหน่อง ฉาบ ซอด้วง ซออู้ ซอสามสาย ฆ้องวง กลอง กลองยาว กลองชุด กลองแขก ฆ้อง ระนาดเอก ระนาดทุ้ม จะเข้ ปี่ ปี่ชวา ปี่สก็อต เปียโน พิณ พิณน้ำเต้า กีตาร์ไฟฟ้า กีตาร์โปร่ง ทรัมเป็ต ทรอมโบน ทูบา โทน โทมบา บองโก เบส แมนโดลิน เมโลเดียน เมาท์ออร์แกน ยูโฟเนียม รีคอร์เดอร์ ลูท วิโอลา ไวโอลิน ไวโอลอนเชลโล ฮาร์ป ฮาร์โมนิกา ออร์แกน อูคูเลเล",
+}
+local seenCandidates={}
+for cat,letters in pairs(bank)do
+    seenCandidates[cat]={}
+    for l,values in pairs(letters)do for _,word in ipairs(values)do seenCandidates[cat][word]=true end end
+end
+local function addCandidate(cat,word)
+    word=word:gsub("%s+","")
+    if utf8.len(word)>30 then return end
+    for _,cp in utf8.codes(word)do if cp<0x0E01 or cp>0x0E5B then return end end
+    local l=firstConsonant(word)
+    if not l then return end
+    bank[cat]=bank[cat] or {}
+    seenCandidates[cat]=seenCandidates[cat] or {}
+    if seenCandidates[cat][word] then return end
+    seenCandidates[cat][word]=true
+    bank[cat][l]=bank[cat][l] or {}
+    table.insert(bank[cat][l],word)
+end
+for cat,list in pairs(extra)do
+    for word in list:gmatch("%S+")do addCandidate(cat,word)end
+end
+
+local function checked(cat,l,word,token)
+    local key=cat.."/"..l.."/"..word
+    if validationCache[key] then return validationCache[key] end
+    if not requestRemote then return "unavailable" end
+    local done=false
+    local status="unavailable"
+    local call=task.spawn(function()
+        local ok,result=pcall(function()
+            return requestRemote:InvokeServer("checkAnswer",{category=cat,letter=l,text=word})
+        end)
+        if ok and type(result)=="table" and type(result.status)=="string" then status=result.status end
+        done=true
+    end)
+    local limit=os.clock()+1.5
+    while not done and alive and generation==token and os.clock()<limit do task.wait(0.05)end
+    if not done then pcall(task.cancel,call)end
+    if done and (status=="valid" or status=="unknown_word" or status=="wrong_letter" or status=="nonsense") then
+        validationCache[key]=status
     end
-    local token = generation
-    local roundLetter = letter
-    local roundCategories = categories
+    return status
+end
+
+local function startVocabulary()
     task.spawn(function()
-        task.wait(0.4)
-        if not alive or generation ~= token or not isOpen() then return end
-        local state = discoverState()
-        cacheText = state and "เชื่อมข้อมูลคำตอบในเกมแล้ว"
-            or "เชื่อมข้อมูลในเกมไม่ได้ — เกมอาจเขียนทับคำตอบตอนจบรอบ"
-        setDesc(cacheCard, cacheText)
-        local lines = {}
-        local sent = 0
-        setStatus("กำลังส่งคำตอบ...")
-        for index, cat in ipairs(roundCategories) do
-            if not alive or generation ~= token or not isOpen() then return end
-            local id = type(cat) == "table" and cat.id or cat
-            local name = type(cat) == "table" and (cat.name or id) or id
-            local text = bank[id] and bank[id][roundLetter]
-            if text then
-                if state and state.letter == roundLetter and state.canType then
-                    state.answers[index] = text
-                end
-                local sentOK, sendError = pcall(function()
-                    input:FireServer({ type = "answer", cat = index, text = text })
-                end)
-                if sentOK then
-                    sent = sent + 1
-                    lines[#lines + 1] = tostring(name) .. ": " .. text
-                    log(tostring(name) .. " → " .. text)
-                else
-                    lines[#lines + 1] = tostring(name) .. ": ส่งไม่สำเร็จ"
-                    log("ส่งไม่สำเร็จ: " .. tostring(sendError))
-                end
-            else
-                lines[#lines + 1] = tostring(name) .. ": ไม่มีคำในคลัง"
-                log("ไม่มีคำ: " .. tostring(name) .. " / " .. tostring(roundLetter))
+        local ok,manifest=pcall(function()
+            return HttpService:JSONDecode(game:HttpGet(dataBase.."manifest.json"))
+        end)
+        if not alive then return end
+        if not ok or type(manifest)~="table" then
+            vocabularyState="โหลดคลังใหญ่ไม่สำเร็จ — ยังใช้คลังคำเริ่มต้นได้"
+            setDesc(vocabularyCard,vocabularyState)
+            return
+        end
+        local nextPart,finished,failed=1,0,0
+        local allSeen={}
+        local function worker()
+            while alive do
+                local index=nextPart
+                nextPart=nextPart+1
+                local name=manifest.parts[index]
+                if not name then return end
+                local got,text=pcall(function()return game:HttpGet(dataBase..name)end)
+                if not alive then return end
+                if got and type(text)=="string" then
+                    local n=0
+                    for line in text:gmatch("[^\r\n]+")do
+                        local word,cats=line:match("^(.-)\t(.*)$")
+                        if word and not allSeen[word] then
+                            allSeen[word]=true
+                            vocabularyTotal=vocabularyTotal+1
+                            for cat in cats:gmatch("[^,]+")do addCandidate(cat,word)end
+                        end
+                        n=n+1
+                        if n%250==0 then task.wait();if not alive then return end end
+                    end
+                else failed=failed+1 end
+                finished=finished+1
+                vocabularyState=string.format("โหลดแล้ว %s / %s คำและวลี • %d/%d ส่วน",tostring(vocabularyTotal),tostring(manifest.total),finished,#manifest.parts)
+                setDesc(vocabularyCard,vocabularyState)
             end
-            resultText = table.concat(lines, "\n")
-            setDesc(resultCard, resultText)
+        end
+        for _=1,3 do task.spawn(worker)end
+        while alive and finished<#manifest.parts do task.wait(0.2)end
+        if not alive then return end
+        vocabularyState=string.format("โหลด %d คำและวลี • แบ่งหมวดอัตโนมัติ %d รายการ • ส่วนที่โหลดไม่สำเร็จ %d",vocabularyTotal,manifest.classified or 0,failed)
+        setDesc(vocabularyCard,vocabularyState)
+        log("คลังคำ: "..vocabularyState)
+        if enabled and isOpen() then answer()end
+    end)
+end
+
+
+answer=function()
+    cancel()
+    if not isOpen() then setStatus("รอช่วงตอบคำถามของรอบใหม่");return end
+    local token=generation
+    local roundLetter,roundCategories=letter,categories
+    task.spawn(function()
+        task.wait(0.15)
+        if not alive or generation~=token or not isOpen()then return end
+        local state=discoverState()
+        cacheText=state and "เชื่อมข้อมูลคำตอบในเกมแล้ว" or "เชื่อมข้อมูลไม่ได้ — เกมอาจเขียนทับคำตอบตอนจบรอบ"
+        setDesc(cacheCard,cacheText)
+        setStatus("กำลังตรวจและส่งคำตอบ...")
+        local lines={}
+        for index,cat in ipairs(roundCategories)do
+            if not alive or generation~=token or not isOpen()then return end
+            local id=type(cat)=="table" and cat.id or cat
+            local name=type(cat)=="table" and (cat.name or id) or id
+            if not sentByCategory[index]then
+                local list=bank[id] and bank[id][roundLetter] or {}
+                local selected
+                for attempt=1,math.min(#list,8)do
+                    if not alive or generation~=token or not isOpen()then return end
+                    local word=list[attempt]
+                    setStatus("ตรวจ "..tostring(name)..": "..word)
+                    local status=checked(id,roundLetter,word,token)
+                    if not alive or generation~=token or not isOpen()then return end
+                    if status=="valid" then selected=word;break end
+                    if status=="unavailable" or status=="rate_limited" then
+                        log("ตรวจคำไม่ได้: "..tostring(name).." / "..status);break
+                    end
+                    task.wait(delaySeconds)
+                end
+                if selected then
+                    if state and state.letter==roundLetter and state.canType then state.answers[index]=selected end
+                    local sentOK,err=pcall(function()input:FireServer({type="answer",cat=index,text=selected})end)
+                    if sentOK then sentByCategory[index]=selected;log(tostring(name).." → "..selected.." ✓")
+                    else log("ส่งไม่สำเร็จ: "..tostring(err))end
+                else log("ยังไม่มีคำที่เกมยืนยัน: "..tostring(name).." / "..tostring(roundLetter))end
+            end
+            lines[#lines+1]=tostring(name)..": "..(sentByCategory[index] or "ยังไม่มีคำที่ผ่านตรวจ")
+            resultText=table.concat(lines,"\n")
+            setDesc(resultCard,resultText)
             task.wait(delaySeconds)
         end
-        if alive and generation == token then
-            setStatus(string.format("ส่งแล้ว %d/%d หมวด • กดหยุด/ส่งในเกมเมื่อพร้อม",
-                sent, #roundCategories))
+        if alive and generation==token then
+            local n=0;for _,_ in pairs(sentByCategory)do n=n+1 end
+            setStatus(string.format("ผ่านตรวจและส่งแล้ว %d/%d หมวด • กดหยุด/ส่งในเกมเมื่อพร้อม",n,#roundCategories))
         end
     end)
 end
@@ -309,6 +612,8 @@ Settings:Paragraph({
     Title = "ซ่อนและเปิดหน้าต่าง",
     Desc = "กด Right Shift หรือใช้ปุ่ม ก–ฮ เมนู เพื่อเปิดหน้าต่างอีกครั้ง",
 })
+vocabularyCard=Settings:Paragraph({Title="คลังคำและวลีไทย",Desc=vocabularyState})
+Settings:Paragraph({Title="เครดิตข้อมูล",Desc="VOLUBILIS Mundo by Belisan • CC BY-SA 4.0\n102,783 รายการหลังกรอง • ไม่ใช่เฉลยที่เกมรับรอง"})
 Settings:Paragraph({
     Title = "เครดิตหน้าต่าง",
     Desc = "WindUI by Footagesus • MIT • github.com/Footagesus/WindUI",
@@ -317,6 +622,7 @@ Settings:Paragraph({
 function controller.Destroy()
     if not alive then return end
     alive = false
+    shell:Destroy()
     enabled = false
     canAnswer = false
     cancel()
@@ -334,6 +640,7 @@ Settings:Button({
 Window:OnDestroy(controller.Destroy)
 
 local function readRound(data, roundMode)
+    sentByCategory={}
     letter = data.letter
     categories = type(data.categories) == "table" and data.categories or {}
     endsAt = tonumber(data.endsAt) or 0
@@ -396,4 +703,6 @@ if current and current.canType and type(current.categories) == "table"
 end
 player:SetAttribute("__ThaiQuizAutoRunning", true)
 log("เปิดหน้าต่างแล้ว — เปิดสวิตช์เพื่อใช้งาน")
+startVocabulary()
 return controller
+
