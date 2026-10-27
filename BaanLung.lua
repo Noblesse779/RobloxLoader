@@ -1,23 +1,35 @@
--- ตัวรวมแมพบ้านลุง: หน้าต่างเดียว แบ่งหมวด
+-- ตัวรวมแมพบ้านลุง: หน้าต่างเดียว แท็บเรียงตามหมวด
 --   งานหาเงิน: ลากซุง / ปลูกข้าว / ตีหมู / ขุดเหมือง / ตัดไม้
---   เก็บของ & ขาย: แอร์ดรอป / ขายของ
---   ทั่วไป: กล้อง / แต่งตัว / กันหลุด / อ่านระบบ (ไฟล์ Misc.lua ไฟล์เดียว แยกแท็บ)
--- แต่ละงานยังเป็นไฟล์ของมันเอง ตัวนี้แค่โหลดมาใส่แท็บ
+--   ขาย & อัปเกรด: แอร์ดรอป / ขายของ / เงินฟรี / อัปเกรด
+--   ทั่วไป: กล้อง / แต่งตัว / กันหลุด & เซิฟ / อ่านระบบ
+-- แต่ละงานยังเป็นไฟล์ของมันเอง ตัวนี้สร้างแท็บตามลำดับก่อน แล้วโหลดไฟล์มาใส่
+-- ไฟล์ที่มีหลายหมวดได้ตาราง { ชื่อหมวดในไฟล์ = แท็บ } ไป (หลายไฟล์ใช้แท็บเดียวกันได้)
 local BASE = "https://raw.githubusercontent.com/Noblesse779/RobloxLoader/main/"
+local TABS = {
+    { key = "elephant", title = "ลากซุง", icon = "truck" },
+    { key = "rice", title = "ปลูกข้าว", icon = "leaf" },
+    { key = "pig", title = "ตีหมู", icon = "sword" },
+    { key = "mine", title = "ขุดเหมือง", icon = "pickaxe" },
+    { key = "wood", title = "ตัดไม้", icon = "axe" },
+    { key = "airdrop", title = "แอร์ดรอป", icon = "package" },
+    { key = "sell", title = "ขายของ", icon = "shopping-cart" },
+    { key = "daily", title = "เงินฟรี", icon = "gift" },
+    { key = "upgrade", title = "อัปเกรด", icon = "trending-up" },
+    { key = "cam", title = "กล้อง", icon = "camera" },
+    { key = "outfit", title = "แต่งตัว", icon = "shirt" },
+    { key = "guard", title = "กันหลุด & เซิฟ", icon = "shield" },
+    { key = "tools", title = "อ่านระบบ", icon = "file-search" },
+}
 local JOBS = {
-    { file = "ElephantJob.lua", title = "ลากซุง", icon = "truck" },
-    { file = "RiceJob.lua", title = "ปลูกข้าว", icon = "leaf" },
-    { file = "PigFarm.lua", title = "ตีหมู", icon = "sword" },
-    { file = "Mining.lua", title = "ขุดเหมือง", icon = "pickaxe" },
-    { file = "Woodcut.lua", title = "ตัดไม้", icon = "axe" },
-    { file = "Airdrop.lua", title = "แอร์ดรอป", icon = "package" },
-    { file = "Seller.lua", title = "ขายของ", icon = "shopping-cart" },
-    { file = "Misc.lua", tabs = {
-        { key = "cam", title = "กล้อง", icon = "camera" },
-        { key = "outfit", title = "แต่งตัว", icon = "shirt" },
-        { key = "guard", title = "กันหลุด", icon = "shield" },
-        { key = "tools", title = "อ่านระบบ", icon = "file-search" },
-    } },
+    { file = "ElephantJob.lua", tab = "elephant" },
+    { file = "RiceJob.lua", tab = "rice" },
+    { file = "PigFarm.lua", tab = "pig" },
+    { file = "Mining.lua", tab = "mine" },
+    { file = "Woodcut.lua", tab = "wood" },
+    { file = "Airdrop.lua", tab = "airdrop" },
+    { file = "Seller.lua", tab = "sell" },
+    { file = "Upgrade.lua", tabs = { daily = "daily", upgrade = "upgrade", server = "guard" } },
+    { file = "Misc.lua", tabs = { cam = "cam", outfit = "outfit", guard = "guard", tools = "tools" } },
 }
 
 local env = (typeof(getgenv) == "function" and getgenv()) or _G
@@ -53,7 +65,7 @@ if not ok or typeof(Fluent) ~= "table" then
 end
 
 -- ปิดหน้าต่างเก่าทั้งหมด (ตัวรวมรอบก่อน / ตัวเดี่ยวที่เปิดค้าง)
-for _, key in ipairs({ "BaanLungFluent", "ElephantFluent", "RiceFluent", "PigFluent", "AirdropFluent", "MiningFluent", "WoodFluent", "SellerFluent", "MiscFluent" }) do
+for _, key in ipairs({ "BaanLungFluent", "ElephantFluent", "RiceFluent", "PigFluent", "AirdropFluent", "MiningFluent", "WoodFluent", "SellerFluent", "UpgradeFluent", "MiscFluent" }) do
     if env[key] then
         pcall(function() env[key]:Destroy() end)
         env[key] = nil
@@ -63,7 +75,7 @@ env.BaanLungFluent = Fluent
 
 local Window = Fluent:CreateWindow({
     Title = "บ้านลุง",
-    SubTitle = "งานหาเงิน • ขายของ • ทั่วไป",
+    SubTitle = "งานหาเงิน • ขาย & อัปเกรด • ทั่วไป",
     TabWidth = 150,
     Size = UDim2.fromOffset(580, 460),
     Acrylic = false,
@@ -71,18 +83,21 @@ local Window = Fluent:CreateWindow({
     MinimizeKey = Enum.KeyCode.H,
 })
 
+local tabs, titles = {}, {}
+for _, t in ipairs(TABS) do
+    tabs[t.key] = Window:AddTab({ Title = t.title, Icon = t.icon })
+    titles[t.key] = t.title
+end
+
 for _, job in ipairs(JOBS) do
-    -- ไฟล์ที่มีหลายหมวด (tabs) ได้ตารางแท็บ { key = tab } ไป ที่เหลือได้แท็บเดียว
-    local tab
+    local tab, title
     if job.tabs then
         tab = {}
-        for _, t in ipairs(job.tabs) do
-            tab[t.key] = Window:AddTab({ Title = t.title, Icon = t.icon })
-        end
+        for name, key in pairs(job.tabs) do tab[name] = tabs[key] end
+        title = job.file
     else
-        tab = Window:AddTab({ Title = job.title, Icon = job.icon })
+        tab, title = tabs[job.tab], titles[job.tab]
     end
-    local title = job.title or job.file
     -- แต่ละงานรอของในแมพ (WaitForChild) แยกกัน งานหนึ่งช้าไม่ถ่วงอีกงาน
     task.spawn(function()
         local loaded, err = pcall(function()

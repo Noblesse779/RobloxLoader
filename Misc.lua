@@ -453,6 +453,82 @@ dumpSection:AddButton({
     end,
 })
 
+-- ค้นโค้ดตามชื่อระบบ: decompile เฉพาะสคริปต์ที่ชื่อ/ที่อยู่มีคำที่พิมพ์ แล้วก๊อปลงคลิปบอร์ด + เซฟไฟล์
+local findWords = "BagShop, DailyLogin, Halloween, WeaponShop, ServerBrowser"
+local function findCode(words)
+    if typeof(decompile) ~= "function" then return false, "ตัวรันนี้ decompile ไม่ได้" end
+    local keys = {}
+    for w in string.gmatch(words, "[^,]+") do
+        w = string.lower((w:gsub("^%s+", ""):gsub("%s+$", "")))
+        if w ~= "" then keys[#keys + 1] = w end
+    end
+    if #keys == 0 then return false, "พิมพ์ชื่อระบบก่อน" end
+    local found, seen = {}, {}
+    local function check(inst)
+        if seen[inst] or not (inst:IsA("LocalScript") or inst:IsA("ModuleScript")) then return end
+        seen[inst] = true
+        local full = inst:GetFullName()
+        -- สำเนาใน StarterGui/StarterPlayer ซ้ำกับของที่อยู่ในตัวเรา ข้ามไป
+        if full:find("^StarterGui%.") or full:find("^StarterPlayer%.") then return end
+        local low = string.lower(full)
+        for _, k in ipairs(keys) do
+            if string.find(low, k, 1, true) then
+                found[#found + 1] = { inst = inst, path = full }
+                return
+            end
+        end
+    end
+    for _, root in ipairs({ ReplicatedStorage, game:GetService("ReplicatedFirst"), LocalPlayer, workspace }) do
+        for _, inst in ipairs(root:GetDescendants()) do check(inst) end
+    end
+    if #found == 0 then return false, "ไม่เจอสคริปต์ที่มีคำนี้" end
+    table.sort(found, function(a, b) return a.path < b.path end)
+    local parts = {}
+    for i, f in ipairs(found) do
+        local ok, src = pcall(decompile, f.inst)
+        parts[#parts + 1] = "-- ==== " .. f.path .. "\n" .. (ok and tostring(src) or ("-- decompile ไม่ได้: " .. tostring(src))) .. "\n"
+        if i % 5 == 0 then task.wait() end
+    end
+    local text = table.concat(parts, "\n")
+    local file = "GameDump/" .. game.PlaceId .. "/find.txt"
+    pcall(function()
+        if typeof(makefolder) == "function" then
+            if not (typeof(isfolder) == "function" and isfolder("GameDump")) then makefolder("GameDump") end
+            if not (typeof(isfolder) == "function" and isfolder("GameDump/" .. game.PlaceId)) then
+                makefolder("GameDump/" .. game.PlaceId)
+            end
+        end
+        writefile(file, text)
+    end)
+    pcall(function() setclipboard(text) end)
+    return true, string.format("เจอ %d สคริปต์ ก๊อปลงคลิปบอร์ดแล้ว (เซฟที่ %s ด้วย)", #found, file)
+end
+
+local findSection = Tabs.tools:AddSection("ค้นโค้ดตามชื่อระบบ")
+findSection:AddInput("MiscFindWords", {
+    Title = "ชื่อระบบ (คั่นด้วย ,)",
+    Default = findWords,
+    Placeholder = "เช่น BagShop, DailyLogin",
+    Finished = false,
+}):OnChanged(function(v)
+    findWords = v
+end)
+local finding = false
+findSection:AddButton({
+    Title = "ค้นแล้วก๊อปโค้ด",
+    Description = "ก๊อปโค้ดของระบบที่พิมพ์ลงคลิปบอร์ด วางส่งได้เลย ไม่ต้องไปหาไฟล์",
+    Callback = function()
+        if finding then return end
+        finding = true
+        task.spawn(function()
+            local ok, _, msg = pcall(findCode, findWords)
+            if not ok then msg = _ end
+            Fluent:Notify({ Title = "ค้นโค้ด", Content = tostring(msg), Duration = 6 })
+            finding = false
+        end)
+    end,
+})
+
 if Window then Window:SelectTab(1) end
 
 -- ปิดหน้าต่าง = หยุดตัวนี้ (คืนกล้อง)
