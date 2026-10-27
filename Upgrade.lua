@@ -326,7 +326,7 @@ local serverInfo = "-"
 local function queueReload()
     local queue = (typeof(queue_on_teleport) == "function" and queue_on_teleport)
         or (typeof(syn) == "table" and syn.queue_on_teleport)
-    if queue then pcall(queue, 'loadstring(game:HttpGet("' .. BASE .. 'BaanLung.lua"))()') end
+    if queue then pcall(queue, env.BaanLungBoot or ('loadstring(game:HttpGet("' .. BASE .. 'BaanLung.lua"))()')) end
 end
 
 local function hopLowest()

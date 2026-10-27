@@ -248,7 +248,7 @@ local function queueReload()
     local queue = (typeof(queue_on_teleport) == "function" and queue_on_teleport)
         or (typeof(syn) == "table" and syn.queue_on_teleport)
     if guard.reload and queue then
-        pcall(queue, 'loadstring(game:HttpGet("' .. BASE .. 'BaanLung.lua"))()')
+        pcall(queue, env.BaanLungBoot or ('loadstring(game:HttpGet("' .. BASE .. 'BaanLung.lua"))()'))
     end
 end
 
@@ -617,7 +617,7 @@ dumpSection:AddButton({
         dumping = true
         task.spawn(function()
             local ok, err = pcall(function()
-                loadstring(game:HttpGet(BASE .. "Dump.lua"))()
+                loadstring(env.BaanLungGet and env.BaanLungGet("Dump.lua") or game:HttpGet(BASE .. "Dump.lua"))()
             end)
             if not ok then
                 Fluent:Notify({ Title = "อ่านระบบเซิฟ", Content = "ไม่สำเร็จ: " .. tostring(err), Duration = 6 })

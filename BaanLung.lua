@@ -35,6 +35,14 @@ local JOBS = {
 
 local env = (typeof(getgenv) == "function" and getgenv()) or _G
 
+-- โหลดไฟล์ในโปรเจกต์: ถ้ารีโปเป็นส่วนตัว ตัวเปิด (bootstrap ที่เก็บไว้ในเครื่อง) จะใส่ env.BaanLungGet
+-- ที่ดึงผ่าน GitHub API ด้วย token มาให้ ไม่มี = ดึงจาก raw แบบรีโปสาธารณะ
+env.BaanLungGet = env.BaanLungGet or function(file)
+    return game:HttpGet(BASE .. file)
+end
+-- โค้ดที่ใช้เปิดตัวรวมใหม่หลังย้ายเซิฟ/หลุด (bootstrap ใส่ของตัวเองไว้ให้)
+env.BaanLungBoot = env.BaanLungBoot or ('loadstring(game:HttpGet("' .. BASE .. 'BaanLung.lua"))()')
+
 local FLUENT_URL = "https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"
 local FLUENT_CACHE = "AutoFish/fluent.lua" -- ใช้ไฟล์เดียวกับตัวตกปลา
 local function loadFluent(useCache)
@@ -102,7 +110,7 @@ for _, job in ipairs(JOBS) do
     -- แต่ละงานรอของในแมพ (WaitForChild) แยกกัน งานหนึ่งช้าไม่ถ่วงอีกงาน
     task.spawn(function()
         local loaded, err = pcall(function()
-            local chunk = loadstring(game:HttpGet(BASE .. job.file))
+            local chunk = loadstring(env.BaanLungGet(job.file))
             chunk(tab, Fluent)
         end)
         if not loaded then

@@ -214,9 +214,16 @@ local function handle(prompt)
     -- รอจนจบ: เกมปิดเอง / ผู้เล่นกดปิด / กล่องหาย / หมดเวลากล่อง (180 วิ)
     local gui = LocalPlayer.PlayerGui:FindFirstChild("LES_AirDrop_UI")
     local mini = gui and gui:FindFirstChild("AirDropMiniGame")
+    -- หน้าต่างมินิเกมหายต้องหายติดกัน 3 วิ ถึงนับว่าจบ (กันกระพริบระหว่างรอบแล้วนึกว่าจบ)
+    local hiddenSince
     waitFor(180, function()
+        if mini and not mini.Visible and os.clock() - askedAt > 1 then
+            hiddenSince = hiddenSince or os.clock()
+        else
+            hiddenSince = nil
+        end
         return not alive() or session.closeAt >= askedAt or not prompt:IsDescendantOf(workspace)
-            or (mini and not mini.Visible and os.clock() - askedAt > 1)
+            or (hiddenSince ~= nil and os.clock() - hiddenSince > 3)
     end)
     done[prompt] = true
     if session.result == "win" then
@@ -226,8 +233,18 @@ local function handle(prompt)
         status = "จบแอร์ดรอป (" .. tostring(session.result or "ออกเอง") .. ") กลับไปทำงานต่อ"
     end
     -- รีตัว: ตายแล้วเกิดใหม่ที่จุดเกิด (ไม่ยืนค้างที่กล่อง) งานอื่นรอจนเกิดใหม่ก่อน
+    -- รีตัวตอนชนะ (ผ่านครบ 5 รอบ เกมแจ้ง win รอให้ของเข้ากระเป๋าก่อน)
+    -- หรือผู้ชนะครบ 5 คนแล้ว (limit) ยืนต่อก็ไม่ได้อะไร
     local oldChar = LocalPlayer.Character
-    if auto.reset and oldChar and not riding() then
+    if auto.reset and (session.result == "win" or session.result == "limit") and oldChar and not riding() then
+        local inv = LocalPlayer:FindFirstChild("InventoryState")
+        local total = inv and inv:GetAttribute("Total") or 0
+        if session.result == "win" then
+            waitFor(5, function()
+                return inv ~= nil and (inv:GetAttribute("Total") or 0) > total
+            end)
+            task.wait(1)
+        end
         status = status .. " (รีตัว)"
         local hum = getHum()
         if hum then hum.Health = 0 end
@@ -331,7 +348,7 @@ section:AddToggle("AirdropType", {
 end)
 section:AddToggle("AirdropReset", {
     Title = "เก็บเสร็จแล้วรีตัว",
-    Description = "จบแอร์ดรอปแล้วตายเกิดใหม่ที่จุดเกิด งานอื่นรอจนเกิดใหม่ค่อยทำต่อ",
+    Description = "ชนะครบ 5 รอบได้ของเข้ากระเป๋าแล้ว หรือผู้ชนะครบ 5 คนแล้ว = ตายเกิดใหม่ (แพ้ไม่รีตัว) งานอื่นรอจนเกิดใหม่",
     Default = true,
 }):OnChanged(function(v)
     auto.reset = v
