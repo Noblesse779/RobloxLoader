@@ -409,10 +409,22 @@ local function loadFluent(useCache)
     return loadstring(source)()
 end
 -- เปิดผ่านตัวรวม (BaanLung.lua) จะส่งแท็บ + Fluent มาให้: ใช้แท็บนั้น ไม่สร้างหน้าต่างเอง
+-- ตัวรวมส่งมาได้ 2 แบบ: แท็บเดียว (ใส่ทุกหมวดในแท็บนั้น) หรือตาราง { daily, upgrade, server } แยกแท็บ
+local TAB_KEYS = {
+    { key = "daily", title = "เงินฟรี", icon = "gift" },
+    { key = "upgrade", title = "อัปเกรด", icon = "trending-up" },
+    { key = "server", title = "เซิฟ", icon = "server" },
+}
 local HUB_TAB, HUB_FLUENT = ...
 local Fluent, Window, Tabs
 if HUB_TAB then
-    Fluent, Tabs = HUB_FLUENT, { main = HUB_TAB }
+    Fluent = HUB_FLUENT
+    if typeof(HUB_TAB) == "table" and HUB_TAB.upgrade then
+        Tabs = HUB_TAB
+    else
+        Tabs = {}
+        for _, t in ipairs(TAB_KEYS) do Tabs[t.key] = HUB_TAB end
+    end
 else
     local ok
     ok, Fluent = pcall(loadFluent, true)
@@ -438,12 +450,13 @@ else
         Theme = "Darker",
         MinimizeKey = Enum.KeyCode.H,
     })
-    Tabs = {
-        main = Window:AddTab({ Title = "หลัก", Icon = "home" }),
-    }
+    Tabs = {}
+    for _, t in ipairs(TAB_KEYS) do
+        Tabs[t.key] = Window:AddTab({ Title = t.title, Icon = t.icon })
+    end
 end
 
-local daily = Tabs.main:AddSection("เงินฟรี")
+local daily = Tabs.daily:AddSection("เช็คอินรายวัน")
 daily:AddToggle("UpgDaily", {
     Title = "รับเช็คอินรายวันเอง",
     Description = "เงิน 30k-50k / กระเป๋า +1 / Diamond Gem x30 / Gold Pickaxe / Sushi Rod (รีเที่ยงคืนไทย)",
@@ -456,7 +469,7 @@ daily:AddButton({
     Callback = function() task.spawn(dailyClaim) end,
 })
 
-local shop = Tabs.main:AddSection("อัปเกรด (วาร์ปไปซื้อแล้ววาร์ปกลับ)")
+local shop = Tabs.upgrade:AddSection("ซื้อของ (วาร์ปไปซื้อแล้ววาร์ปกลับ)")
 shop:AddToggle("UpgBag", {
     Title = "ซื้อกระเป๋าใหญ่ขึ้นเองเมื่อเงินพอ",
     Description = "ซื้อไล่ทีละระดับ 250 -> 3000 ช่อง กระเป๋าใหญ่ = ไปขายน้อยรอบ",
@@ -490,7 +503,7 @@ shop:AddButton({
     Callback = function() task.spawn(buyWeapon) end,
 })
 
-local craft = Tabs.main:AddSection("พลั่วดีขึ้น = ขุดไวขึ้น + ขุดเพชรได้ (เพชร 400/เม็ด)")
+local craft = Tabs.upgrade:AddSection("พลั่วดีขึ้น = ขุดไวขึ้น + ขุดเพชรได้ (เพชร 400/เม็ด)")
 craft:AddToggle("UpgKeep", {
     Title = "เก็บแท่งทอง/เพชรไว้คราฟพลั่ว",
     Description = "ล็อกขาย Gold Ingot (ยังไม่มีพลั่วทอง) หรือ Diamond Gem (ยังไม่มีพลั่วเพชร) ร้านจะไม่รับ ได้พลั่วแล้วปลดล็อกเอง",
@@ -511,14 +524,16 @@ craft:AddButton({
     Callback = function() task.spawn(craftPickaxe) end,
 })
 
-local server = Tabs.main:AddSection("เซิฟ")
+local server = Tabs.server:AddSection("ย้ายเซิฟ")
 server:AddButton({
     Title = "ย้ายไปเซิฟที่คนน้อยสุด",
     Description = "คนน้อย = แย่งหิน/ต้นไม้/แอร์ดรอปน้อย  ย้ายแล้วเปิดสคริปต์ให้เอง (ต้องกดเปิดงานใหม่)",
     Callback = function() task.spawn(hopLowest) end,
 })
 
-local statusPara = Tabs.main:AddSection("สถานะ"):AddParagraph({ Title = "สถานะ", Content = status })
+local statusPara = Tabs.upgrade:AddSection("สถานะ"):AddParagraph({ Title = "สถานะ", Content = status })
+local dailyPara = daily:AddParagraph({ Title = "เช็คอิน", Content = dailyInfo })
+local serverPara = server:AddParagraph({ Title = "เซิฟ", Content = serverInfo })
 
 if Window then Window:SelectTab(1) end
 
@@ -540,6 +555,8 @@ task.spawn(function()
                 "เซิฟ: " .. serverInfo,
                 status,
             }, "\n"))
+            dailyPara:SetDesc(dailyInfo)
+            serverPara:SetDesc(serverInfo)
         end)
         task.wait(1)
     end
