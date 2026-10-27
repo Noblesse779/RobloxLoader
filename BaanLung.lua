@@ -1,5 +1,5 @@
 -- ตัวรวมแมพบ้านลุง: หน้าต่างเดียว แท็บเรียงตามหมวด
---   งานหาเงิน: ลากซุง / ปลูกข้าว / ตีหมู / ขุดเหมือง / ตัดไม้
+--   งานหาเงิน: ลากซุง / ปลูกข้าว / ตีหมู / เล็งมอน / ขุดเหมือง / ตัดไม้
 --   ขาย & อัปเกรด: แอร์ดรอป / ขายของ / เงินฟรี / อัปเกรด
 --   ทั่วไป: กล้อง / ลดแลค / แต่งตัว / กันหลุด & เซิฟ / อ่านระบบ
 -- แต่ละงานยังเป็นไฟล์ของมันเอง ตัวนี้สร้างแท็บตามลำดับก่อน แล้วโหลดไฟล์มาใส่
@@ -12,6 +12,7 @@ local TABS = {
     { key = "elephant", title = "ลากซุง", icon = "truck" },
     { key = "rice", title = "ปลูกข้าว", icon = "leaf" },
     { key = "pig", title = "ตีหมู", icon = "sword" },
+    { key = "aim", title = "เล็งมอน", icon = "crosshair" },
     { key = "mine", title = "ขุดเหมือง", icon = "pickaxe" },
     { key = "wood", title = "ตัดไม้", icon = "axe" },
     { key = "airdrop", title = "แอร์ดรอป", icon = "package" },
@@ -27,7 +28,7 @@ local TABS = {
 local JOBS = {
     { file = "ElephantJob.lua", tab = "elephant" },
     { file = "RiceJob.lua", tab = "rice" },
-    { file = "PigFarm.lua", tab = "pig" },
+    { file = "PigFarm.lua", tabs = { main = "pig", aim = "aim" } },
     { file = "Mining.lua", tab = "mine" },
     { file = "Woodcut.lua", tab = "wood" },
     { file = "Airdrop.lua", tab = "airdrop" },

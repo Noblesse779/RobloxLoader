@@ -708,7 +708,12 @@ end
 local HUB_TAB, HUB_FLUENT = ...
 local Fluent, Window, Tabs
 if HUB_TAB then
-    Fluent, Tabs = HUB_FLUENT, { main = HUB_TAB }
+    -- ตัวรวมส่งมาได้ทั้งแท็บเดียว หรือ { main = ตีหมู, aim = เล็งมอน }
+    if typeof(HUB_TAB) == "table" and HUB_TAB.main and HUB_TAB.aim then
+        Fluent, Tabs = HUB_FLUENT, HUB_TAB
+    else
+        Fluent, Tabs = HUB_FLUENT, { main = HUB_TAB, aim = HUB_TAB }
+    end
 else
     local ok
     ok, Fluent = pcall(loadFluent, true)
@@ -736,6 +741,7 @@ else
     })
     Tabs = {
         main = Window:AddTab({ Title = "หลัก", Icon = "home" }),
+        aim = Window:AddTab({ Title = "เล็งมอน", Icon = "crosshair" }),
     }
 end
 
@@ -800,7 +806,7 @@ section:AddDropdown("PigSide", {
 }):OnChanged(function(v)
     auto.side = v
 end)
-local aimSection = Tabs.main:AddSection("เล็งมอน (Aimbot ใส่หมู/บอส ไม่เล็งผู้เล่น)")
+local aimSection = Tabs.aim:AddSection("เล็งมอน (Aimbot ใส่หมู/บอส ไม่เล็งผู้เล่น)")
 aimSection:AddToggle("PigAim", {
     Title = "เล็งมอนอัตโนมัติ",
     Description = "ถืออาวุธ (เช่น Sniper) แล้วมีหมูในวงกลม = หันตัว+กล้องเข้าหาตัวที่ใกล้เมาส์สุด",
