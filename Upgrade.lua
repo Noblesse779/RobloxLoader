@@ -6,6 +6,10 @@
 --            Purchase:InvokeServer(ความจุระดับถัดไป) ต้องซื้อทีละระดับ แล้ว CloseShop:FireServer()
 --   อาวุธ: กดปุ่ม WeaponShopPrompt (ลุงน้อยขายอาวุธ) -> WeaponShopSystem.Remotes.OpenShop { ok, money, owned }
 --          Purchase:InvokeServer(ชื่ออาวุธ)  ของที่มีแล้ว = LocalPlayer.CollectionState BoolValue
+--   คราฟพลั่ว: Survival System.CraftingRemotes.Request:InvokeServer("Craft", รหัสสูตร, GUID, nil) คราฟมือ ไม่ต้องมีโต๊ะ
+--            gold_pickaxe = 50k + ไม้ 30 + Gold Ingot 30 (ขุด 4 ที/ก้อน ขุดเพชรได้)
+--            diamond_pickaxe = 75k + ไม้ 30 + Diamond Gem 30 (ขุด 3 ที/ก้อน)
+--            ล็อกขาย: InventorySystem.Remotes.SetSaleLock:InvokeServer(ชื่อของ, true/false) ร้านจะไม่รับของที่ล็อก
 --   เซิฟ: GetServerList() -> { jobId, players, maxPlayers, isCurrent, hostName }  ย้าย: ServerBrowserJoin(jobId)
 -- ระหว่างไปร้าน งานอื่นในตัวรวมพักรอ (env.AirdropBusy ตัวเดียวกับแอร์ดรอป/ขายของ)
 
@@ -23,7 +27,7 @@ end
 local BASE = "https://raw.githubusercontent.com/Noblesse779/RobloxLoader/main/"
 local status = "-"
 local opt = {
-    daily = false, bag = false, weapon = false,
+    daily = false, bag = false, weapon = false, pickaxe = false, keep = false,
     reserve = 0,   -- เก็บเงินไว้อย่างน้อยเท่านี้ ไม่เอาไปซื้อ
     busy = false,
 }
@@ -242,6 +246,73 @@ local function buyWeapon()
     end)
 end
 
+---------------------------------------------------------------- คราฟพลั่ว
+local Survival = ReplicatedStorage:WaitForChild("Survival System")
+local CraftRemotes = Survival:WaitForChild("CraftingRemotes")
+local HttpService = game:GetService("HttpService")
+local SetSaleLock = ReplicatedStorage:WaitForChild("InventorySystem"):WaitForChild("Remotes"):WaitForChild("SetSaleLock")
+
+-- ไล่ขึ้น: ทอง -> เพชร (มีอันดีกว่าแล้วไม่ต้องทำอันต่ำ)
+local PICKAXES = {
+    { id = "gold_pickaxe", name = "Gold Pickaxe", money = 50000, wood = 30, item = "Gold Ingot", need = 30 },
+    { id = "diamond_pickaxe", name = "Diamond Pickaxe", money = 75000, wood = 30, item = "Diamond Gem", need = 30 },
+}
+
+local function count(name)
+    local inv = LocalPlayer:FindFirstChild("InventoryState")
+    local v = inv and inv:FindFirstChild(name)
+    return v and v.Value or 0
+end
+
+local function nextPickaxe()
+    if owns("Diamond Pickaxe") then return nil end
+    if owns("Gold Pickaxe") then return PICKAXES[2] end
+    return PICKAXES[1]
+end
+
+local function pickaxeNeeds(p)
+    local miss = {}
+    if count("Wood") < p.wood then miss[#miss + 1] = ("ไม้ %d/%d"):format(count("Wood"), p.wood) end
+    if count(p.item) < p.need then miss[#miss + 1] = ("%s %d/%d"):format(p.item, count(p.item), p.need) end
+    if money() - p.money < opt.reserve then miss[#miss + 1] = ("เงิน %s/%s"):format(fmt(money()), fmt(p.money + opt.reserve)) end
+    return miss
+end
+
+local function setLock(name, on)
+    local inv = LocalPlayer:FindFirstChild("InventoryState")
+    local v = inv and inv:FindFirstChild(name)
+    if not v or (v:GetAttribute("SaleLocked") == true) == on then return end
+    pcall(function() SetSaleLock:InvokeServer(name, on) end)
+end
+
+-- ล็อกของที่ต้องใช้คราฟพลั่วตัวถัดไปไว้ไม่ให้ขาย คราฟเสร็จ/ปิดสวิตช์ = ปลดล็อก
+local function syncLocks()
+    local p = nextPickaxe()
+    for _, q in ipairs(PICKAXES) do
+        setLock(q.item, opt.keep and p ~= nil and q == p)
+    end
+end
+
+local function craftPickaxe()
+    local p = nextPickaxe()
+    if not p then status = "มี Diamond Pickaxe แล้ว" return end
+    local miss = pickaxeNeeds(p)
+    if #miss > 0 then
+        status = p.name .. " ยังขาด: " .. table.concat(miss, ", ")
+        return
+    end
+    local ok, res = pcall(function()
+        return CraftRemotes.Request:InvokeServer("Craft", p.id, HttpService:GenerateGUID(false), nil)
+    end)
+    task.wait(0.5)
+    if owns(p.name) then
+        status = "คราฟ " .. p.name .. " แล้ว (ขุดเหมืองจะหยิบอันดีสุดเอง)"
+        syncLocks()
+    else
+        status = "คราฟ " .. p.name .. " ไม่สำเร็จ: " .. tostring(ok and type(res) == "table" and res.Message or res)
+    end
+end
+
 ---------------------------------------------------------------- ย้ายเซิฟ
 local serverInfo = "-"
 
@@ -289,6 +360,11 @@ task.spawn(function()
         if opt.daily and os.clock() - lastDaily >= 60 then
             lastDaily = os.clock()
             pcall(dailyClaim)
+        end
+        pcall(syncLocks)
+        if opt.pickaxe then
+            local p = nextPickaxe()
+            if p and #pickaxeNeeds(p) == 0 then pcall(craftPickaxe) end
         end
         if not opt.busy and not env.AirdropBusy then
             local tier = opt.bag and nextBag()
@@ -407,6 +483,27 @@ shop:AddButton({
     Callback = function() task.spawn(buyWeapon) end,
 })
 
+local craft = Tabs.main:AddSection("พลั่วดีขึ้น = ขุดไวขึ้น + ขุดเพชรได้ (เพชร 400/เม็ด)")
+craft:AddToggle("UpgKeep", {
+    Title = "เก็บแท่งทอง/เพชรไว้คราฟพลั่ว",
+    Description = "ล็อกขาย Gold Ingot (ยังไม่มีพลั่วทอง) หรือ Diamond Gem (ยังไม่มีพลั่วเพชร) ร้านจะไม่รับ ได้พลั่วแล้วปลดล็อกเอง",
+    Default = false,
+}):OnChanged(function(v)
+    opt.keep = v
+    task.spawn(syncLocks)
+end)
+craft:AddToggle("UpgPickaxe", {
+    Title = "คราฟพลั่วเองเมื่อของครบ",
+    Description = "Gold Pickaxe: 50k + ไม้ 30 + Gold Ingot 30  |  Diamond Pickaxe: 75k + ไม้ 30 + Diamond Gem 30",
+    Default = false,
+}):OnChanged(function(v)
+    opt.pickaxe = v
+end)
+craft:AddButton({
+    Title = "คราฟพลั่วตัวถัดไปตอนนี้",
+    Callback = function() task.spawn(craftPickaxe) end,
+})
+
 local server = Tabs.main:AddSection("เซิฟ")
 server:AddButton({
     Title = "ย้ายไปเซิฟที่คนน้อยสุด",
@@ -426,6 +523,12 @@ task.spawn(function()
                 "เงิน: " .. fmt(money()) .. " บาท",
                 "กระเป๋า: " .. fmt(bagCapacity()) .. " ช่อง" .. (tier and (" • ถัดไป " .. fmt(tier.Capacity) .. " ช่อง " .. fmt(tier.Price) .. " บาท") or " • สูงสุดแล้ว"),
                 "อาวุธถัดไป: " .. (w and (w.ToolName .. " " .. fmt(w.Price) .. " บาท") or "ครบแล้ว"),
+                "พลั่วถัดไป: " .. (function()
+                    local p = nextPickaxe()
+                    if not p then return "มีพลั่วเพชรแล้ว" end
+                    local miss = pickaxeNeeds(p)
+                    return p.name .. (#miss > 0 and (" • ขาด " .. table.concat(miss, ", ")) or " • ของครบ คราฟได้")
+                end)(),
                 "เช็คอิน: " .. dailyInfo,
                 "เซิฟ: " .. serverInfo,
                 status,
