@@ -1,6 +1,6 @@
 -- ตัวรวมแมพบ้านลุง: หน้าต่างเดียว แบ่งหมวด
 --   งานหาเงิน: ลากซุง / ปลูกข้าว / ตีหมู / ขุดเหมือง / ตัดไม้
---   เก็บของ & ขาย: แอร์ดรอป / ขายของ
+--   เก็บของ & ขาย: แอร์ดรอป / ขายของ / อัปเกรด (เช็คอิน กระเป๋า อาวุธ ย้ายเซิฟ)
 --   ทั่วไป: กล้อง / แต่งตัว / กันหลุด / อ่านระบบ (ไฟล์ Misc.lua ไฟล์เดียว แยกแท็บ)
 -- แต่ละงานยังเป็นไฟล์ของมันเอง ตัวนี้แค่โหลดมาใส่แท็บ
 local BASE = "https://raw.githubusercontent.com/Noblesse779/RobloxLoader/main/"
@@ -12,6 +12,7 @@ local JOBS = {
     { file = "Woodcut.lua", title = "ตัดไม้", icon = "axe" },
     { file = "Airdrop.lua", title = "แอร์ดรอป", icon = "package" },
     { file = "Seller.lua", title = "ขายของ", icon = "shopping-cart" },
+    { file = "Upgrade.lua", title = "อัปเกรด", icon = "trending-up" },
     { file = "Misc.lua", tabs = {
         { key = "cam", title = "กล้อง", icon = "camera" },
         { key = "outfit", title = "แต่งตัว", icon = "shirt" },
@@ -53,7 +54,7 @@ if not ok or typeof(Fluent) ~= "table" then
 end
 
 -- ปิดหน้าต่างเก่าทั้งหมด (ตัวรวมรอบก่อน / ตัวเดี่ยวที่เปิดค้าง)
-for _, key in ipairs({ "BaanLungFluent", "ElephantFluent", "RiceFluent", "PigFluent", "AirdropFluent", "MiningFluent", "WoodFluent", "SellerFluent", "MiscFluent" }) do
+for _, key in ipairs({ "BaanLungFluent", "ElephantFluent", "RiceFluent", "PigFluent", "AirdropFluent", "MiningFluent", "WoodFluent", "SellerFluent", "UpgradeFluent", "MiscFluent" }) do
     if env[key] then
         pcall(function() env[key]:Destroy() end)
         env[key] = nil
