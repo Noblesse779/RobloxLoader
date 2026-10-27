@@ -233,15 +233,18 @@ local function handle(prompt)
         status = "จบแอร์ดรอป (" .. tostring(session.result or "ออกเอง") .. ") กลับไปทำงานต่อ"
     end
     -- รีตัว: ตายแล้วเกิดใหม่ที่จุดเกิด (ไม่ยืนค้างที่กล่อง) งานอื่นรอจนเกิดใหม่ก่อน
-    -- รีตัวเฉพาะตอนชนะ (ผ่านครบ 5 รอบ เกมแจ้ง win) และรอให้ของเข้ากระเป๋าก่อน
+    -- รีตัวตอนชนะ (ผ่านครบ 5 รอบ เกมแจ้ง win รอให้ของเข้ากระเป๋าก่อน)
+    -- หรือผู้ชนะครบ 5 คนแล้ว (limit) ยืนต่อก็ไม่ได้อะไร
     local oldChar = LocalPlayer.Character
-    if auto.reset and session.result == "win" and oldChar and not riding() then
+    if auto.reset and (session.result == "win" or session.result == "limit") and oldChar and not riding() then
         local inv = LocalPlayer:FindFirstChild("InventoryState")
         local total = inv and inv:GetAttribute("Total") or 0
-        waitFor(5, function()
-            return inv ~= nil and (inv:GetAttribute("Total") or 0) > total
-        end)
-        task.wait(1)
+        if session.result == "win" then
+            waitFor(5, function()
+                return inv ~= nil and (inv:GetAttribute("Total") or 0) > total
+            end)
+            task.wait(1)
+        end
         status = status .. " (รีตัว)"
         local hum = getHum()
         if hum then hum.Health = 0 end
@@ -345,7 +348,7 @@ section:AddToggle("AirdropType", {
 end)
 section:AddToggle("AirdropReset", {
     Title = "เก็บเสร็จแล้วรีตัว",
-    Description = "ชนะครบ 5 รอบ ได้ของเข้ากระเป๋าแล้วค่อยตายเกิดใหม่ (แพ้/ไม่ได้ของไม่รีตัว) งานอื่นรอจนเกิดใหม่",
+    Description = "ชนะครบ 5 รอบได้ของเข้ากระเป๋าแล้ว หรือผู้ชนะครบ 5 คนแล้ว = ตายเกิดใหม่ (แพ้ไม่รีตัว) งานอื่นรอจนเกิดใหม่",
     Default = true,
 }):OnChanged(function(v)
     auto.reset = v
