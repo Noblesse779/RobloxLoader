@@ -112,12 +112,70 @@ local Window = Fluent:CreateWindow({
     MinimizeKey = Enum.KeyCode.H,
 })
 
+---------------------------------------------------------------- หน้าโหลด
+-- ซ่อนหน้าต่างไว้จนทุกแท็บโหลดเสร็จ (กดเร็วไปจะเจอแท็บโล่ง) โชว์แถบโหลดแทน
+local function setWindowVisible(on)
+    pcall(function() Fluent.GUI.Enabled = on end)
+end
+setWindowVisible(false)
+
+local loader = Instance.new("ScreenGui")
+loader.Name = "BaanLungLoading"
+loader.IgnoreGuiInset = true
+loader.ResetOnSpawn = false
+loader.DisplayOrder = 1000
+pcall(function() loader.Parent = (typeof(gethui) == "function" and gethui()) or game:GetService("CoreGui") end)
+if not loader.Parent then loader.Parent = game:GetService("Players").LocalPlayer:WaitForChild("PlayerGui") end
+local box = Instance.new("Frame")
+box.AnchorPoint = Vector2.new(0.5, 0.5)
+box.Position = UDim2.fromScale(0.5, 0.5)
+box.Size = UDim2.fromOffset(340, 120)
+box.BackgroundColor3 = Color3.fromRGB(24, 26, 32)
+box.BorderSizePixel = 0
+box.Parent = loader
+Instance.new("UICorner", box).CornerRadius = UDim.new(0, 12)
+local boxStroke = Instance.new("UIStroke", box)
+boxStroke.Color = Color3.fromRGB(70, 76, 92)
+local function label(text, y, size, color)
+    local l = Instance.new("TextLabel")
+    l.BackgroundTransparency = 1
+    l.Position = UDim2.fromOffset(16, y)
+    l.Size = UDim2.new(1, -32, 0, size + 6)
+    l.Font = Enum.Font.GothamBold
+    l.TextSize = size
+    l.TextColor3 = color
+    l.TextXAlignment = Enum.TextXAlignment.Left
+    l.Text = text
+    l.Parent = box
+    return l
+end
+label("บ้านลุง", 12, 22, Color3.fromRGB(240, 242, 248))
+local loadText = label("กำลังโหลด...", 44, 14, Color3.fromRGB(170, 178, 196))
+local bar = Instance.new("Frame")
+bar.Position = UDim2.fromOffset(16, 84)
+bar.Size = UDim2.new(1, -32, 0, 10)
+bar.BackgroundColor3 = Color3.fromRGB(44, 48, 60)
+bar.BorderSizePixel = 0
+bar.Parent = box
+Instance.new("UICorner", bar).CornerRadius = UDim.new(1, 0)
+local fill = Instance.new("Frame")
+fill.Size = UDim2.fromScale(0, 1)
+fill.BackgroundColor3 = Color3.fromRGB(96, 165, 250)
+fill.BorderSizePixel = 0
+fill.Parent = bar
+Instance.new("UICorner", fill).CornerRadius = UDim.new(1, 0)
+
 local tabs, titles = {}, {}
 for _, t in ipairs(TABS) do
     if inBaanLung or t.any then
         tabs[t.key] = Window:AddTab({ Title = t.title, Icon = t.icon })
         titles[t.key] = t.title
     end
+end
+
+local total, done, failed, pending = 0, 0, {}, {}
+for _, job in ipairs(JOBS) do
+    if inBaanLung or job.any then total += 1 end
 end
 
 for _, job in ipairs(JOBS) do
@@ -131,6 +189,7 @@ for _, job in ipairs(JOBS) do
         tab, title = tabs[job.tab], titles[job.tab]
     end
     -- แต่ละงานรอของในแมพ (WaitForChild) แยกกัน งานหนึ่งช้าไม่ถ่วงอีกงาน
+    pending[job.file] = title
     task.spawn(function()
         local loaded, err = pcall(function()
             local chunk = loadstring(env.BaanLungGet(job.file))
@@ -138,9 +197,34 @@ for _, job in ipairs(JOBS) do
         end)
         if not loaded then
             warn("[BaanLung] โหลด " .. job.file .. " ไม่ได้: " .. tostring(err))
-            Fluent:Notify({ Title = "โหลดไม่ได้", Content = title .. ": " .. tostring(err), Duration = 8 })
+            failed[#failed + 1] = title .. ": " .. tostring(err)
         end
+        pending[job.file] = nil
+        done += 1
     end)
 end
 
 Window:SelectTab(1)
+
+-- รอทุกไฟล์ (ไม่เกิน 40 วิ: บางงานรอของในแมพนานผิดปกติ ก็เปิดหน้าต่างให้ใช้ส่วนที่พร้อมก่อน)
+local startedAt = os.clock()
+while done < total and os.clock() - startedAt < 40 do
+    local waiting = {}
+    for _, name in pairs(pending) do waiting[#waiting + 1] = name end
+    loadText.Text = ("กำลังโหลด %d/%d • %s"):format(done, total, table.concat(waiting, ", "))
+    fill.Size = UDim2.fromScale(done / math.max(1, total), 1)
+    task.wait(0.1)
+end
+fill.Size = UDim2.fromScale(1, 1)
+loadText.Text = done < total and "บางแท็บยังโหลดไม่เสร็จ เปิดส่วนที่พร้อมก่อน" or "พร้อมแล้ว"
+task.wait(0.4)
+loader:Destroy()
+setWindowVisible(true)
+for _, msg in ipairs(failed) do
+    Fluent:Notify({ Title = "โหลดไม่ได้", Content = msg, Duration = 8 })
+end
+if done < total then
+    local waiting = {}
+    for _, name in pairs(pending) do waiting[#waiting + 1] = name end
+    Fluent:Notify({ Title = "ยังโหลดไม่เสร็จ", Content = table.concat(waiting, ", "), Duration = 8 })
+end
