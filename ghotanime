@@ -1,0 +1,684 @@
+-- CandyTDHelper for GitHub (loadstring ready)
+-- วิธีใช้: loadstring(game:HttpGet("ลิงก์ raw ของคุณ"))()
+
+local ok, err = pcall(function()
+	local Players = game:GetService("Players")
+	local ReplicatedStorage = game:GetService("ReplicatedStorage")
+	local UserInputService = game:GetService("UserInputService")
+	local RunService = game:GetService("RunService")
+	local HttpService = game:GetService("HttpService")
+
+	local LocalPlayer = Players.LocalPlayer
+	local CandyTD = ReplicatedStorage:WaitForChild("CandyTD", 30)
+
+	if not CandyTD then
+		warn("[Helper] ไม่พบ CandyTD")
+		return
+	end
+
+	-- ====== รอ ctx ======
+	local ctx
+	task.spawn(function()
+		local t0 = os.clock()
+		while not ctx and os.clock() - t0 < 120 do
+			ctx = _G.CandyTDCtx
+			if ctx then return end
+			task.wait(0.25)
+		end
+	end)
+
+	-- fallback NET
+	local NET
+	task.spawn(function()
+		local net = CandyTD:FindFirstChild("MatchNet")
+		if net then
+			local ok2, mod = pcall(require, net)
+			if ok2 then NET = mod end
+		end
+	end)
+
+	-- ====== STORAGE ======
+	local SLOTS = 5
+	local SLOT_KEY = "CandyTD_Slot_"
+	local SETTINGS_KEY = "CandyTD_HelperSettings"
+
+	local function keyFor(slot)
+		return SLOT_KEY .. tostring(slot)
+	end
+
+	local function saveSlot(slot, data)
+		local ok2, encoded = pcall(function()
+			return HttpService:JSONEncode(data)
+		end)
+		if ok2 then
+			LocalPlayer:SetAttribute(keyFor(slot), encoded)
+		end
+	end
+
+	local function loadSlot(slot)
+		local raw = LocalPlayer:GetAttribute(keyFor(slot))
+		if type(raw) ~= "string" then return nil end
+		local ok2, decoded = pcall(function()
+			return HttpService:JSONDecode(raw)
+		end)
+		if ok2 then return decoded end
+		return nil
+	end
+
+	local function deleteSlot(slot)
+		LocalPlayer:SetAttribute(keyFor(slot), nil)
+	end
+
+	-- ====== SETTINGS ======
+	local settings = {
+		autoUpgrade = false,
+		autoStartWave = false,
+		autoPlayAgain = false,
+		autoReplay = false,
+		replayMinutes = 5,
+		activeSlot = 0,
+	}
+
+	do
+		local raw = LocalPlayer:GetAttribute(SETTINGS_KEY)
+		if type(raw) == "string" then
+			local ok2, decoded = pcall(function()
+				return HttpService:JSONDecode(raw)
+			end)
+			if ok2 and type(decoded) == "table" then
+				for k, v in decoded do
+					if settings[k] ~= nil then settings[k] = v end
+				end
+			end
+		end
+	end
+
+	local function saveSettings()
+		local ok2, encoded = pcall(function()
+			return HttpService:JSONEncode(settings)
+		end)
+		if ok2 then
+			LocalPlayer:SetAttribute(SETTINGS_KEY, encoded)
+		end
+	end
+
+	-- ====== HELPERS ======
+	local function getTowers()
+		return (ctx and ctx.towers) or {}
+	end
+
+	local function getState()
+		if ctx and ctx.state then
+			local ok2, s = pcall(ctx.state)
+			if ok2 then return s end
+		end
+		return nil
+	end
+
+	local function getMoney()
+		local s = getState()
+		return s and (tonumber(s.money) or 0) or 0
+	end
+
+	local function getPlacePrice(kind)
+		if ctx and ctx.placePrice then
+			local ok2, p = pcall(ctx.placePrice, kind)
+			if ok2 and type(p) == "number" then return p end
+		end
+		return 0
+	end
+
+	local function getCap(kind)
+		local cat = CandyTD:FindFirstChild("Catalog")
+		if cat then
+			local ok2, m = pcall(require, cat)
+			if ok2 and m and m.placeCap then
+				local ok3, c = pcall(m.placeCap, kind)
+				if ok3 and type(c) == "number" then return c end
+			end
+		end
+		return 99
+	end
+
+	local function request(action, ...)
+		if NET and NET.request then
+			local ok2, res = pcall(NET.request, action, ...)
+			if ok2 then return res end
+		end
+		return { ok = false, reason = "no net" }
+	end
+
+	local function mine(tower)
+		if NET and NET.mine then
+			local ok2, m = pcall(NET.mine, tower)
+			if ok2 then return m == true end
+		end
+		return false
+	end
+
+	local function isPlacing()
+		if ctx and ctx.placingKind then
+			local ok2, k = pcall(ctx.placingKind)
+			if ok2 then return k ~= nil end
+		end
+		return false
+	end
+
+	local function isPending()
+		if ctx and ctx.pendingKind then
+			local ok2, k = pcall(ctx.pendingKind)
+			if ok2 then return k ~= nil end
+		end
+		return false
+	end
+
+	local function waitPlacingDone(timeout)
+		local t = os.clock()
+		while (isPlacing() or isPending()) and os.clock() - t < timeout do
+			task.wait(0.1)
+		end
+		return not (isPlacing() or isPending())
+	end
+
+	local function banner(msg, kind)
+		if ctx and ctx.banner then
+			pcall(ctx.banner, msg, kind or "info")
+		end
+	end
+
+	-- ====== SAVE / LOAD ======
+	local function saveToSlot(slot)
+		local out = {}
+		for _, t in getTowers() do
+			if mine(t) and t.unit and t.pos then
+				table.insert(out, {
+					kind = t.unit,
+					pos = { t.pos.X, t.pos.Y, t.pos.Z },
+					targeting = t.targeting or "first",
+				})
+			end
+		end
+		if #out == 0 then
+			banner("ไม่มีฮีโร่ให้บันทึก", "full")
+			return
+		end
+		local world = (ctx and ctx.world) or "candy"
+		saveSlot(slot, { world = world, heroes = out, savedAt = os.time() })
+		banner(("บันทึกสล็อต %d: %d ตัว"):format(slot, #out), "clear")
+	end
+
+	local function loadFromSlot(slot)
+		local data = loadSlot(slot)
+		if not data or type(data.heroes) ~= "table" or #data.heroes == 0 then
+			banner(("สล็อต %d ว่าง"):format(slot), "full")
+			return false
+		end
+
+		-- ลบของเดิมของเรา
+		for _, t in getTowers() do
+			if mine(t) then
+				request("sell", t.id)
+				task.wait(0.12)
+			end
+		end
+		task.wait(0.35)
+
+		local placed = 0
+		for _, item in data.heroes do
+			if type(item.kind) ~= "string" then continue end
+			local pos = item.pos
+			if type(pos) ~= "table" or #pos < 3 then continue end
+			local v = Vector3.new(pos[1], pos[2], pos[3])
+
+			local price = getPlacePrice(item.kind)
+			local t = os.clock()
+			while getMoney() < price and os.clock() - t < 15 do
+				task.wait(0.2)
+			end
+
+			local cap = getCap(item.kind)
+			local have = 0
+			for _, tw in getTowers() do
+				if mine(tw) and tw.unit == item.kind then have = have + 1 end
+			end
+			if have >= cap then continue end
+
+			if ctx and ctx.pickHero then
+				pcall(ctx.pickHero, item.kind)
+				task.wait(0.3)
+				waitPlacingDone(8)
+			else
+				request("place", item.kind, v)
+				task.wait(0.15)
+			end
+			placed = placed + 1
+		end
+
+		-- ตั้ง targeting
+		for _, t in getTowers() do
+			if mine(t) then
+				for _, item in data.heroes do
+					if item.kind == t.unit and item.targeting and item.targeting ~= "first" then
+						local dx = t.pos.X - item.pos[1]
+						local dz = t.pos.Z - item.pos[3]
+						if math.sqrt(dx*dx + dz*dz) < 1 then
+							request("target", t.id, item.targeting)
+						end
+					end
+				end
+			end
+		end
+
+		banner(("โหลดสล็อต %d: %d ตัว"):format(slot, placed), "clear")
+		return true
+	end
+
+	-- ====== AUTO ACTIONS ======
+	local autoUpgradeThread = nil
+	local lastWave = nil
+	local wasOver = false
+	local nextWaveRequested = false
+
+	local function upgradeAll()
+		local towers = getTowers()
+		local money = getMoney()
+		local levelMax = 6
+		local cat = CandyTD:FindFirstChild("Catalog")
+		if cat then
+			local ok2, m = pcall(require, cat)
+			if ok2 and m and m.LEVEL and m.LEVEL.max then
+				levelMax = m.LEVEL.max
+			end
+		end
+		for _, t in towers do
+			if not mine(t) then continue end
+			if t.level and t.level >= levelMax then continue end
+			local lv = (t.levels or {})[t.level + 1]
+			local cost = (type(lv) == "table" and tonumber(lv.cost)) or 0
+			if money >= cost then
+				local res = request("upgrade", t.id)
+				if type(res) == "table" and res.ok then
+					money = money - cost
+				else
+					return
+				end
+			end
+			task.wait(0.04)
+		end
+	end
+
+	local function startAutoUpgrade()
+		if autoUpgradeThread then return end
+		autoUpgradeThread = task.spawn(function()
+			while settings.autoUpgrade do
+				if not (isPlacing() or isPending()) then
+					pcall(upgradeAll)
+				end
+				task.wait(0.8)
+			end
+			autoUpgradeThread = nil
+		end)
+	end
+
+	local function stopAutoUpgrade()
+		autoUpgradeThread = nil
+	end
+
+	-- ====== AUTO REPLAY 5 นาที ======
+	local replayThread = nil
+	local replayStart = 0
+
+	local function stopReplay()
+		replayThread = nil
+	end
+
+	local function startReplay()
+		stopReplay()
+		if not settings.autoReplay or settings.activeSlot <= 0 then return end
+		replayStart = os.clock()
+		replayThread = task.spawn(function()
+			while settings.autoReplay and settings.activeSlot > 0 do
+				local elapsed = os.clock() - replayStart
+				if elapsed >= settings.replayMinutes * 60 then
+					replayStart = os.clock()
+					local s = getState()
+					if s and s.over then
+						if ctx and ctx.ctx and ctx.ctx.net then
+							pcall(ctx.ctx.net.request, "again")
+						end
+					end
+					task.wait(0.5)
+					loadFromSlot(settings.activeSlot)
+				end
+				task.wait(1)
+			end
+		end)
+	end
+
+	-- ====== MAIN LOOP ======
+	task.spawn(function()
+		while true do
+			task.wait(0.5)
+			local s = getState()
+			if not s then continue end
+
+			local wave = tonumber(s.wave) or 0
+
+			if settings.autoStartWave and not s.running and not s.over then
+				if lastWave and wave > lastWave and not isPlacing() then
+					nextWaveRequested = true
+				end
+				if nextWaveRequested then
+					local ok2, res = pcall(request, "start")
+					if ok2 and type(res) == "table" and res.ok then
+						nextWaveRequested = false
+					end
+				end
+			else
+				nextWaveRequested = false
+			end
+			lastWave = wave
+
+			if settings.autoPlayAgain and s.over and not wasOver then
+				wasOver = true
+				task.wait(1.5)
+				local ok2, res = pcall(request, "again")
+				if ok2 and type(res) == "table" and res.ok then
+					if settings.autoReplay and settings.activeSlot > 0 then
+						task.wait(1.0)
+						loadFromSlot(settings.activeSlot)
+						replayStart = os.clock()
+					end
+				end
+				task.wait(2.0)
+				wasOver = false
+			end
+			if not s.over then wasOver = false end
+		end
+	end)
+
+	-- ====== UI ======
+	local THEME = {
+		bg = Color3.fromRGB(28, 16, 44),
+		bg2 = Color3.fromRGB(44, 24, 68),
+		accent = Color3.fromRGB(255, 170, 230),
+		accent2 = Color3.fromRGB(150, 220, 255),
+		gold = Color3.fromRGB(255, 220, 120),
+		green = Color3.fromRGB(120, 240, 150),
+		red = Color3.fromRGB(255, 120, 120),
+		text = Color3.fromRGB(255, 240, 252),
+		dim = Color3.fromRGB(180, 160, 200),
+	}
+
+	local gui = Instance.new("ScreenGui")
+	gui.Name = "CandyTDHelper"
+	gui.ResetOnSpawn = false
+	gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+	gui.DisplayOrder = 50
+	gui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+
+	local main = Instance.new("Frame")
+	main.Name = "Main"
+	main.AnchorPoint = Vector2.new(1, 1)
+	main.Position = UDim2.new(1, -16, 1, -16)
+	main.Size = UDim2.fromOffset(280, 70)
+	main.BackgroundColor3 = THEME.bg
+	main.BorderSizeMode = Enum.BorderSizeMode.Pixel
+	main.BorderSizePixel = 0
+	main.Active = true
+	main.Draggable = true
+	main.Parent = gui
+
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0, 12)
+	corner.Parent = main
+
+	local stroke = Instance.new("UIStroke")
+	stroke.Color = THEME.accent
+	stroke.Thickness = 2
+	stroke.Transparency = 0.3
+	stroke.Parent = main
+
+	local header = Instance.new("TextButton")
+	header.Name = "Header"
+	header.Text = ""
+	header.AutoButtonColor = false
+	header.BackgroundTransparency = 1
+	header.Size = UDim2.new(1, 0, 0, 28)
+	header.Parent = main
+
+	local title = Instance.new("TextLabel")
+	title.Text = "CANDY HELPER"
+	title.Font = Enum.Font.GothamBold
+	title.TextSize = 13
+	title.TextColor3 = THEME.accent
+	title.BackgroundTransparency = 1
+	title.TextXAlignment = Enum.TextXAlignment.Left
+	title.Position = UDim2.fromOffset(10, 6)
+	title.Size = UDim2.new(1, -40, 0, 18)
+	title.Parent = header
+
+	local collapse = Instance.new("TextButton")
+	collapse.Text = "▲"
+	collapse.Font = Enum.Font.GothamBold
+	collapse.TextSize = 12
+	collapse.TextColor3 = THEME.text
+	collapse.BackgroundTransparency = 1
+	collapse.Position = UDim2.new(1, -26, 0, 4)
+	collapse.Size = UDim2.fromOffset(20, 20)
+	collapse.Parent = header
+
+	local body = Instance.new("Frame")
+	body.Name = "Body"
+	body.BackgroundTransparency = 1
+	body.Position = UDim2.fromOffset(0, 28)
+	body.Size = UDim2.new(1, 0, 0, 42)
+	body.Parent = main
+
+	local slotRow = Instance.new("Frame")
+	slotRow.BackgroundTransparency = 1
+	slotRow.Position = UDim2.fromOffset(8, 0)
+	slotRow.Size = UDim2.new(1, -16, 0, 26)
+	slotRow.Parent = body
+
+	local slotLabel = Instance.new("TextLabel")
+	slotLabel.Text = "SLOT: 1"
+	slotLabel.Font = Enum.Font.GothamBold
+	slotLabel.TextSize = 12
+	slotLabel.TextColor3 = THEME.text
+	slotLabel.BackgroundTransparency = 1
+	slotLabel.Position = UDim2.fromOffset(0, 0)
+	slotLabel.Size = UDim2.fromOffset(56, 26)
+	slotLabel.Parent = slotRow
+
+	local function makeButton(parent, text, color, xOffset, width)
+		local btn = Instance.new("TextButton")
+		btn.Text = text
+		btn.Font = Enum.Font.GothamBold
+		btn.TextSize = 11
+		btn.TextColor3 = Color3.fromRGB(20, 10, 30)
+		btn.BackgroundColor3 = color
+		btn.AutoButtonColor = false
+		btn.Position = UDim2.fromOffset(xOffset, 0)
+		btn.Size = UDim2.fromOffset(width, 26)
+		btn.Parent = parent
+		local c = Instance.new("UICorner")
+		c.CornerRadius = UDim.new(0, 8)
+		c.Parent = btn
+		return btn
+	end
+
+	local slotPrev = makeButton(slotRow, "<", THEME.dim, 56, 20)
+	local slotNext = makeButton(slotRow, ">", THEME.dim, 78, 20)
+	local saveBtn = makeButton(slotRow, "SAVE", THEME.green, 102, 60)
+	local loadBtn = makeButton(slotRow, "LOAD", THEME.accent2, 166, 60)
+	local delBtn = makeButton(slotRow, "X", THEME.red, 230, 24)
+
+	local toggleRow = Instance.new("Frame")
+	toggleRow.BackgroundTransparency = 1
+	toggleRow.Position = UDim2.fromOffset(8, 28)
+	toggleRow.Size = UDim2.new(1, -16, 0, 22)
+	toggleRow.Parent = body
+
+	local function makeToggle(text, xOffset, width)
+		local btn = Instance.new("TextButton")
+		btn.Text = text
+		btn.Font = Enum.Font.GothamBold
+		btn.TextSize = 10
+		btn.TextColor3 = THEME.dim
+		btn.BackgroundColor3 = THEME.bg2
+		btn.AutoButtonColor = false
+		btn.Position = UDim2.fromOffset(xOffset, 0)
+		btn.Size = UDim2.fromOffset(width, 20)
+		btn.Parent = toggleRow
+		local c = Instance.new("UICorner")
+		c.CornerRadius = UDim.new(0, 6)
+		c.Parent = btn
+		return btn
+	end
+
+	local upBtn = makeToggle("UPG", 0, 46)
+	local waveBtn = makeToggle("WAVE", 50, 52)
+	local againBtn = makeToggle("AGAIN", 106, 56)
+	local replayBtn = makeToggle("5MIN", 166, 46)
+
+	local function refreshToggle(btn, on, label)
+		btn.Text = label .. (on and " ON" or " OFF")
+		if on then
+			btn.BackgroundColor3 = THEME.green
+			btn.TextColor3 = Color3.fromRGB(20, 10, 30)
+		else
+			btn.BackgroundColor3 = THEME.bg2
+			btn.TextColor3 = THEME.dim
+		end
+	end
+
+	local currentSlot = math.clamp(tonumber(settings.activeSlot) or 1, 1, SLOTS)
+
+	local function refreshSlotUI()
+		slotLabel.Text = "SLOT: " .. currentSlot
+		local data = loadSlot(currentSlot)
+		if data and type(data.heroes) == "table" then
+			saveBtn.Text = "SAVE(" .. #data.heroes .. ")"
+		else
+			saveBtn.Text = "SAVE"
+		end
+	end
+
+	refreshSlotUI()
+	refreshToggle(upBtn, settings.autoUpgrade, "UPG")
+	refreshToggle(waveBtn, settings.autoStartWave, "WAVE")
+	refreshToggle(againBtn, settings.autoPlayAgain, "AGAIN")
+	refreshToggle(replayBtn, settings.autoReplay, "5MIN")
+
+	collapse.Activated:Connect(function()
+		local collapsed = main:GetAttribute("Collapsed") == true
+		main:SetAttribute("Collapsed", not collapsed)
+		body.Visible = collapsed
+		main.Size = collapsed and UDim2.fromOffset(280, 70) or UDim2.fromOffset(280, 28)
+		collapse.Text = collapsed and "▲" or "▼"
+	end)
+	main:SetAttribute("Collapsed", false)
+
+	slotPrev.Activated:Connect(function()
+		currentSlot = math.max(1, currentSlot - 1)
+		settings.activeSlot = currentSlot
+		saveSettings()
+		refreshSlotUI()
+	end)
+
+	slotNext.Activated:Connect(function()
+		currentSlot = math.min(SLOTS, currentSlot + 1)
+		settings.activeSlot = currentSlot
+		saveSettings()
+		refreshSlotUI()
+	end)
+
+	saveBtn.Activated:Connect(function()
+		saveToSlot(currentSlot)
+		refreshSlotUI()
+	end)
+
+	loadBtn.Activated:Connect(function()
+		task.spawn(function()
+			local ok2 = loadFromSlot(currentSlot)
+			if ok2 then
+				settings.activeSlot = currentSlot
+				saveSettings()
+				startReplay()
+			end
+		end)
+	end)
+
+	delBtn.Activated:Connect(function()
+		deleteSlot(currentSlot)
+		banner(("ลบสล็อต %d"):format(currentSlot), "info")
+		refreshSlotUI()
+	end)
+
+	upBtn.Activated:Connect(function()
+		settings.autoUpgrade = not settings.autoUpgrade
+		saveSettings()
+		refreshToggle(upBtn, settings.autoUpgrade, "UPG")
+		if settings.autoUpgrade then startAutoUpgrade() else stopAutoUpgrade() end
+		banner("Auto-upgrade " .. (settings.autoUpgrade and "ON" or "OFF"), "info")
+	end)
+
+	waveBtn.Activated:Connect(function()
+		settings.autoStartWave = not settings.autoStartWave
+		saveSettings()
+		refreshToggle(waveBtn, settings.autoStartWave, "WAVE")
+		banner("Auto-start wave " .. (settings.autoStartWave and "ON" or "OFF"), "info")
+	end)
+
+	againBtn.Activated:Connect(function()
+		settings.autoPlayAgain = not settings.autoPlayAgain
+		saveSettings()
+		refreshToggle(againBtn, settings.autoPlayAgain, "AGAIN")
+		banner("Auto-play again " .. (settings.autoPlayAgain and "ON" or "OFF"), "info")
+	end)
+
+	replayBtn.Activated:Connect(function()
+		settings.autoReplay = not settings.autoReplay
+		saveSettings()
+		refreshToggle(replayBtn, settings.autoReplay, "5MIN")
+		if settings.autoReplay then
+			settings.activeSlot = currentSlot
+			saveSettings()
+			startReplay()
+		else
+			stopReplay()
+		end
+		banner(("Auto-replay %d นาที "):format(settings.replayMinutes) .. (settings.autoReplay and "ON" or "OFF"), "info")
+	end)
+
+	if settings.autoUpgrade then startAutoUpgrade() end
+	if settings.autoReplay and settings.activeSlot > 0 then startReplay() end
+
+	UserInputService.InputBegan:Connect(function(input, processed)
+		if processed then return end
+		if input.KeyCode == Enum.KeyCode.F5 then
+			saveToSlot(currentSlot)
+			refreshSlotUI()
+		elseif input.KeyCode == Enum.KeyCode.F6 then
+			task.spawn(function()
+				if loadFromSlot(currentSlot) then
+					settings.activeSlot = currentSlot
+					saveSettings()
+					startReplay()
+				end
+			end)
+		elseif input.KeyCode == Enum.KeyCode.F7 then
+			settings.autoUpgrade = not settings.autoUpgrade
+			saveSettings()
+			refreshToggle(upBtn, settings.autoUpgrade, "UPG")
+			if settings.autoUpgrade then startAutoUpgrade() else stopAutoUpgrade() end
+		end
+	end)
+
+	print("[Helper] พร้อมใช้งาน — UI มุมขวาล่าง")
+end)
+
+if not ok then
+	warn("[CandyHelper] โหลดไม่สำเร็จ: " .. tostring(err))
+end
