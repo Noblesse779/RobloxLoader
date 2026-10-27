@@ -524,15 +524,27 @@ end
 local function autoLoop()
     while alive() and auto.on do
         local hum = getHum()
-        -- สลับกับลากซุง: บอกแท็บลากซุงว่าหมูต้องการเวลาไหม (ไม่มีบอส = หมูทำ / มีบอส = ช้างทำ)
-        local bossUp = boss() ~= nil
-        env.PigWantsTime = auto.bossSwitch and not bossUp
-        if auto.bossSwitch and bossUp then
-            status = "ราชาหมูเกิด ไปลากซุงก่อน (บอสหายแล้วกลับมาตีหมู)"
-            task.wait(1)
-        elseif auto.bossSwitch and env.ElephantDelivering then
-            status = "บอสหายแล้ว รอส่งซุงเที่ยวนี้ให้เสร็จก่อน..."
-            task.wait(1)
+        -- สลับกับลากซุง (BossState.Phase: Warning = ป้ายนับถอยหลังบอสจะเกิด / Active = บอสอยู่ / Recovery = พักสนาม)
+        --   ป้ายเตือนขึ้น หรือบอสเลือดยังเกิน 20% = ไปลากซุง
+        --   บอสเลือดเหลือ 20% = ลงช้างมาช่วยตีบอส / บอสตาย = ลงช้างมาตีหมูต่อ
+        local yield = false
+        if auto.bossSwitch then
+            local phase = BossState and BossState:GetAttribute("Phase")
+            local bossModel, ratio = boss()
+            if not bossModel and phase == "Active" and (BossState:GetAttribute("MaxHealth") or 0) > 0 then
+                ratio = (BossState:GetAttribute("Health") or 0) / BossState:GetAttribute("MaxHealth")
+                bossModel = ratio > 0 and true or nil
+            end
+            yield = phase == "Warning" or (bossModel ~= nil and ratio > BOSS_JOIN)
+            if yield then
+                status = phase == "Warning" and "ป้ายเตือนราชาหมูขึ้น ไปลากซุงก่อน"
+                    or ("ราชาหมูเลือด %d%% ลากซุงไปก่อน (เหลือ %d%% ลงมาช่วยตี)"):format(
+                        math.floor(ratio * 100 + 0.5), BOSS_JOIN * 100)
+            end
+        end
+        env.PigWantsTime = auto.bossSwitch and not yield
+        if yield then
+            task.wait(0.5)
         elseif env.AirdropBusy then
             status = "พักให้แอร์ดรอป..."
             task.wait(0.5)
@@ -638,8 +650,8 @@ section:AddToggle("PigAuto", {
     if v then task.spawn(autoLoop) end
 end)
 section:AddToggle("PigBossSwitch", {
-    Title = "บอสเกิด -> ไปลากซุง, บอสหาย -> กลับมาตีหมู",
-    Description = "เปิดคู่กับ ตีหมูอัตโนมัติ + ลากซุงอัตโนมัติ (แท็บลากซุง) ส่งซุงเที่ยวที่ขับอยู่ให้เสร็จก่อนค่อยกลับมา",
+    Title = "บอสจะเกิด -> ไปลากซุง, บอสเหลือ 20%/ตาย -> ลงช้างมาตี",
+    Description = "เปิดคู่กับ ตีหมูอัตโนมัติ + ลากซุงอัตโนมัติ (แท็บลากซุง) ป้ายเตือนบอสขึ้นไปขี่ช้างเลย บอสเลือดเหลือ 20% หรือตาย ลงช้างทันที",
     Default = false,
 }):OnChanged(function(v)
     auto.bossSwitch = v

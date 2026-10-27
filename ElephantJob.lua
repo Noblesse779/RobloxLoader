@@ -240,8 +240,7 @@ end
 ---------------------------------------------------------------- ลากซุงอัตโนมัติ
 local auto = { on = false, delivered = 0 }
 
--- ตีหมูขอเวลา (เปิด "บอสเกิด -> ไปลากซุง" ในแท็บตีหมู และไม่มีบอส) = พักลากซุง
--- ส่งซุงเที่ยวที่ขับอยู่ให้เสร็จก่อน (env.ElephantDelivering) แล้วค่อยลงจากช้างให้หมูทำต่อ
+-- ตีหมูขอเวลา (เปิดสวิตช์สลับในแท็บตีหมู และไม่มีบอส/บอสเหลือ 20%) = ลงช้างทันที ไม่รอส่งเที่ยวนี้
 local function paused()
     return env.PigWantsTime == true
 end
@@ -293,7 +292,7 @@ local function driveTo(pos, arrive, done)
     local result = false
     while alive() and auto.on do
         if done and done() then result = true break end
-        if paused() and not env.ElephantDelivering then break end -- ขากลับ: หมูขอเวลาแล้ว ไม่ต้องขี่กลับ
+        if paused() then break end -- หมูขอเวลา: หยุดขับทันที
         local mount, root = myMount()
         if not root then break end
         local ground = root.Position - Vector3.new(0, (mount:GetAttribute("GroundOffset") or 6.91) - 0.2, 0)
@@ -385,7 +384,7 @@ end
 local function autoLoop()
     while alive() and auto.on do
         local st = jobState.status
-        if paused() and not (riding() and st == "Active") then
+        if paused() then
             if riding() then dismount() end
             status = "พักให้ตีหมู (รอราชาหมูเกิดค่อยมาลากซุง)"
             task.wait(1)
