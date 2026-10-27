@@ -614,6 +614,74 @@ local function autoLoop()
     if hum and hrp and auto.walk then hum:MoveTo(hrp.Position) end
 end
 
+---------------------------------------------------------------- เล็งมอน (Aimbot ใส่หมู/บอสเท่านั้น ไม่เล็งผู้เล่น)
+-- ถืออาวุธอยู่ + มีมอนในวงกลม FOV (รอบเมาส์) = หันตัวและกล้องเข้าหาตัวที่ใกล้เมาส์สุด
+-- เซิร์ฟเวอร์นับเฉพาะมอนที่อยู่ข้างหน้าในระยะอาวุธ (Sniper ยิงได้ไกล 42)
+local UserInputService = game:GetService("UserInputService")
+local aim = { on = false, fov = 150, circle = true, hold = false, shoot = false }
+
+local fovGui = Instance.new("ScreenGui")
+fovGui.Name = "PigAimFov"
+fovGui.IgnoreGuiInset = true
+fovGui.ResetOnSpawn = false
+pcall(function() fovGui.Parent = (typeof(gethui) == "function" and gethui()) or game:GetService("CoreGui") end)
+if not fovGui.Parent then fovGui.Parent = LocalPlayer:WaitForChild("PlayerGui") end
+local fovRing = Instance.new("Frame")
+fovRing.BackgroundTransparency = 1
+fovRing.AnchorPoint = Vector2.new(0.5, 0.5)
+fovRing.Visible = false
+fovRing.Parent = fovGui
+Instance.new("UICorner", fovRing).CornerRadius = UDim.new(1, 0)
+local fovStroke = Instance.new("UIStroke", fovRing)
+fovStroke.Color = Color3.fromRGB(255, 255, 255)
+fovStroke.Transparency = 0.4
+fovStroke.Thickness = 1.5
+
+local function aimTarget(center)
+    local cam = workspace.CurrentCamera
+    local best, bestD
+    for _, m in ipairs(ActiveMonsters:GetChildren()) do
+        local h = m:FindFirstChildOfClass("Humanoid")
+        local root = monsterRoot(m)
+        if h and h.Health > 0 and root then
+            local sp, onScreen = cam:WorldToViewportPoint(root.Position)
+            if onScreen then
+                local d = (Vector2.new(sp.X, sp.Y) - center).Magnitude
+                if d <= aim.fov and (not bestD or d < bestD) then best, bestD = root, d end
+            end
+        end
+    end
+    return best
+end
+
+local aimConn = RunService.RenderStepped:Connect(function()
+    local center = UserInputService:GetMouseLocation()
+    fovRing.Visible = aim.on and aim.circle
+    if fovRing.Visible then
+        fovRing.Position = UDim2.fromOffset(center.X, center.Y)
+        fovRing.Size = UDim2.fromOffset(aim.fov * 2, aim.fov * 2)
+    end
+    if not aim.on or env.AirdropBusy then return end
+    if aim.hold and not UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton2) then return end
+    local held = weaponTools()[1]
+    if not held or held.Parent ~= LocalPlayer.Character then return end
+    local target = aimTarget(center)
+    if not target then return end
+    face(target.Position)
+    local cam = workspace.CurrentCamera
+    cam.CFrame = CFrame.lookAt(cam.CFrame.Position, target.Position)
+    local stats = WeaponConfig.Weapons[held.Name]
+    local hrp = getRoot()
+    if aim.shoot and stats and hrp and (target.Position - hrp.Position).Magnitude <= stats.Range + 1 then
+        swing(stats)
+    end
+end)
+task.spawn(function()
+    while alive() do task.wait(1) end
+    aimConn:Disconnect()
+    fovGui:Destroy()
+end)
+
 ---------------------------------------------------------------- หน้าต่าง (Fluent)
 local FLUENT_URL = "https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"
 local FLUENT_CACHE = "AutoFish/fluent.lua" -- ใช้ไฟล์เดียวกับตัวตกปลา
@@ -732,6 +800,43 @@ section:AddDropdown("PigSide", {
 }):OnChanged(function(v)
     auto.side = v
 end)
+local aimSection = Tabs.main:AddSection("เล็งมอน (Aimbot ใส่หมู/บอส ไม่เล็งผู้เล่น)")
+aimSection:AddToggle("PigAim", {
+    Title = "เล็งมอนอัตโนมัติ",
+    Description = "ถืออาวุธ (เช่น Sniper) แล้วมีหมูในวงกลม = หันตัว+กล้องเข้าหาตัวที่ใกล้เมาส์สุด",
+    Default = false,
+}):OnChanged(function(v)
+    aim.on = v
+end)
+aimSection:AddSlider("PigAimFov", {
+    Title = "ขนาดวง FOV (พิกเซล)",
+    Default = 150,
+    Min = 30,
+    Max = 600,
+    Rounding = 0,
+}):OnChanged(function(v)
+    aim.fov = v
+end)
+aimSection:AddToggle("PigAimCircle", {
+    Title = "แสดงวง FOV",
+    Default = true,
+}):OnChanged(function(v)
+    aim.circle = v
+end)
+aimSection:AddToggle("PigAimHold", {
+    Title = "เล็งเฉพาะตอนกดคลิกขวาค้าง",
+    Default = false,
+}):OnChanged(function(v)
+    aim.hold = v
+end)
+aimSection:AddToggle("PigAimShoot", {
+    Title = "ยิง/ฟันเองเมื่อเล็งติดและอยู่ในระยะ",
+    Description = "ตามดีเลอาวุธ เหมือนกดเอง",
+    Default = false,
+}):OnChanged(function(v)
+    aim.shoot = v
+end)
+
 local sellSection = Tabs.main:AddSection("ขายเนื้อ")
 sellSection:AddDropdown("PigSell", {
     Title = "ขายเนื้อเมื่อไหร่",
