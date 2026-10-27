@@ -1,7 +1,7 @@
 -- ตัวรวมแมพบ้านลุง: หน้าต่างเดียว แท็บเรียงตามหมวด
 --   งานหาเงิน: ลากซุง / ปลูกข้าว / ตีหมู / ขุดเหมือง / ตัดไม้
 --   ขาย & อัปเกรด: แอร์ดรอป / ขายของ / เงินฟรี / อัปเกรด
---   ทั่วไป: กล้อง / แต่งตัว / กันหลุด & เซิฟ / อ่านระบบ
+--   ทั่วไป: กล้อง / ลดแลค / แต่งตัว / กันหลุด & เซิฟ / อ่านระบบ
 -- แต่ละงานยังเป็นไฟล์ของมันเอง ตัวนี้สร้างแท็บตามลำดับก่อน แล้วโหลดไฟล์มาใส่
 -- ไฟล์ที่มีหลายหมวดได้ตาราง { ชื่อหมวดในไฟล์ = แท็บ } ไป (หลายไฟล์ใช้แท็บเดียวกันได้)
 local BASE = "https://raw.githubusercontent.com/Noblesse779/RobloxLoader/main/"
@@ -16,6 +16,7 @@ local TABS = {
     { key = "daily", title = "เงินฟรี", icon = "gift" },
     { key = "upgrade", title = "อัปเกรด", icon = "trending-up" },
     { key = "cam", title = "กล้อง", icon = "camera" },
+    { key = "perf", title = "ลดแลค", icon = "gauge" },
     { key = "outfit", title = "แต่งตัว", icon = "shirt" },
     { key = "guard", title = "กันหลุด & เซิฟ", icon = "shield" },
     { key = "tools", title = "อ่านระบบ", icon = "file-search" },
@@ -29,7 +30,7 @@ local JOBS = {
     { file = "Airdrop.lua", tab = "airdrop" },
     { file = "Seller.lua", tab = "sell" },
     { file = "Upgrade.lua", tabs = { daily = "daily", upgrade = "upgrade", server = "guard" } },
-    { file = "Misc.lua", tabs = { cam = "cam", outfit = "outfit", guard = "guard", tools = "tools" } },
+    { file = "Misc.lua", tabs = { cam = "cam", perf = "perf", outfit = "outfit", guard = "guard", tools = "tools" } },
 }
 
 local env = (typeof(getgenv) == "function" and getgenv()) or _G
