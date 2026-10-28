@@ -1,4 +1,4 @@
--- CandyTD v6.7 • Remember / Record / Retry | SINGLE-FILE SOURCE BUNDLE
+-- CandyTD v6.8 • Remember / Record / Retry | SINGLE-FILE SOURCE BUNDLE
 -- No external Lua/data downloads; Roblox gameplay and Roblox-hosted assets remain online.
 -- WindUI
 -- MIT License
@@ -32,8 +32,8 @@ local WindUI=loadstring(__BUNDLE_READ("https://github.com/Footagesus/WindUI/rele
 pcall(function()WindUI:SetParent(game:GetService("Players").LocalPlayer:WaitForChild("PlayerGui"))end)
 local Rayfield={}
 local tabIcons={
-    ["Main (Match)"]="gamepad-2",["Auto Slots"]="save",["Lobby Auto"]="house",
-    ["🧬 Evolve"]="dna",["🍬 Feed"]="candy",["🎰 Reroll Trait"]="dices",["เลือกด่าน"]="map",
+    ["Main (Match)"]="gamepad-2",["Auto Slots"]="save",["ล็อบบี้"]="house",
+    ["วิวัฒนาการ"]="dna",["เพิ่มเลเวล"]="candy",["🎰 Reroll Trait"]="dices",["เลือกด่าน"]="map",
 }
 function Rayfield:Notify(options)
     return WindUI:Notify({Title=options.Title or "CandyTD",Content=options.Content or "",Duration=options.Duration or 3,Icon="info"})
@@ -59,6 +59,9 @@ function Rayfield:CreateWindow(options)
             local proxy={}
             function proxy:Set(value)label:SetTitle(tostring(value))end
             return proxy
+        end
+        function wrapped:CreateInput(options)
+            return tab:Input({Title=options.Name,Placeholder=options.Placeholder or "",Value=options.CurrentValue or "",Callback=options.Callback})
         end
         function wrapped:CreateButton(options)
             local button=tab:Button({Title=options.Name or "Button",Desc=options.Description,Callback=options.Callback})
@@ -135,6 +138,7 @@ local SAVE_FILE = "CandyTD_AutoAll_v1.json"
 local DefaultState = {
     autoUpgrade=false, autoStartWave=false, autoReplay="off", activeSlot=0, autoSellExcess=false,
     autoRetryLoss=true,planPlayback="snapshot",recordSlot=1,
+    traitUnitId="",traitTargets={},statsUnitId="",statsTargets={dmg="S",range="ไม่กำหนด",spa="ไม่กำหนด"},statsLocks={},craftRecipe="",summonBanner="normal",lobbyRewardsVersion=0,evolveUnitId="",evolveTarget="",evolvePartner="",
     autoSummon=false, summonMode="10",
     autoClaimDaily=false, autoClaimLevels=false, autoClaimQuests=false, autoClaimPass=false,
     autoSetSlots=false, autoRedeemCodes=false,
@@ -666,6 +670,265 @@ if isMatch then
     end)
 end
 
+-- Lobby rolls use names and protocols from the supplied Hub dump.
+local LobbyRoll={traitRunning=false,statsRunning=false,traitStatus="เลือกตัวละครและ Trait ก่อนเริ่ม",statsStatus="เลือกตัวละครและเกรดก่อนเริ่ม",generation={trait=0,stats=0},busy=false}
+local UnitStats
+State.traitUnitId=type(State.traitUnitId)=="string"and State.traitUnitId or ""
+State.traitTargets=type(State.traitTargets)=="table"and State.traitTargets or {}
+State.statsUnitId=type(State.statsUnitId)=="string"and State.statsUnitId or ""
+State.statsTargets=type(State.statsTargets)=="table"and State.statsTargets or {dmg="S",range="ไม่กำหนด",spa="ไม่กำหนด"}
+State.statsLocks=type(State.statsLocks)=="table"and State.statsLocks or {}
+-- Removed lobby automation must not resume from old settings.
+State.autoRerollTraits=false;State.autoDeleteBelow="off";State.autoSetSlots=false;State.autoRedeemCodes=false;State.autoQuickPlay=false
+function LobbyRoll.modules()
+    if not UnitStats and Hub then local m=Hub:FindFirstChild("UnitStats");if m then local ok,value=pcall(require,m);if ok then UnitStats=value end end end
+    return Catalog and UnitStats
+end
+function LobbyRoll.unit(id)return Profile and Profile.units and Profile.units[id]end
+function LobbyRoll.count(item)
+    if not Catalog or not Profile then return 0 end
+    local ok,value=pcall(Catalog.itemCount,Profile,item);return ok and tonumber(value)or 0
+end
+function LobbyRoll.unitName(kind)
+    local def=Catalog and Catalog.UNITS and Catalog.UNITS[kind]
+    return def and (def.name or def.displayName)or tostring(kind)
+end
+function LobbyRoll.traitName(key)
+    local def=Catalog and Catalog.TRAITS and Catalog.TRAITS[key]
+    return def and def.name or tostring(key or "ไม่มี")
+end
+function LobbyRoll.stop(mode,message)
+    LobbyRoll.generation[mode]=LobbyRoll.generation[mode]+1
+    LobbyRoll[mode.."Running"]=false;LobbyRoll[mode.."Status"]=message or "หยุดแล้ว"
+end
+function LobbyRoll.result(response)
+    if type(response)~="table"then return false,"ไม่ได้รับคำตอบจากเซิร์ฟเวอร์"end
+    if response.ok~=true then return false,tostring(response.reason or "เกมปฏิเสธคำสั่ง")end
+    if type(response.profile)=="table"then Profile=response.profile;if LobbyRoll.extras then LobbyRoll.extras.commit(response)end;return true end
+    local fresh=invoke("GetProfile")
+    if type(fresh)=="table"and type(fresh.profile)=="table"then Profile=fresh.profile;return true end
+    return false,"อ่านผลล่าสุดไม่ได้ กรุณารีเฟรชก่อนเริ่มใหม่"
+end
+function LobbyRoll.start(mode)
+    if isMatch then return end
+    LobbyRoll.stop(mode)
+    if LobbyRoll.busy then LobbyRoll[mode.."Status"]="รอคำสั่งก่อนหน้าสิ้นสุดแล้วเริ่มใหม่";return end
+    LobbyRoll.stop(mode=="trait"and "stats"or "trait","พักขณะใช้อีกระบบ")
+    refreshProfile();LobbyRoll.modules()
+    local id=mode=="trait"and State.traitUnitId or State.statsUnitId
+    if not LobbyRoll.unit(id)then LobbyRoll[mode.."Status"]="เลือกตัวละครที่มีอยู่จริงในกระเป๋า";return end
+    local wanted={}
+    if mode=="trait"then
+        for _,key in ipairs(State.traitTargets)do if Catalog and Catalog.TRAITS[key]then wanted[key]=true end end
+        if not next(wanted)then LobbyRoll.traitStatus="เลือก Trait เป้าหมายอย่างน้อย 1 ชื่อ";return end
+    else
+        if not UnitStats then LobbyRoll.statsStatus="ยังโหลด Hub.UnitStats ไม่สำเร็จ";return end
+        for _,stat in ipairs(UnitStats.STATS)do local index=UnitStats.index(State.statsTargets[stat]);if index then wanted[stat]=index end end
+        if not next(wanted)then LobbyRoll.statsStatus="เลือกเกรดเป้าหมายอย่างน้อย 1 ค่า";return end
+    end
+    LobbyRoll[mode.."Running"]=true
+    local generation=LobbyRoll.generation[mode]
+    task.spawn(function()
+        local rolls=0
+        while LobbyRoll[mode.."Running"]and generation==LobbyRoll.generation[mode]do
+            while LobbyRoll.extras and LobbyRoll.extras.rewardBusy do task.wait(0.1)end
+            if generation~=LobbyRoll.generation[mode]then break end
+            local unit=LobbyRoll.unit(id)
+            if not unit then LobbyRoll.stop(mode,"ตัวละครที่เลือกไม่อยู่ในกระเป๋าแล้ว");break end
+            local locks={};local item,cost,gems
+            if mode=="trait"then
+                if wanted[unit.trait]then LobbyRoll.stop(mode,"ได้เป้าหมายแล้ว: "..LobbyRoll.traitName(unit.trait).." • "..rolls.." ครั้ง");break end
+                item="crystal";cost=tonumber(Catalog.REROLL_COST)or 1;gems=0
+            else
+                local grades=UnitStats.decode(unit.g)
+                if not grades then LobbyRoll.stop(mode,"อ่านเกรดตัวละครไม่ได้ จึงหยุดก่อนใช้ไอเทม");break end
+                local complete=true
+                for _,stat in ipairs(UnitStats.STATS)do
+                    local target=wanted[stat]
+                    local reached=target and grades[stat]>=target
+                    if target and not reached then complete=false end
+                    if State.statsLocks[stat]and target and not reached then LobbyRoll.stop(mode,"ปลดล็อก "..stat.." ก่อน เพราะค่านี้ยังไม่ถึงเป้าหมาย");return end
+                    if reached or State.statsLocks[stat]then locks[#locks+1]=stat end
+                end
+                if complete then LobbyRoll.stop(mode,"ได้ทุกค่าเป้าหมายแล้ว: "..UnitStats.text(unit.g).." • "..rolls.." ครั้ง");break end
+                if #locks>(UnitStats.MAX_LOCKS or 2)then LobbyRoll.stop(mode,"ล็อกได้สูงสุด 2 ค่า กรุณาปลดล็อกหนึ่งค่าก่อน");break end
+                item=UnitStats.ITEM;cost,gems=UnitStats.cost(#locks)
+            end
+            if LobbyRoll.count(item)<cost or(gems>0 and(tonumber(Profile.gems)or 0)<gems)then
+                LobbyRoll.stop(mode,"ทรัพยากรไม่พอ • ต้องใช้ "..cost.." "..tostring(item)..(gems>0 and(" + "..gems.." gems")or "").." • "..rolls.." ครั้ง");break
+            end
+            LobbyRoll.busy=true
+            local response
+            if mode=="trait"then response=invoke("RerollTrait",id)
+            else response=invoke("RerollStats",id,#locks==1 and locks[1]or(#locks>1 and locks or nil))end
+            local ok,reason=LobbyRoll.result(response)
+            LobbyRoll.busy=false
+            if not ok then LobbyRoll.stop(mode,"หยุด: "..reason);break end
+            rolls=rolls+1
+            if generation~=LobbyRoll.generation[mode]then break end
+            unit=LobbyRoll.unit(id)
+            LobbyRoll[mode.."Status"]="สุ่ม "..rolls.." ครั้ง • "..(mode=="trait"and LobbyRoll.traitName(unit and unit.trait)or UnitStats.text(unit and unit.g))
+            task.wait(0.8)
+        end
+    end)
+end
+
+local LobbyExtras={native=nil,nextScan=0,modules={},status="กำลังโหลดข้อมูลล็อบบี้",rewardStatus="กำลังตรวจรางวัล",rewardBusy=false,claimCount=0,craftRunning=false,craftStatus="เลือกสูตรก่อนคราฟต์",craftGeneration=0}
+LobbyRoll.extras=LobbyExtras
+if State.lobbyRewardsVersion~=1 then
+    State.autoClaimDaily=true;State.autoClaimLevels=true;State.autoClaimQuests=true;State.autoClaimPass=true;State.lobbyRewardsVersion=1
+end
+function LobbyExtras.module(name)
+    if LobbyExtras.modules[name]then return LobbyExtras.modules[name]end
+    local object=Hub and Hub:FindFirstChild(name)
+    if object then local ok,value=pcall(require,object);if ok then LobbyExtras.modules[name]=value;return value end end
+end
+function LobbyExtras.context()
+    if LobbyExtras.native then return LobbyExtras.native end
+    if os.clock()<LobbyExtras.nextScan then return nil end
+    LobbyExtras.nextScan=os.clock()+5
+    if type(getgc)~="function"then return nil end
+    local ok,objects=pcall(getgc,true)
+    if ok then
+        for _,object in pairs(objects)do
+            if type(object)=="table"and type(rawget(object,"open"))=="function"and type(rawget(object,"setProfile"))=="function"and rawget(object,"Catalog")==Catalog and type(rawget(object,"hudParts"))=="table"then
+                local gui=rawget(object,"gui")
+                if type(gui)=="table"and typeof(gui.windows)=="Instance"and gui.windows:IsDescendantOf(PlayerGui)then LobbyExtras.native=object;return object end
+            end
+        end
+    end
+end
+function LobbyExtras.commit(response)
+    if type(response)=="table"and type(response.profile)=="table"then
+        Profile=response.profile
+        local native=LobbyExtras.context();if native then pcall(native.setProfile,Profile)end
+    end
+end
+function LobbyExtras.call(folder,name,...)
+    local remote=folder and folder:FindFirstChild(name)
+    if not remote or not remote:IsA("RemoteFunction")then return {ok=false,reason="ไม่พบคำสั่ง "..name}end
+    local ok,response=pcall(remote.InvokeServer,remote,...)
+    if not ok or type(response)~="table"then return {ok=false,reason="เรียก "..name.." ไม่สำเร็จ"}end
+    LobbyExtras.commit(response);return response
+end
+function LobbyExtras.open(name)
+    local native=LobbyExtras.context()
+    if not native then Rayfield:Notify({Title="ยังไม่พบเมนูเกม",Content="รอให้ล็อบบี้โหลดเสร็จ แล้วกดใหม่ ตัวรันต้องรองรับ getgc",Duration=4});return end
+    local ok,result=pcall(native.open,name,{origin="hud"})
+    if not ok or result==false then Rayfield:Notify({Title="เปิดเมนูไม่ได้",Content="เกมอาจกำลังเปลี่ยนหน้า หรือยังไม่ได้โหลดเมนูนี้",Duration=4})end
+end
+function LobbyExtras.day()
+    local native=LobbyExtras.context()
+    if native and type(native.day)=="function"then local ok,day=pcall(native.day);if ok and day then return day end end
+    return Catalog.dayOf(workspace:GetServerTimeNow())
+end
+function LobbyExtras.rewards(all)
+    if isMatch or LobbyExtras.rewardBusy or LobbyRoll.busy then return end
+    LobbyExtras.rewardBusy=true
+    local function run()
+        local fresh=invoke("GetProfile")
+        if type(fresh)~="table"or type(fresh.profile)~="table"then LobbyExtras.rewardStatus="อ่านโปรไฟล์ไม่สำเร็จ จะลองใหม่";return end
+        LobbyExtras.commit(fresh)
+        local messages={};local received=0
+        local function claim(folder,name,...)
+            local response=LobbyExtras.call(folder,name,...)
+            if response.ok then received=received+1;LobbyExtras.claimCount=LobbyExtras.claimCount+1
+            elseif not response.already then messages[#messages+1]=tostring(response.reason or name)end
+            task.wait(0.2);return response.ok==true
+        end
+        if all or State.autoClaimQuests then
+            local day=LobbyExtras.day()
+            for _,def in ipairs(Catalog.QUESTS and Catalog.QUESTS.daily or {})do
+                local have,need,claimed=Catalog.dailyProgress(Profile,def,day)
+                if not claimed and have>=need then claim(HubRemotes,"ClaimQuest",def.id)end
+            end
+            -- Story quests advance one at a time; re-read after each accepted claim.
+            for _=1,20 do
+                local def=Catalog.currentStory(Profile)
+                if not def then break end
+                local have,need=Catalog.storyProgress(Profile,def)
+                if have<need or not claim(HubRemotes,"ClaimQuest",def.id)then break end
+            end
+        end
+        if all or State.autoClaimDaily then
+            local daily=LobbyExtras.module("DailyRewards")
+            if daily then if daily.state(Profile.daily,LobbyExtras.day()).claimable then claim(RewardRemotes,"ClaimDaily")end
+            else messages[#messages+1]="ยังโหลด DailyRewards ไม่สำเร็จ"end
+        end
+        if all or State.autoClaimLevels then
+            local levels=LobbyExtras.module("LevelRewards")
+            if levels then
+                local level=levels.levelOf(Profile)
+                for _,milestone in ipairs(levels.milestones())do if levels.status(Profile,milestone,level)=="ready"then claim(RewardRemotes,"ClaimLevelReward",milestone)end end
+            else messages[#messages+1]="ยังโหลด LevelRewards ไม่สำเร็จ"end
+        end
+        if all or State.autoClaimPass then
+            if Battlepass and Battlepass.claimable(Profile,Battlepass.premium(Profile))>0 then claim(PassRemotes,"ClaimAll")end
+        end
+        LobbyExtras.rewardStatus="รับแล้วทั้งหมด "..LobbyExtras.claimCount.." รายการ • "..(#messages>0 and table.concat(messages," / ")or(received>0 and "รับรางวัลที่พร้อมแล้ว"or "รอภารกิจเสร็จ / รางวัลรอบถัดไป"))
+    end
+    local ok,reason=pcall(run)
+    LobbyExtras.rewardBusy=false
+    if not ok then LobbyExtras.rewardStatus="ตรวจรางวัลผิดพลาด: "..tostring(reason)end
+end
+function LobbyExtras.stopCraft(message)
+    LobbyExtras.craftGeneration=LobbyExtras.craftGeneration+1;LobbyExtras.craftRunning=false;LobbyExtras.craftStatus=message or "หยุดคราฟต์แล้ว"
+end
+function LobbyExtras.craft(repeatMode)
+    if LobbyExtras.craftRunning then return end
+    local recipe=Catalog and Catalog.craftRecipe(State.craftRecipe)
+    if not recipe then LobbyExtras.craftStatus="เลือกสูตรคราฟต์ก่อน";return end
+    LobbyExtras.craftGeneration=LobbyExtras.craftGeneration+1;local generation=LobbyExtras.craftGeneration
+    LobbyExtras.craftRunning=true
+    task.spawn(function()
+        local count=0
+        while generation==LobbyExtras.craftGeneration do
+            refreshProfile()
+            local can=Catalog.craftable(Profile,recipe)
+            if not can then LobbyExtras.stopCraft("วัตถุดิบไม่พอ • คราฟต์แล้ว "..count.." ครั้ง");break end
+            local response=LobbyExtras.call(RS:FindFirstChild("CraftRemotes"),"Craft",recipe.id)
+            if not response.ok then LobbyExtras.stopCraft(tostring(response.reason));break end
+            count=count+1;LobbyExtras.craftStatus="คราฟต์แล้ว "..count.." ครั้ง"
+            if not repeatMode then LobbyExtras.stopCraft("คราฟต์สำเร็จ 1 ครั้ง");break end
+            task.wait(1)
+        end
+    end)
+end
+if not isMatch then
+    task.spawn(function()
+        while true do task.wait(4)
+            if Catalog and HubRemotes and Profile then LobbyExtras.rewards(false)end
+        end
+    end)
+end
+State.autoEvolve=false
+if not isMatch then
+    task.spawn(function()
+        while true do
+            task.wait(3)
+            if State.autoSummon and Catalog and Profile and not LobbyRoll.traitRunning and not LobbyRoll.statsRunning and not LobbyExtras.rewardBusy then
+                local count=tonumber(State.summonMode)or 1
+                local remote,cost,balance="Summon",0,0
+                if State.summonBanner=="event"then
+                    if Catalog.EVENT_BANNER and Catalog.eventCost and Catalog.eventOn and Catalog.eventOn()then
+                        remote="SummonEvent";cost=Catalog.eventCost(count);balance=LobbyRoll.count(Catalog.EVENT_BANNER.currency)
+                    else
+                        State.autoSummon=false;saveData();LobbyExtras.summonStatus="แบนเนอร์กิจกรรมปิดแล้ว"
+                    end
+                else cost=Catalog.summonCost(Profile,count);balance=tonumber(Profile.gems)or 0 end
+                if State.autoSummon then
+                    if balance<cost then LobbyExtras.summonStatus="รอทรัพยากร "..balance.."/"..cost
+                    else
+                        local response=LobbyExtras.call(HubRemotes,remote,count)
+                        LobbyExtras.summonStatus=response.ok and("สุ่มสำเร็จ "..count.." ตัว")or tostring(response.reason)
+                        if not response.ok then State.autoSummon=false;saveData()end
+                    end
+                end
+            end
+        end
+    end)
+end
+
 -- ═══════════ LOBBY LOGIC ═══════════
 if not isMatch then
     local Loop = { lastSummon=0, lastClaim=0, lastPlay=0, lastReroll=0, lastEvolve=0, 
@@ -673,41 +936,9 @@ if not isMatch then
     
     task.spawn(function()
         while true do task.wait(1)
-            if not ctx and HubRemotes and Profile then
+            if not ctx and HubRemotes and Profile and Catalog then
                 local now = os.clock()
                 
-                if State.autoSummon and now - Loop.lastSummon > 3 then
-                    Loop.lastSummon = now
-                    local n = tonumber(State.summonMode) or 1
-                    if (tonumber(Profile.gems) or 0) >= Catalog.summonCost(Profile, n) then
-                        invoke("Summon", n); task.wait(1); refreshProfile()
-                    end
-                end
-
-                if (State.autoClaimDaily or State.autoClaimLevels or State.autoClaimQuests or State.autoClaimPass) and now - Loop.lastClaim > 4 then
-                    Loop.lastClaim = now
-                    if State.autoClaimDaily then local d=rr("ClaimDaily"); if d then pcall(d.InvokeServer,d) end end
-                    if State.autoClaimLevels then
-                        local lvl = tonumber(LocalPlayer:GetAttribute("Level")) or (LocalPlayer.leaderstats and LocalPlayer.leaderstats.Level and LocalPlayer.leaderstats.Level.Value) or 1
-                        if lvl > Loop.lastLevel then
-                            Loop.lastLevel = lvl
-                            local cl=rr("ClaimLevelReward"); if cl then for i=1,lvl do pcall(cl.InvokeServer, cl, i) end end
-                        end
-                    end
-                    if State.autoClaimQuests then
-                        local q = Profile.quests or {}; local qf=hr("ClaimQuest")
-                        if qf then
-                            for _,d in ipairs(Catalog.QUESTS.daily or {}) do
-                                if ((q.daily and q.daily[d.id]) or 0) >= d.goal and not (q.claimed and q.claimed[d.id]) then
-                                    pcall(qf.InvokeServer, qf, d.id)
-                                end
-                            end
-                        end
-                    end
-                    if State.autoClaimPass then local ca=pr("ClaimAll"); if ca then pcall(ca.InvokeServer,ca) end end
-                    refreshProfile()
-                end
-
                 if State.autoPlay and now - Loop.lastPlay > 8 then
                     Loop.lastPlay = now
                     local tid = nil
@@ -718,47 +949,7 @@ if not isMatch then
                     if tid then local play=hr("Play"); if play then pcall(play.InvokeServer, play, tid) end end
                 end
 
-                if State.autoEvolve and now - Loop.lastEvolve > 3 then
-                    Loop.lastEvolve = now
-                    local minOrder = RARITY_ORDER[State.evolveMinRarity or "Rare"] or 1
-                    local mode = State.evolveMode or "all_ready"
-                    local specific = State.evolveSpecificKind
-                    local candidates = {}
-                    for uid, u in pairs(Profile.units or {}) do
-                        if type(u)=="table" and u.kind then
-                            local ur = Catalog.UNITS[u.kind]
-                            local uord = (ur and ur.rarity and RARITY_ORDER[ur.rarity]) or 1
-                            local evos = (Catalog.evolutionsOf and Catalog.evolutionsOf(u.kind)) or {}
-                            if #evos > 0 and uord >= minOrder then
-                                if mode == "specific_kind" then
-                                    if u.kind == specific then table.insert(candidates, {id=uid, kind=u.kind, order=uord, level=u.level or 1, evos=evos}) end
-                                else table.insert(candidates, {id=uid, kind=u.kind, order=uord, level=u.level or 1, evos=evos}) end
-                            end
-                        end
-                    end
-                    if mode == "highest_rarity" or mode == "all_ready" then
-                        table.sort(candidates, function(a,b) if a.order~=b.order then return a.order>b.order end return a.level>b.level end)
-                    elseif mode == "specific_kind" then table.sort(candidates, function(a,b) return a.level>b.level end) end
-
-                    for _, cand in ipairs(candidates) do
-                        for _, evo in ipairs(cand.evos) do
-                            local r = evo.recipe or {}
-                            local canGo = not r.testers
-                            if canGo and r.gems and (tonumber(Profile.gems) or 0) < r.gems then canGo = false end
-                            if canGo and r.items then
-                                for it, n in pairs(r.items) do if Catalog.itemCount(Profile, it) < n then canGo = false; break end end
-                            end
-                            if canGo and r.with then
-                                local has = false
-                                for _, pu in pairs(Profile.units) do if pu.kind == r.with then has = true; break end end
-                                if not has then canGo = false end
-                            end
-                            if canGo then invoke("EvolveUnit", cand.kind, evo.target, cand.id); task.wait(0.8); refreshProfile(); break end
-                        end
-                    end
-                end
-
-                if State.autoFeed and now - Loop.lastFeed > 1 then
+                if not LobbyRoll.traitRunning and not LobbyRoll.statsRunning and State.autoFeed and now - Loop.lastFeed > 1 then
                     Loop.lastFeed = now
                     local candy = Catalog.itemCount(Profile, "candy")
                     local big = Catalog.itemCount(Profile, "bigcandy")
@@ -788,83 +979,19 @@ if not isMatch then
                     end
                 end
 
-                if State.autoRerollTraits and now - Loop.lastReroll > 1 then
-                    Loop.lastReroll = now
-                    if Catalog.itemCount(Profile, "crystal") > 0 then
-                        local targetOrder = RARITY_ORDER[State.rerollTargetTrait] or 4
-                        local minRarOrd = State.rerollRarityFilter=="all" and 0 or (RARITY_ORDER[State.rerollRarityFilter] or 0)
-                        local kindFilter = State.rerollKindFilter
-                        local candidates = {}
-                        for uid, u in pairs(Profile.units or {}) do
-                            if type(u)=="table" and u.kind then
-                                local uord = RARITY_ORDER[rarityOf(u.kind)] or 1
-                                local tord = (Catalog.traitOrder and Catalog.traitOrder(u.trait)) or 0
-                                local okRar = (State.rerollRarityFilter=="all") or (uord >= minRarOrd)
-                                local okKind = (kindFilter=="all") or (u.kind == kindFilter)
-                                if okRar and okKind and tord < targetOrder then table.insert(candidates, {id=uid, kind=u.kind, level=u.level or 1, heroOrder=uord, traitOrder=tord}) end
-                            end
-                        end
-                        if #candidates > 0 then
-                            local prio = State.rerollPriority
-                            if prio=="lowest_trait" then table.sort(candidates, function(a,b) if a.traitOrder~=b.traitOrder then return a.traitOrder<b.traitOrder end return a.heroOrder>b.heroOrder end)
-                            elseif prio=="highest_rarity" then table.sort(candidates, function(a,b) if a.heroOrder~=b.heroOrder then return a.heroOrder>b.heroOrder end return a.traitOrder<b.traitOrder end)
-                            elseif prio=="specific_kind" then table.sort(candidates, function(a,b) return a.traitOrder<b.traitOrder end) end
-                            local target = candidates[1]
-                            if target then invoke("RerollTrait", target.id); task.wait(0.4); refreshProfile() end
-                        end
-                    end
-                end
-
-                if State.autoDeleteBelow ~= "off" and now - Loop.lastDelete > 5 then
-                    Loop.lastDelete = now
-                    local th = RARITY_ORDER[State.autoDeleteBelow] or 0
-                    local kill = {}
-                    for uid, u in pairs(Profile.units or {}) do
-                        if type(u)=="table" and u.kind and (RARITY_ORDER[rarityOf(u.kind)] or 0) < th then table.insert(kill, uid) end
-                    end
-                    if #kill > 0 then invoke("DeleteUnits", kill); task.wait(1); refreshProfile() end
-                end
-
-                if State.autoSetSlots and now - Loop.lastSlots > 5 then
-                    Loop.lastSlots = now
-                    local arr = {}
-                    for id, u in pairs(Profile.units or {}) do
-                        if type(u)=="table" and u.kind then table.insert(arr, {id=id, kind=u.kind, level=u.level or 1, order=rarityOrderOf(u.kind)}) end
-                    end
-                    table.sort(arr, function(a,b) if a.order~=b.order then return a.order>b.order end return a.level>b.level end)
-                    if #arr > 0 then
-                        local slots = { "", "", "", "", "", "" }
-                        for i=1, math.min(6, #arr) do slots[i] = arr[i].id end
-                        invoke("SetSlots", slots); task.wait(1); refreshProfile()
-                    end
-                end
-
-                if State.autoRedeemCodes and now - Loop.lastCode > 5 then
-                    Loop.lastCode = now
-                    local COMMON_CODES = {"CANDYTD","CANDYKINGDOM","ADVENTURE","JAKE","FINN","BMO","MARCELINE","PRINCESS","LEMONGRAB","LICH","GUNTER","WENK","OOO","CANDY","SWEET","HALLOWEEN","2024","2025","100K","50K","SUMMER","WINTER","SPOOKY","CANDYLOVE","TREEHOUSE"}
-                    for _, code in ipairs(COMMON_CODES) do
-                        if not UsedCodes[code] then
-                            local res = invoke("RedeemCode", code)
-                            if type(res)=="table" and (res.ok or (res.reason and string.lower(tostring(res.reason)):find("already")) or string.lower(tostring(res.reason)):find("used")) then
-                                UsedCodes[code] = true; saveData()
-                            end
-                            task.wait(0.3)
-                        end
-                    end
-                end
-
-                if State.autoQuickPlay and now - Loop.lastQuickPlay > 15 then
-                    Loop.lastQuickPlay = now
-                    local qp = hr("QuickPlay"); if qp then pcall(qp.InvokeServer, qp) end
-                end
             end
         end
     end)
 end
 
+if not isMatch then
+    local deadline=os.clock()+25
+    while (not Catalog or not HubRemotes)and os.clock()<deadline do task.wait(0.2)end
+    refreshProfile();buildKindLists();buildStageList();LobbyRoll.modules()
+end
 -- ═══════════ UI SETUP ═══════════
 local Window = Rayfield:CreateWindow({
-    Name = "CandyTD Auto-All v6.7 • Record + Retry",
+    Name = "CandyTD Auto-All v6.8 • Record + Retry",
     LoadingTitle = isMatch and "Match Mode" or "Lobby Mode",
     ConfigurationSaving = { Enabled = false },
     KeySystem = false,
@@ -962,53 +1089,251 @@ if isMatch then
 
 else
     -- ─────────────── [LOBBY UI] ───────────────
-    local LB = Window:CreateTab("Lobby Auto", 4483362459)
-    LB:CreateSection("SUMMON")
+    local LB = Window:CreateTab("ล็อบบี้", 4483362459)
+    LB:CreateSection("สุ่มตัวละคร")
     LB:CreateToggle({ Name="🎲 สุ่มฮีโร่", CurrentValue=State.autoSummon, Callback=function(v) State.autoSummon=v; saveData() end })
     LB:CreateDropdown({ Name="จำนวน", Options={"1 ตัว","10 ตัว"}, CurrentOption={ State.summonMode=="10" and "10 ตัว" or "1 ตัว" }, MultipleOptions=false, Callback=function(o) State.summonMode = ((type(o)=="table" and o[1] or o)=="10 ตัว") and "10" or "1"; saveData() end })
-    LB:CreateSection("CLAIM REWARDS")
-    LB:CreateToggle({ Name="🎁 Daily", CurrentValue=State.autoClaimDaily, Callback=function(v) State.autoClaimDaily=v; saveData() end })
-    LB:CreateToggle({ Name="🏆 Level", CurrentValue=State.autoClaimLevels, Callback=function(v) State.autoClaimLevels=v; saveData() end })
-    LB:CreateToggle({ Name="📜 Quest", CurrentValue=State.autoClaimQuests, Callback=function(v) State.autoClaimQuests=v; saveData() end })
-    LB:CreateToggle({ Name="🎫 Battle Pass", CurrentValue=State.autoClaimPass, Callback=function(v) State.autoClaimPass=v; saveData() end })
-    LB:CreateSection("OTHER")
-    LB:CreateDropdown({ Name="🗑️ Auto-Delete ต่ำกว่า", Options={"off","Rare","Epic","Legendary"}, CurrentOption={ State.autoDeleteBelow }, MultipleOptions=false, Callback=function(o) State.autoDeleteBelow = type(o)=="table" and o[1] or o; saveData() end })
-    LB:CreateToggle({ Name="⭐ Auto-Set Slots", CurrentValue=State.autoSetSlots, Callback=function(v) State.autoSetSlots=v; saveData() end })
-    LB:CreateToggle({ Name="🔑 Auto-Redeem Codes", CurrentValue=State.autoRedeemCodes, Callback=function(v) State.autoRedeemCodes=v; saveData() end })
-    LB:CreateToggle({ Name="⚔️ Auto QuickPlay (PvP)", CurrentValue=State.autoQuickPlay, Callback=function(v) State.autoQuickPlay=v; saveData() end })
+    LB:CreateSection("รับรางวัล")
+    LB:CreateToggle({ Name="🎁 รางวัลรายวัน", CurrentValue=State.autoClaimDaily, Callback=function(v) State.autoClaimDaily=v; saveData() end })
+    LB:CreateToggle({ Name="🏆 รางวัลเลเวล", CurrentValue=State.autoClaimLevels, Callback=function(v) State.autoClaimLevels=v; saveData() end })
+    LB:CreateToggle({ Name="📜 รางวัลภารกิจ", CurrentValue=State.autoClaimQuests, Callback=function(v) State.autoClaimQuests=v; saveData() end })
+    LB:CreateToggle({ Name="🎫 รางวัล Battle Pass", CurrentValue=State.autoClaimPass, Callback=function(v) State.autoClaimPass=v; saveData() end })
+    LB:CreateButton({Name="รับรางวัลที่พร้อมทั้งหมดตอนนี้",Callback=function()task.spawn(function()LobbyExtras.rewards(true)end)end})
+    local summonBannerChoices={"ปกติ"}
+    if Catalog.EVENT_BANNER and Catalog.eventCost then summonBannerChoices[#summonBannerChoices+1]="กิจกรรม"end
+    LB:CreateDropdown({Name="แบนเนอร์สุ่ม",Options=summonBannerChoices,CurrentOption={State.summonBanner=="event"and "กิจกรรม"or "ปกติ"},Callback=function(o)
+        local selected=type(o)=="table"and o[1]or o;State.summonBanner=selected=="กิจกรรม"and "event"or "normal";saveData()
+    end})
+    local summonStatus=LB:CreateLabel("รอเปิดสุ่มตัวละคร")
+    task.spawn(function()while true do task.wait(1);summonStatus:Set(LobbyExtras.summonStatus or "รอเปิดสุ่มตัวละคร")end end)
+    local rewardStatus=LB:CreateLabel(LobbyExtras.rewardStatus)
+    LB:CreateButton({Name="รีเฟรชข้อมูลล็อบบี้",Callback=function()
+        local response=LobbyExtras.call(HubRemotes,"GetProfile")
+        Rayfield:Notify({Title=response.profile and "อัปเดตแล้ว"or "รีเฟรชไม่ได้",Content=response.profile and "อ่านข้อมูลล่าสุดจากเกมแล้ว"or tostring(response.reason),Duration=3})
+    end})
+    task.spawn(function()while true do task.wait(0.5);rewardStatus:Set(LobbyExtras.rewardStatus)end end)
+    local CF=Window:CreateTab("คราฟต์",4483362461)
+    CF:CreateLabel("สูตรและจำนวนวัตถุดิบอ่านจากเกม • การคราฟต์ใช้ไอเทมจริง")
+    local craftMap,craftOptions={},{}
+    for _,recipe in ipairs(Catalog and Catalog.CRAFTS or {})do
+        local def=Catalog.ITEMS[recipe.id];local label=def and def.name or recipe.id
+        craftOptions[#craftOptions+1]=label;craftMap[label]=recipe.id
+    end
+    local currentCraft="เลือกสูตร"
+    for label,id in pairs(craftMap)do if id==State.craftRecipe then currentCraft=label end end
+    CF:CreateDropdown({Name="สูตรคราฟต์",Options=craftOptions,CurrentOption={currentCraft},Callback=function(o)
+        LobbyExtras.stopCraft();local label=type(o)=="table"and o[1]or o;State.craftRecipe=craftMap[label];saveData()
+    end})
+    local craftMaterials=CF:CreateLabel("เลือกสูตรเพื่อดูวัตถุดิบ")
+    local craftStatus=CF:CreateLabel(LobbyExtras.craftStatus)
+    CF:CreateButton({Name="คราฟต์ 1 ครั้ง",Callback=function()LobbyExtras.craft(false)end})
+    CF:CreateButton({Name="คราฟต์ซ้ำจนวัตถุดิบหมด",Callback=function()LobbyExtras.craft(true)end})
+    CF:CreateButton({Name="หยุดคราฟต์",Callback=function()LobbyExtras.stopCraft()end})
+    task.spawn(function()while true do
+        task.wait(1);craftStatus:Set(LobbyExtras.craftStatus)
+        local recipe=Catalog and Catalog.craftRecipe(State.craftRecipe)
+        if recipe then
+            local parts={}
+            for id,need in pairs(recipe.items)do local def=Catalog.ITEMS[id];parts[#parts+1]=(def and def.name or id).." "..LobbyRoll.count(id).."/"..need end
+            table.sort(parts);craftMaterials:Set(table.concat(parts," • "))
+        end
+    end end)
+    local GM=Window:CreateTab("เมนูเกมทั้งหมด",4483362460)
+    GM:CreateLabel("เปิดหน้าต่างเดิมของเกม • กด Right Shift ซ่อนเมนูสคริปต์เพื่อใช้งาน • การซื้อ/ลบ/เริ่มกิจกรรมให้เลือกเองในหน้าต่างเกม")
+    for _,entry in ipairs({
+        {"inventory","กระเป๋าตัวละคร / จัดทีม / ล็อกตัว / สกิน"},
+        {"items","กระเป๋าไอเทม"},{"summon","สุ่มตัวละคร / แบนเนอร์กิจกรรม"},
+        {"traits","รีโรล / เลือก Trait ในเกม"},{"stats","รีสเตตัส / ล็อกค่าในเกม"},
+        {"shrine","วิวัฒนาการ"},{"craft","คราฟต์ในเกม"},{"titles","ฉายาที่ปลดล็อก"},
+        {"daily","รางวัลรายวัน"},{"levels","รางวัลเลเวล"},{"battlepass","Battle Pass"},
+        {"shop","ร้านค้า"},{"teller","Teller Shop"},{"leaderboards","กระดานอันดับ"},
+        {"tourney","Tournament"},{"battle","Battles"},{"raid","Raid"},{"challenges","Challenges"}
+    })do
+        local key,title=entry[1],entry[2]
+        GM:CreateButton({Name=title,Callback=function()LobbyExtras.open(key)end})
+    end
+    GM:CreateButton({Name="แสดง / ซ่อนภารกิจ",Callback=function()
+        local native=LobbyExtras.context();local quests=native and native.hudParts.quests
+        if quests and type(quests.toggle)=="function"then pcall(quests.toggle)end
+    end})
+    GM:CreateButton({Name="ค้นหาหน้าต่างเกมใหม่",Callback=function()
+        LobbyExtras.native=nil;LobbyExtras.nextScan=0
+        Rayfield:Notify({Title="เชื่อมเมนูเกม",Content=LobbyExtras.context()and "พบแล้ว"or "ยังไม่พบ รอโหลดล็อบบี้แล้วลองใหม่",Duration=3})
+    end})
 
-    local EVO = Window:CreateTab("🧬 Evolve", 4483362461)
-    EVO:CreateSection("AUTO EVOLVE")
-    EVO:CreateToggle({ Name="🧬 Evolve อัตโนมัติ", CurrentValue=State.autoEvolve, Callback=function(v) State.autoEvolve=v; saveData() end })
-    EVO:CreateSection("เกณฑ์เลือก")
-    EVO:CreateDropdown({ Name="โหมด", Options={ "all_ready (ทุกตัว)", "specific_kind (เฉพาะ kind)", "highest_rarity (rarity สูงสุดก่อน)" }, CurrentOption={ State.evolveMode=="specific_kind" and "specific_kind (เฉพาะ kind)" or State.evolveMode=="highest_rarity" and "highest_rarity (rarity สูงสุดก่อน)" or "all_ready (ทุกตัว)" }, MultipleOptions=false, Callback=function(o) local v = type(o)=="table" and o[1] or o; if v:find("specific_kind") then State.evolveMode="specific_kind" elseif v:find("highest_rarity") then State.evolveMode="highest_rarity" else State.evolveMode="all_ready" end; saveData() end })
-    EVO:CreateDropdown({ Name="kind (ถ้าเลือก specific)", Options=(function() local t={}; if Catalog then for _,k in ipairs(EvolveKinds) do local u=Catalog.UNITS[k]; table.insert(t, k.." ("..((u and u.rarity) or "?")..")") end end; if #t==0 then table.insert(t,"⏳ รอโหลด") end; return t end)(), CurrentOption={ State.evolveSpecificKind }, MultipleOptions=false, Callback=function(o) local v = type(o)=="table" and o[1] or o; State.evolveSpecificKind = string.match(v, "^([^%s]+)") or v; saveData() end })
-    EVO:CreateDropdown({ Name="ขั้นต่ำ rarity", Options={ "Rare", "Epic", "Legendary", "Mythic" }, CurrentOption={ State.evolveMinRarity }, MultipleOptions=false, Callback=function(o) State.evolveMinRarity = type(o)=="table" and o[1] or o; saveData() end })
+    local CD=Window:CreateTab("แลกโค้ด",4483362460)
+    local redeemCode=""
+    local redeemStatus=CD:CreateLabel("กรอกโค้ดจากประกาศเกม แล้วกดแลก")
+    CD:CreateInput({Name="โค้ด",Placeholder="กรอกโค้ด",CurrentValue="",Callback=function(value)redeemCode=tostring(value)end})
+    CD:CreateButton({Name="แลกโค้ด",Callback=function()
+        local code=redeemCode:match("^%s*(.-)%s*$")
+        if code==""then redeemStatus:Set("กรอกโค้ดก่อน");return end
+        local response=LobbyExtras.call(HubRemotes,"RedeemCode",code)
+        redeemStatus:Set(response.ok and "แลกโค้ดสำเร็จ"or tostring(response.reason or "แลกไม่สำเร็จ"))
+    end})
 
-    local FD = Window:CreateTab("🍬 Feed", 4483362462)
-    FD:CreateSection("AUTO FEED")
-    FD:CreateToggle({ Name="🍬 Auto-Feed", CurrentValue=State.autoFeed, Callback=function(v) State.autoFeed=v; saveData() end })
+    local EVO=Window:CreateTab("วิวัฒนาการ",4483362461)
+    EVO:CreateLabel("เลือกตัวละครจริงและร่างปลายทาง • สูตรผสมต้องเลือกตัวคู่ด้วย • กดครั้งเดียวต่อการวิวัฒนาการ")
+    local evolveUnits,evolvePaths,evolvePartners={},{},{}
+    local sourcePicker,pathPicker,partnerPicker
+    local evolveStatus=EVO:CreateLabel("เลือกตัวละครก่อน")
+    local function evoValue(o)return type(o)=="table"and o[1]or o end
+    local function unitLabel(id,u)return LobbyRoll.unitName(u.kind).." • Lv."..tostring(u.level or 1).." • ID "..tostring(id)end
+    local function refreshEvolvePaths()
+        local source=LobbyRoll.unit(State.evolveUnitId)
+        local paths,partners={},{}
+        evolvePaths={};evolvePartners={}
+        for _,entry in ipairs(source and Catalog.evolutionsOf(source.kind)or {})do
+            if not entry.recipe.testers then local label=LobbyRoll.unitName(entry.target)..(entry.partner and(" + "..LobbyRoll.unitName(entry.partner))or "");paths[#paths+1]=label;evolvePaths[label]=entry end
+        end
+        local selected
+        for _,entry in pairs(evolvePaths)do if entry.target==State.evolveTarget then selected=entry end end
+        if selected and selected.partner then
+            for id,u in pairs(Profile.units or {})do if id~=State.evolveUnitId and u.kind==selected.partner then local label=unitLabel(id,u);partners[#partners+1]=label;evolvePartners[label]=id end end
+        end
+        table.sort(paths);table.sort(partners)
+        pathPicker:Refresh(#paths>0 and paths or {"ไม่มีร่างที่วิวัฒนาการได้"})
+        partnerPicker:Refresh(#partners>0 and partners or {"ไม่ต้องใช้ตัวคู่ / ยังไม่มีตัวคู่"})
+        local materials={}
+        if selected then
+            local recipe=selected.recipe
+            if recipe.gems then materials[#materials+1]="gems "..tostring(Profile.gems or 0).."/"..recipe.gems end
+            for id,n in pairs(recipe.items or {})do local def=Catalog.ITEMS[id];materials[#materials+1]=(def and def.name or id).." "..LobbyRoll.count(id).."/"..n end
+        end
+        evolveStatus:Set(#materials>0 and table.concat(materials," • ")or "เลือกร่างปลายทาง")
+    end
+    local options={}
+    for id,u in pairs(Profile and Profile.units or {})do local label=unitLabel(id,u);options[#options+1]=label;evolveUnits[label]=id end
+    table.sort(options)
+    sourcePicker=EVO:CreateDropdown({Name="ตัวละครต้นทาง",Options=options,CurrentOption={"เลือกตัวละคร"},Callback=function(o)
+        local id=evolveUnits[evoValue(o)];if id then State.evolveUnitId=id;State.evolveTarget="";State.evolvePartner="";saveData();if pathPicker then refreshEvolvePaths()end end
+    end})
+    pathPicker=EVO:CreateDropdown({Name="ร่างปลายทาง",Options={"เลือกตัวต้นทางก่อน"},CurrentOption={"เลือกตัวต้นทางก่อน"},Callback=function(o)
+        local entry=evolvePaths[evoValue(o)];if entry then State.evolveTarget=entry.target;State.evolvePartner="";saveData();refreshEvolvePaths()end
+    end})
+    partnerPicker=EVO:CreateDropdown({Name="ตัวคู่สำหรับสูตรผสม",Options={"ไม่ต้องใช้ตัวคู่ / ยังไม่มีตัวคู่"},CurrentOption={"ไม่ต้องใช้ตัวคู่ / ยังไม่มีตัวคู่"},Callback=function(o)State.evolvePartner=evolvePartners[evoValue(o)]or "";saveData()end})
+    EVO:CreateButton({Name="วิวัฒนาการตัวที่เลือก 1 ครั้ง",Callback=function()
+        refreshProfile()
+        local source=LobbyRoll.unit(State.evolveUnitId)
+        local entry
+        for _,candidate in ipairs(source and Catalog.evolutionsOf(source.kind)or {})do if candidate.target==State.evolveTarget then entry=candidate;break end end
+        if not entry then evolveStatus:Set("เลือกตัวละครและร่างปลายทางก่อน");return end
+        if entry.recipe.testers then evolveStatus:Set("สูตรนี้จำกัดสิทธิ์ในเกม");return end
+        if entry.partner then local partner=LobbyRoll.unit(State.evolvePartner);if not partner or partner.kind~=entry.partner or State.evolvePartner==State.evolveUnitId then evolveStatus:Set("เลือกตัวคู่ให้ตรงกับสูตรก่อน");return end end
+        local recipe=entry.recipe
+        if (tonumber(Profile.gems)or 0)<(recipe.gems or 0)then evolveStatus:Set("gems ไม่พอ");return end
+        for id,n in pairs(recipe.items or {})do if LobbyRoll.count(id)<n then evolveStatus:Set("วัตถุดิบไม่พอ: "..id);return end end
+        local response=LobbyExtras.call(HubRemotes,"EvolveUnit",State.evolveUnitId,entry.target,entry.partner and State.evolvePartner or nil)
+        evolveStatus:Set(response.ok and "วิวัฒนาการสำเร็จ — กดรีเฟรชรายการ"or tostring(response.reason))
+    end})
+    EVO:CreateButton({Name="รีเฟรชตัวละครและสูตร",Callback=function()
+        refreshProfile();options={};evolveUnits={}
+        for id,u in pairs(Profile and Profile.units or {})do local label=unitLabel(id,u);options[#options+1]=label;evolveUnits[label]=id end
+        table.sort(options);sourcePicker:Refresh(options);refreshEvolvePaths()
+    end})
+    refreshEvolvePaths()
+
+    local FD = Window:CreateTab("เพิ่มเลเวล", 4483362462)
+    FD:CreateSection("เพิ่มเลเวลอัตโนมัติ")
+    FD:CreateToggle({ Name="🍬 ป้อนอาหารอัตโนมัติ", CurrentValue=State.autoFeed, Callback=function(v) State.autoFeed=v; saveData() end })
     FD:CreateSection("เกณฑ์เลือกคิว")
     FD:CreateDropdown({ Name="เรียงคิว", Options={ "lowest_level (level ต่ำสุดก่อน)", "highest_rarity (rarity สูงสุดก่อน)", "specific_kind (เฉพาะ kind)" }, CurrentOption={ State.feedPriority=="highest_rarity" and "highest_rarity (rarity สูงสุดก่อน)" or State.feedPriority=="specific_kind" and "specific_kind (เฉพาะ kind)" or "lowest_level (level ต่ำสุดก่อน)" }, MultipleOptions=false, Callback=function(o) local v = type(o)=="table" and o[1] or o; if v:find("highest_rarity") then State.feedPriority="highest_rarity" elseif v:find("specific_kind") then State.feedPriority="specific_kind" else State.feedPriority="lowest_level" end; saveData() end })
     FD:CreateSection("ตัวกรอง")
-    local kindListCache = { "all" }
-    task.spawn(function() task.wait(3); if Catalog then kindListCache={"all"}; for _,k in ipairs(Catalog.UNIT_ORDER or {}) do local u=Catalog.UNITS[k]; if u and not u.hidden then table.insert(kindListCache, k.." ("..(u.rarity or "?")..")") end end end end)
-    FD:CreateDropdown({ Name="kind (หรือ all)", Options=kindListCache, CurrentOption={ State.feedKindFilter == "all" and "all" or State.feedKindFilter }, MultipleOptions=false, Callback=function(o) local v = type(o)=="table" and o[1] or o; if v == "all" then State.feedKindFilter = "all" else State.feedKindFilter = string.match(v, "^([^%s]+)") or v end; saveData() end })
-    FD:CreateDropdown({ Name="rarity filter (ขั้นต่ำ)", Options=RARITY_LIST, CurrentOption={ State.feedRarityFilter }, MultipleOptions=false, Callback=function(o) State.feedRarityFilter = type(o)=="table" and o[1] or o; saveData() end })
-    FD:CreateDropdown({ Name="หยุดเมื่อ level ถึง", Options={ "all", "5", "10", "15", "20", "30", "40", "49" }, CurrentOption={ State.feedMaxLevel }, MultipleOptions=false, Callback=function(o) State.feedMaxLevel = type(o)=="table" and o[1] or o; saveData() end })
+    local kindListCache = { "all" };for _,k in ipairs(AllKinds)do local u=Catalog.UNITS[k];table.insert(kindListCache,k.." ("..LobbyRoll.unitName(k).." • "..u.rarity..")")end
+    FD:CreateDropdown({ Name="ชนิดตัวละคร (all = ทุกชนิด)", Options=kindListCache, CurrentOption={ State.feedKindFilter == "all" and "all" or State.feedKindFilter }, MultipleOptions=false, Callback=function(o) local v = type(o)=="table" and o[1] or o; if v == "all" then State.feedKindFilter = "all" else State.feedKindFilter = string.match(v, "^([^%s]+)") or v end; saveData() end })
+    FD:CreateDropdown({ Name="ความหายากขั้นต่ำ", Options=RARITY_LIST, CurrentOption={ State.feedRarityFilter }, MultipleOptions=false, Callback=function(o) State.feedRarityFilter = type(o)=="table" and o[1] or o; saveData() end })
+    FD:CreateDropdown({ Name="หยุดเมื่อเลเวลถึง", Options={ "all", "5", "10", "15", "20", "30", "40", "49" }, CurrentOption={ State.feedMaxLevel }, MultipleOptions=false, Callback=function(o) State.feedMaxLevel = type(o)=="table" and o[1] or o; saveData() end })
     FD:CreateDropdown({ Name="ประเภทอาหาร", Options={ "auto", "candy", "bigcandy" }, CurrentOption={ State.feedFoodType=="candy" and "candy" or State.feedFoodType=="bigcandy" and "bigcandy" or "auto" }, MultipleOptions=false, Callback=function(o) local v = type(o)=="table" and o[1] or o; if v:find("candy") and not v:find("bigcandy") then State.feedFoodType="candy" elseif v:find("bigcandy") then State.feedFoodType="bigcandy" else State.feedFoodType="auto" end; saveData() end })
 
-    local RT = Window:CreateTab("🎰 Reroll Trait", 4483362463)
-    RT:CreateSection("AUTO REROLL")
-    RT:CreateToggle({ Name="🎰 Auto-Reroll Trait", CurrentValue=State.autoRerollTraits, Callback=function(v) State.autoRerollTraits=v; saveData() end })
-    RT:CreateSection("เป้าหมาย & เกณฑ์")
-    RT:CreateDropdown({ Name="reroll จนได้ trait", Options=TRAIT_TARGETS, CurrentOption={ State.rerollTargetTrait }, MultipleOptions=false, Callback=function(o) State.rerollTargetTrait = type(o)=="table" and o[1] or o; saveData() end })
-    RT:CreateDropdown({ Name="เรียงคิว", Options={ "lowest_trait (แย่สุดก่อน)", "highest_rarity (rarity สูงสุดก่อน)", "specific_kind (เฉพาะ kind)" }, CurrentOption={ State.rerollPriority=="highest_rarity" and "highest_rarity (rarity สูงสุดก่อน)" or State.rerollPriority=="specific_kind" and "specific_kind (เฉพาะ kind)" or "lowest_trait (แย่สุดก่อน)" }, MultipleOptions=false, Callback=function(o) local v = type(o)=="table" and o[1] or o; if v:find("highest_rarity") then State.rerollPriority="highest_rarity" elseif v:find("specific_kind") then State.rerollPriority="specific_kind" else State.rerollPriority="lowest_trait" end; saveData() end })
-    RT:CreateSection("ตัวกรอง")
-    local rerollKindCache = { "all" }
-    task.spawn(function() task.wait(3); if Catalog then rerollKindCache={"all"}; for _,k in ipairs(Catalog.UNIT_ORDER or {}) do local u=Catalog.UNITS[k]; if u and not u.hidden then table.insert(rerollKindCache, k.." ("..(u.rarity or "?")..")") end end end end)
-    RT:CreateDropdown({ Name="kind (หรือ all)", Options=rerollKindCache, CurrentOption={ State.rerollKindFilter == "all" and "all" or State.rerollKindFilter }, MultipleOptions=false, Callback=function(o) local v = type(o)=="table" and o[1] or o; if v == "all" then State.rerollKindFilter = "all" else State.rerollKindFilter = string.match(v, "^([^%s]+)") or v end; saveData() end })
-    RT:CreateDropdown({ Name="rarity filter (ขั้นต่ำ)", Options=RARITY_LIST, CurrentOption={ State.rerollRarityFilter }, MultipleOptions=false, Callback=function(o) State.rerollRarityFilter = type(o)=="table" and o[1] or o; saveData() end })
+    local RT=Window:CreateTab("รีโรล Trait",4483362463)
+    local SR=Window:CreateTab("รีสเตตัส",4483362463)
+    local traitUnits,statsUnits,unitChoices,traitChoices={},{},{},{}
+    local traitPicker,statsPicker,traitTargetPicker
+    local function unitOptions()
+        local options={};unitChoices={}
+        for id,unit in pairs(Profile and Profile.units or {})do
+            if type(unit)=="table"and unit.kind then
+                local label=string.format("%s • Lv.%s • %s • ID %s",LobbyRoll.unitName(unit.kind),tostring(unit.level or 1),LobbyRoll.traitName(unit.trait),tostring(id))
+                options[#options+1]=label;unitChoices[label]=tostring(id)
+            end
+        end
+        table.sort(options);if #options==0 then options={"ยังไม่มีข้อมูลตัวละคร — กดรีเฟรช"}end
+        return options
+    end
+    local function selectedUnit(id,options)
+        for _,label in ipairs(options)do if unitChoices[label]==id then return label end end
+        return "เลือกตัวละคร"
+    end
+    local function value(o)return type(o)=="table"and o[1]or o end
+    local function selectUnit(mode,o)
+        local id=unitChoices[value(o)]
+        if id then LobbyRoll.stop(mode,"เลือกตัวละครแล้ว");State[mode=="trait"and "traitUnitId"or "statsUnitId"]=id;saveData()end
+    end
+    local function traitOptions()
+        local options={};traitChoices={}
+        for _,key in ipairs(Catalog and Catalog.TRAIT_ORDER or {})do
+            local def=Catalog.TRAITS[key]
+            if def then local label=def.name.." ("..def.rarity..")";options[#options+1]=label;traitChoices[label]=key end
+        end
+        if #options==0 then options={"ยังโหลด Trait ไม่เสร็จ — กดรีเฟรช"}end
+        return options
+    end
+    local function selectedTraits(options)
+        local selected={}
+        for _,label in ipairs(options)do if table.find(State.traitTargets,traitChoices[label])then selected[#selected+1]=label end end
+        return selected
+    end
+    RT:CreateLabel("เลือกตัวในกระเป๋าเป็นรายตัว • หยุดเมื่อได้ Trait ใดก็ได้ที่เลือก หรือคริสตัลหมด")
+    local options=unitOptions()
+    traitPicker=RT:CreateDropdown({Name="ตัวละครที่จะรีโรล",Options=options,CurrentOption={selectedUnit(State.traitUnitId,options)},Callback=function(o)selectUnit("trait",o)end})
+    local traits=traitOptions()
+    traitTargetPicker=RT:CreateDropdown({Name="Trait ที่ต้องการ (เลือกได้หลายชื่อ)",Options=traits,CurrentOption=selectedTraits(traits),MultipleOptions=true,Callback=function(o)
+        LobbyRoll.stop("trait","เปลี่ยนเป้าหมายแล้ว")
+        State.traitTargets={};for _,label in ipairs(o)do local key=traitChoices[label];if key then State.traitTargets[#State.traitTargets+1]=key end end;saveData()
+    end})
+    RT:CreateButton({Name="เริ่มรีโรลจนได้เป้าหมาย / คริสตัลหมด",Callback=function()LobbyRoll.start("trait")end})
+    RT:CreateButton({Name="หยุดรีโรล",Callback=function()LobbyRoll.stop("trait")end})
+    local traitStatus=RT:CreateLabel(LobbyRoll.traitStatus)
+    local traitCurrent=RT:CreateLabel("ยังไม่เลือกตัวละคร")
+    SR:CreateLabel("เลือกเกรดขั้นต่ำแต่ละค่า • ล็อกค่าที่ถึงเป้าแล้วอัตโนมัติ • หยุดเมื่อครบเป้าหมายหรือของหมด")
+    SR:CreateLabel("ไม่ล็อก: 1 Juice • ล็อก 1 ค่า: 2 Juice • ล็อก 2 ค่า: 3 Juice + 100 gems / ครั้ง")
+    SR:CreateLabel("ล็อกค่าปัจจุบันเองได้สูงสุด 2 ค่า • ค่าที่ถึงเกรดเป้าหมายจะล็อกให้อัตโนมัติ")
+    statsPicker=SR:CreateDropdown({Name="ตัวละครที่จะรีสเตตัส",Options=options,CurrentOption={selectedUnit(State.statsUnitId,options)},Callback=function(o)selectUnit("stats",o)end})
+    LobbyRoll.modules()
+    local gradeOptions={"ไม่กำหนด"}
+    for _,grade in ipairs(UnitStats and UnitStats.LADDER or {})do gradeOptions[#gradeOptions+1]=grade end
+    for _,entry in ipairs({{"dmg","DMG — พลังโจมตี"},{"range","RANGE — ระยะโจมตี"},{"spa","SPA — ความเร็วโจมตี"}})do
+        local stat,title=entry[1],entry[2]
+        SR:CreateDropdown({Name=title.." (เกรดนี้หรือสูงกว่า)",Options=gradeOptions,CurrentOption={State.statsTargets[stat]or "ไม่กำหนด"},Callback=function(o)
+            LobbyRoll.stop("stats","เปลี่ยนเป้าหมายแล้ว");State.statsTargets[stat]=value(o);saveData()
+        end})
+        SR:CreateToggle({Name="ล็อกค่าปัจจุบัน "..title,CurrentValue=State.statsLocks[stat]==true,Callback=function(on)
+            LobbyRoll.stop("stats","เปลี่ยนล็อกแล้ว");State.statsLocks[stat]=on;saveData()
+        end})
+    end
+    SR:CreateButton({Name="เริ่มรีสเตตัสจนได้เป้าหมาย / ของหมด",Callback=function()LobbyRoll.start("stats")end})
+    SR:CreateButton({Name="หยุดรีสเตตัส",Callback=function()LobbyRoll.stop("stats")end})
+    local statsStatus=SR:CreateLabel(LobbyRoll.statsStatus)
+    local statsCurrent=SR:CreateLabel("ยังไม่เลือกตัวละคร")
+    local function refreshRollChoices()
+        if LobbyRoll.traitRunning or LobbyRoll.statsRunning or LobbyRoll.busy then Rayfield:Notify({Title="กำลังสุ่ม",Content="หยุดสุ่มก่อนรีเฟรชรายการ",Duration=3});return end
+        refreshProfile();LobbyRoll.modules()
+        local list=unitOptions();traitPicker:Refresh(list);statsPicker:Refresh(list)
+        local traitList=traitOptions();traitTargetPicker:Refresh(traitList)
+        Rayfield:Notify({Title="รีเฟรชแล้ว",Content="รายการตัวละครและ Trait มาจากข้อมูลเกม",Duration=3})
+    end
+    RT:CreateButton({Name="รีเฟรชตัวละคร / Trait",Callback=refreshRollChoices})
+    SR:CreateButton({Name="รีเฟรชตัวละคร",Callback=refreshRollChoices})
+    task.spawn(function()
+        while true do
+            task.wait(0.5)
+            traitStatus:Set(LobbyRoll.traitStatus);statsStatus:Set(LobbyRoll.statsStatus)
+            local traitUnit=LobbyRoll.unit(State.traitUnitId)
+            traitCurrent:Set(traitUnit and("ปัจจุบัน: "..LobbyRoll.unitName(traitUnit.kind).." • "..LobbyRoll.traitName(traitUnit.trait).." • คริสตัล "..LobbyRoll.count("crystal"))or "ยังไม่เลือกตัวละคร")
+            local statUnit=LobbyRoll.unit(State.statsUnitId)
+            statsCurrent:Set(statUnit and UnitStats and("ปัจจุบัน: "..LobbyRoll.unitName(statUnit.kind).." • DMG / RANGE / SPA: "..UnitStats.text(statUnit.g).." • Juice "..LobbyRoll.count(UnitStats.ITEM).." • gems "..tostring(Profile.gems or 0))or "ยังไม่เลือกตัวละคร / รอข้อมูลเกรด")
+        end
+    end)
 
     local ST = Window:CreateTab("เลือกด่าน", 4483362460)
     ST:CreateSection("AUTO PLAY")
