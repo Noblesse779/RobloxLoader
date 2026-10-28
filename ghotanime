@@ -1,4 +1,4 @@
--- CandyTD v6.11 • Remember / Record / Retry | SINGLE-FILE SOURCE BUNDLE
+-- CandyTD v6.13 • Remember / Record / Retry | SINGLE-FILE SOURCE BUNDLE
 -- No external Lua/data downloads; Roblox gameplay and Roblox-hosted assets remain online.
 -- WindUI
 -- MIT License
@@ -137,7 +137,7 @@ local SAVE_FILE = "CandyTD_AutoAll_v1.json"
 -- ═══════════ STATE ═══════════
 local DefaultState = {
     autoUpgrade=true, autoStartWave=false, autoReplay="off", activeSlot=0, autoSellExcess=false,
-    autoRetryLoss=true,planPlayback="snapshot",recordSlot=1,
+    autoRetryLoss=true,planPlayback="snapshot",recordSlot=1,autoSkills=false,antiAFK=true,fpsLimit=false,fpsCap=30,lowGraphics=true,
     traitUnitId="",traitTargets={},statsUnitId="",statsTargets={dmg="S",range="ไม่กำหนด",spa="ไม่กำหนด"},statsLocks={},craftRecipe="",summonBanner="normal",lobbyRewardsVersion=0,evolveUnitId="",evolveTarget="",evolvePartner="",
     autoSummon=false, summonMode="10",
     autoClaimDaily=false, autoClaimLevels=false, autoClaimQuests=false, autoClaimPass=false,
@@ -200,89 +200,105 @@ loadData()
 local MATCH_PLACE = 90286053025127
 local isMatch = (game.PlaceId == MATCH_PLACE) or (RS:FindFirstChild("CandyTD") and not RS:FindFirstChild("Hub"))
 
--- ═══════════ ANTI-DISCONNECT & LOW GRAPHICS ═══════════
-local function setupAntiDisconnect()
-    pcall(function()
-        if setfflag then
-            setfflag("DFIntTaskSchedulerTargetFps", "9999")
-            setfflag("FFlagDebugDisableTelemetryEphemeralCounter", "true")
-            setfflag("FFlagDebugDisableTelemetryEphemeralStat", "true")
-            setfflag("FFlagDebugDisableTelemetryEventIngest", "true")
-            setfflag("FFlagDebugDisableTelemetryPoint", "true")
-            setfflag("FFlagDebugDisableTelemetryV2Counter", "true")
-            setfflag("FFlagDebugDisableTelemetryV2Event", "true")
-            setfflag("FFlagDebugDisableTelemetryV2Stat", "true")
-            setfflag("FFlagDisableNewFFlagsManager", "true")
-            setfflag("FFlagEnableInGameMenuChrome", "false")
-        end
-    end)
-    pcall(function()
-        local mt = getrawmetatable(game)
-        local oldNamecall = mt.__namecall
-        setreadonly(mt, false)
-        mt.__namecall = newcclosure(function(self, ...)
-            local method = getnamecallmethod()
-            if method == "Kick" or method == "Shutdown" then return nil end
-            return oldNamecall(self, ...)
-        end)
-        setreadonly(mt, true)
-    end)
-    pcall(function() if hookfunction then hookfunction(LocalPlayer.Kick, function() return nil end) end end)
-    pcall(function() if hookfunction then hookfunction(game.Shutdown, function() return nil end) end end)
+local ClientSettings={status="พร้อม",graphics=setmetatable({},{__mode="k"}),graphicsGeneration=0}
+local SettingsLighting=game:GetService("Lighting")
+local TeleportService=game:GetService("TeleportService")
+local VirtualUser
+pcall(function()VirtualUser=game:GetService("VirtualUser")end)
+local originalFPS=60
+if type(getfpscap)=="function"then local ok,value=pcall(getfpscap);if ok and tonumber(value)then originalFPS=value end end
+function ClientSettings.fps()
+    if type(setfpscap)~="function"then ClientSettings.status="ตัวรันไม่รองรับการจำกัด FPS";return end
+    local ok,reason=pcall(setfpscap,State.fpsLimit and(tonumber(State.fpsCap)or 30)or originalFPS)
+    ClientSettings.status=ok and(State.fpsLimit and("จำกัด FPS ที่ "..State.fpsCap)or "คืนค่า FPS เดิมแล้ว")or("ตั้ง FPS ไม่สำเร็จ: "..tostring(reason))
 end
-
-local function setupLowGraphics()
-    pcall(function() UserSettings().GameSettings.SavedQualityLevel = Enum.SavedQualitySetting.QualityLevel1 end)
-    pcall(function()
-        settings().Rendering.QualityLevel = Enum.QualityLevel.Level01
-        settings().Rendering.MeshPartDetail = Enum.MeshPartDetailLevel.Level01
-        settings().Rendering.EdtiorQualityLevel = Enum.QualityLevel.Level01
-    end)
-    local Lighting = game:GetService("Lighting")
-    pcall(function()
-        Lighting.GlobalShadows = false
-        Lighting.FogEnd = 9e9
-        Lighting.Brightness = 1
-        Lighting.Ambient = Color3.fromRGB(255, 255, 255)
-        Lighting.OutdoorAmbient = Color3.fromRGB(255, 255, 255)
-        Lighting.EnvironmentDiffuseScale = 0
-        Lighting.EnvironmentSpecularScale = 0
-        Lighting.ShadowSoftness = 0
-        Lighting.ClockTime = 12
-    end)
-    pcall(function()
-        for _, v in pairs(Lighting:GetChildren()) do
-            if v:IsA("PostEffect") or v:IsA("Sky") or v:IsA("Atmosphere") or v:IsA("Clouds") then
-                pcall(function() v:Destroy() end)
-            end
-        end
-    end)
-    local Terrain = workspace:FindFirstChildOfClass("Terrain")
-    if Terrain then
-        pcall(function()
-            Terrain.WaterWaveSize = 0
-            Terrain.WaterWaveSpeed = 0
-            Terrain.WaterTransparency = 0
-            Terrain.WaterReflectance = 0
-            Terrain.Decoration = false
-        end)
+function ClientSettings.property(object,name,value)
+    local ok,old=pcall(function()return object[name]end)
+    if not ok or old==value then return end
+    local saved=ClientSettings.graphics[object]
+    if not saved then saved={};ClientSettings.graphics[object]=saved end
+    if saved[name]==nil then saved[name]={value=old}end
+    pcall(function()object[name]=value end)
+end
+function ClientSettings.lowObject(object)
+    if object:IsA("BasePart")then
+        ClientSettings.property(object,"Material",Enum.Material.SmoothPlastic)
+        ClientSettings.property(object,"CastShadow",false)
+        if object:IsA("MeshPart")then ClientSettings.property(object,"RenderFidelity",Enum.RenderFidelity.Performance)end
+    elseif object:IsA("Decal")or object:IsA("Texture")then ClientSettings.property(object,"Transparency",1)
+    elseif object:IsA("ParticleEmitter")or object:IsA("Trail")or object:IsA("Beam")or object:IsA("Fire")or object:IsA("Smoke")or object:IsA("Sparkles")or object:IsA("PostEffect")or object:IsA("Light")then
+        ClientSettings.property(object,"Enabled",false)
+    elseif object:IsA("Atmosphere")then ClientSettings.property(object,"Density",0);ClientSettings.property(object,"Haze",0)
+    elseif object:IsA("Clouds")then ClientSettings.property(object,"Enabled",false)end
+end
+function ClientSettings.lowGraphics()
+    ClientSettings.graphicsGeneration=ClientSettings.graphicsGeneration+1
+    local generation=ClientSettings.graphicsGeneration
+    if not State.lowGraphics then
+        for object,properties in pairs(ClientSettings.graphics)do for name,entry in pairs(properties)do pcall(function()object[name]=entry.value end)end end
+        ClientSettings.graphics=setmetatable({},{__mode="k"});ClientSettings.status="คืนค่าภาพที่สคริปต์ปรับแล้ว";return
+    end
+    pcall(function()ClientSettings.property(UserSettings():GetService("UserGameSettings"),"SavedQualityLevel",Enum.SavedQualitySetting.QualityLevel1)end)
+    pcall(function()ClientSettings.property(settings().Rendering,"QualityLevel",Enum.QualityLevel.Level01)end)
+    ClientSettings.property(SettingsLighting,"GlobalShadows",false)
+    ClientSettings.property(SettingsLighting,"FogEnd",9e9)
+    local terrain=workspace:FindFirstChildOfClass("Terrain")
+    if terrain then
+        ClientSettings.property(terrain,"Decoration",false)
+        ClientSettings.property(terrain,"WaterWaveSize",0)
+        ClientSettings.property(terrain,"WaterWaveSpeed",0)
+        ClientSettings.property(terrain,"WaterReflectance",0)
     end
     task.spawn(function()
-        while true do
-            task.wait(3)
-            for _, v in pairs(workspace:GetDescendants()) do
-                if v:IsA("ParticleEmitter") or v:IsA("Fire") or v:IsA("Smoke") or v:IsA("Sparkles") or v:IsA("Trail") or v:IsA("Beam") then
-                    pcall(function() v.Enabled = false end)
-                elseif v:IsA("MeshPart") then
-                    pcall(function() v.RenderFidelity = Enum.RenderFidelity.Performance end)
-                end
+        for _,root in ipairs({workspace,SettingsLighting})do
+            for index,object in ipairs(root:GetDescendants())do
+                if generation~=ClientSettings.graphicsGeneration or not State.lowGraphics then return end
+                ClientSettings.lowObject(object)
+                if index%250==0 then task.wait()end
             end
         end
+        if generation==ClientSettings.graphicsGeneration then ClientSettings.status="เปิดภาพต่ำสุดแล้ว"end
     end)
 end
-
-setupAntiDisconnect()
-setupLowGraphics()
+workspace.DescendantAdded:Connect(function(object)if State.lowGraphics then ClientSettings.lowObject(object)end end)
+SettingsLighting.DescendantAdded:Connect(function(object)if State.lowGraphics then ClientSettings.lowObject(object)end end)
+LocalPlayer.Idled:Connect(function()
+    if not State.antiAFK then return end
+    if not VirtualUser then ClientSettings.status="Anti-AFK: ตัวรันไม่รองรับ VirtualUser";return end
+    local ok,reason=pcall(function()
+        local camera=workspace.CurrentCamera
+        if not camera then return end
+        VirtualUser:CaptureController()
+        VirtualUser:Button2Down(Vector2.new(0,0),camera.CFrame)
+        task.wait(0.5)
+        VirtualUser:Button2Up(Vector2.new(0,0),camera.CFrame)
+    end)
+    ClientSettings.status=ok and "Anti-AFK ส่งการตอบสนองแล้ว"or("Anti-AFK ถูกปฏิเสธ: "..tostring(reason))
+end)
+function ClientSettings.rejoin()
+    saveData();ClientSettings.status="กำลังรีจอยเซิร์ฟเวอร์เดิม"
+    local ok,reason=pcall(function()
+        if game.JobId~=""then TeleportService:TeleportToPlaceInstance(game.PlaceId,game.JobId,LocalPlayer)
+        else TeleportService:Teleport(game.PlaceId,LocalPlayer)end
+    end)
+    if not ok then ClientSettings.status="รีจอยไม่สำเร็จ: "..tostring(reason)end
+end
+function ClientSettings.home()
+    saveData()
+    if not isMatch then ClientSettings.status="อยู่ล็อบบี้แล้ว";return end
+    local remotes=RS:FindFirstChild("MatchRemotes")
+    local remote=remotes and remotes:FindFirstChild("ReturnToHub")
+    local ok,reason=pcall(function()
+        if remote and remote:IsA("RemoteEvent")then remote:FireServer()
+        else TeleportService:Teleport(111053011787075,LocalPlayer)end
+    end)
+    ClientSettings.status=ok and "กำลังกลับล็อบบี้"or("กลับล็อบบี้ไม่สำเร็จ: "..tostring(reason))
+end
+TeleportService.TeleportInitFailed:Connect(function(player,_,reason)
+    if player==LocalPlayer then ClientSettings.status="ย้ายเซิร์ฟเวอร์ไม่สำเร็จ: "..tostring(reason)end
+end)
+ClientSettings.lowGraphics()
+if State.fpsLimit then ClientSettings.fps()end
 
 -- ═══════════ CONTEXT ═══════════
 local ctx = _G.CandyCtx
@@ -567,7 +583,7 @@ startSmartPlace=function(slot)
                 if not s.over then
                     if State.planPlayback=="record"then
                         timelinePlaying=true
-                        while State.autoUpgrade and SavedRecords[slot][index]and SavedRecords[slot][index].action=="upgrade"do index=index+1 end
+                        while SavedRecords[slot][index]and((State.autoUpgrade and SavedRecords[slot][index].action=="upgrade")or(State.autoSkills and SavedRecords[slot][index].action=="ability"))do index=index+1 end
                         local event=SavedRecords[slot][index]
                         pendingTimeline=event and {event=event,reason="time"}or nil
                         if event and (currentWave>event.wave or(currentWave==event.wave and clock()-waveAt>=(event.at or 0)))then
@@ -741,6 +757,72 @@ if isMatch then
     task.spawn(function()
         while not ctx or not MatchNet do task.wait(0.5)end
         if State.activeSlot>0 then startSmartPlace(State.activeSlot)end
+    end)
+end
+
+local AutoSkills={records={},status="ปิดออโต้สกิล",lastTry={}}
+function AutoSkills.record(record)
+    if type(record)~="table"or record.id==nil then return end
+    if type(record.abReady)=="number"then
+        AutoSkills.records[record.id]={readyAt=clock()+record.abReady,untilAt=clock()+(tonumber(record.abLeft)or 0)}
+    end
+end
+if isMatch then
+    task.spawn(function()
+        while not MatchNet or not Catalog or not ctx do task.wait(0.5)end
+        local remotes=RS:FindFirstChild("MatchRemotes")
+        local event=remotes and remotes:FindFirstChild("Event")
+        if event then event.OnClientEvent:Connect(function(_,kind,data)
+            if kind=="tower"then AutoSkills.record(data)
+            elseif kind=="snapshot"and type(data)=="table"then for _,record in pairs(data.towers or {})do AutoSkills.record(record)end
+            elseif kind=="reset"then AutoSkills.records={};AutoSkills.lastTry={}
+            elseif kind=="ability"and type(data)=="table"and data.id~=nil then
+                AutoSkills.records[data.id]={readyAt=clock()+(tonumber(data.cd)or 60),untilAt=clock()+(tonumber(data.wait)or 0)+(tonumber(data.dur)or 0)}
+            end
+        end)end
+        -- Read cooldowns once when attaching midway through a match.
+        local sync=remotes and remotes:FindFirstChild("Sync")
+        if sync then
+            local ok,snapshot=pcall(sync.InvokeServer,sync)
+            if ok and type(snapshot)=="table"then for _,record in pairs(snapshot.towers or {})do AutoSkills.record(record)end end
+        end
+        while true do
+            task.wait(1)
+            if State.autoSkills and not gameState().over then
+                if type(MatchInfo.battle)=="table"then AutoSkills.status="โหมด Battles ไม่เปิดใช้สกิลเหล่านี้"
+                elseif type(Catalog.abilityOf)~="function"then AutoSkills.status="เกมนี้ไม่มีข้อมูลสกิล"
+                else
+                    local count,unlocked=0,0
+                    local present={}
+                    -- Only the player's placed towers, never Workspace descendants or the inventory.
+                    for _,tower in ipairs(mine())do
+                        local def=Catalog.abilityOf(tower.unit)
+                        if def then
+                            count=count+1;present[tower.id]=true
+                            if (tonumber(tower.level)or 1)>=(tonumber(def.unlock)or 1)then
+                                unlocked=unlocked+1
+                                local cooldown=AutoSkills.records[tower.id]
+                                if not cooldown then
+                                    cooldown={readyAt=clock()+(tonumber(def.firstDelay)or 20),untilAt=0}
+                                    AutoSkills.records[tower.id]=cooldown
+                                end
+                                if clock()>=cooldown.readyAt and clock()>=(cooldown.untilAt or 0)and os.clock()>=(AutoSkills.lastTry[tower.id]or 0)then
+                                    AutoSkills.lastTry[tower.id]=os.clock()+5
+                                    local result=act("ability",tower.id)
+                                    if result.ok then
+                                        -- Reserve the cooldown immediately, including before the Event arrives.
+                                        cooldown.readyAt=clock()+(tonumber(def.cooldown)or 60)
+                                        AutoSkills.records[tower.id]=cooldown
+                                    else AutoSkills.status="สกิล "..tostring(def.name)..": "..tostring(result.reason)end
+                                end
+                            end
+                        end
+                    end
+                    for id in pairs(AutoSkills.records)do if not present[id]then AutoSkills.records[id]=nil;AutoSkills.lastTry[id]=nil end end
+                    AutoSkills.status="ตัวที่มีสกิล "..count.." • ปลดล็อกแล้ว "..unlocked.." • ตรวจทุก 1 วินาที / รอคูลดาวน์"
+                end
+            else AutoSkills.status=State.autoSkills and "รอรอบใหม่"or "ปิดออโต้สกิล"end
+        end
     end)
 end
 
@@ -1065,7 +1147,7 @@ if not isMatch then
 end
 -- ═══════════ UI SETUP ═══════════
 local Window = Rayfield:CreateWindow({
-    Name = "CandyTD Auto-All v6.11 • Record + Retry",
+    Name = "CandyTD Auto-All v6.13 • Record + Retry",
     LoadingTitle = isMatch and "Match Mode" or "Lobby Mode",
     ConfigurationSaving = { Enabled = false },
     KeySystem = false,
@@ -1082,6 +1164,9 @@ if isMatch then
     end end)
     
     Main:CreateSection("AUTO IN MATCH")
+    Main:CreateToggle({Name="ออโต้สกิล — เฉพาะตัวที่วางและพร้อมใช้",CurrentValue=State.autoSkills,Callback=function(value)State.autoSkills=value;saveData()end})
+    local skillStatus=Main:CreateLabel(AutoSkills.status)
+    task.spawn(function()while true do task.wait(1);skillStatus:Set(AutoSkills.status)end end)
     Main:CreateToggle({ Name="⚔️ เริ่มเวฟอัตโนมัติ", CurrentValue=State.autoStartWave,
         Callback=function(v) State.autoStartWave=v; saveData() end })
     Main:CreateToggle({Name="⬆️ อัปเกรดออโต้ • ตัวรอง 1 ครั้ง แล้วรอตัวแรง",CurrentValue=State.autoUpgrade,Callback=function(v)State.autoUpgrade=v;saveData()end})
@@ -1425,7 +1510,22 @@ else
 end
 
 task.spawn(function() task.wait(2); refreshProfile(); buildKindLists(); buildStageList() end)
-print("✅ CandyTD Auto-All (v6.3) Wave Snapshots โหลดสำเร็จ")]=],
+print("✅ CandyTD Auto-All (v6.3) Wave Snapshots โหลดสำเร็จ")
+local SettingsTab=Window:CreateTab("Settings",4483362460)
+SettingsTab:CreateSection("กันยืนนิ่ง / ประสิทธิภาพ")
+SettingsTab:CreateToggle({Name="Anti-AFK — กันหลุดเมื่อยืนนิ่ง",CurrentValue=State.antiAFK,Callback=function(value)State.antiAFK=value;saveData()end})
+SettingsTab:CreateToggle({Name="จำกัด FPS",CurrentValue=State.fpsLimit,Callback=function(value)State.fpsLimit=value;saveData();ClientSettings.fps()end})
+SettingsTab:CreateDropdown({Name="FPS ที่ต้องการ",Options={"15","30","45","60","90","120","144","240"},CurrentOption={tostring(State.fpsCap)},Callback=function(o)
+    State.fpsCap=tonumber(type(o)=="table"and o[1]or o)or 30;saveData();if State.fpsLimit then ClientSettings.fps()end
+end})
+SettingsTab:CreateToggle({Name="ภาพต่ำสุด — ปิดเงา เอฟเฟกต์ และพื้นผิว",CurrentValue=State.lowGraphics,Callback=function(value)State.lowGraphics=value;saveData();ClientSettings.lowGraphics()end})
+SettingsTab:CreateSection("เซิร์ฟเวอร์")
+SettingsTab:CreateButton({Name="รีจอยเซิร์ฟเวอร์เดิม",Callback=ClientSettings.rejoin})
+SettingsTab:CreateButton({Name="กลับหน้าหลัก / ล็อบบี้เกม",Callback=ClientSettings.home})
+SettingsTab:CreateLabel("บันทึกข้อมูลก่อนย้าย • หลังย้ายเซิร์ฟเวอร์ให้รันสคริปต์ใหม่ • Anti-AFK ไม่ป้องกันเน็ตหลุด")
+local SettingsStatus=SettingsTab:CreateLabel(ClientSettings.status)
+task.spawn(function()while true do task.wait(0.5);SettingsStatus:Set(ClientSettings.status)end end)
+]=],
 ["lib:WindUI"]=[=[--[[
      _      ___         ____  ______
     | | /| / (_)__  ___/ / / / /  _/
