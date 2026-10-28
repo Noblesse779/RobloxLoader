@@ -1,4 +1,4 @@
--- CandyTD v6.6 • Remember / Record / Retry | SINGLE-FILE SOURCE BUNDLE
+-- CandyTD v6.7 • Remember / Record / Retry | SINGLE-FILE SOURCE BUNDLE
 -- No external Lua/data downloads; Roblox gameplay and Roblox-hosted assets remain online.
 -- WindUI
 -- MIT License
@@ -191,6 +191,7 @@ local function saveData()
     end)
 end
 loadData()
+State.autoUpgrade=true
 
 -- ═══════════ MATCH / LOBBY CHECK ═══════════
 local MATCH_PLACE = 90286053025127
@@ -402,7 +403,6 @@ local MatchInfo={}
 local matchStatus="พร้อม"
 local playbackStatus="ยังไม่เปิดแผน"
 local onPlanChanged
-local upgradeFocus
 local startSmartPlace,stopSmartPlace
 local function gameState()
     if ctx and type(ctx.state)=="function"then local ok,s=pcall(ctx.state);if ok and type(s)=="table"then return s end end
@@ -459,7 +459,7 @@ local function startRecording(slot)
     Recorder={active=true,slot=slot,known={},nextKey=0,wave=tonumber(gameState().wave)or 0,waveAt=clock(),running=gameState().running==true}
     SavedRecords[slot]={};SavedMeta[slot]={stage=stageId(),version=2}
     saveData();changed(slot)
-    matchStatus="กำลังอัดช่อง "..slot.." • วาง/อัปเกรด/ขาย • ออโต้ทำงานต่อ"
+    matchStatus="กำลังอัดช่อง "..slot.." • วาง/ขาย • อัปเกรดออโต้ตลอด"
     return true,"เริ่มอัดใหม่แล้ว แผนแบบจำกระดานเดิมยังอยู่"
 end
 task.spawn(function()
@@ -488,10 +488,9 @@ task.spawn(function()
                     local d=unitData(t);local old=Recorder.known[id]
                     if not old then
                         Recorder.nextKey=Recorder.nextKey+1;d.key=tostring(Recorder.nextKey)
-                        add("place",table.clone(d))
+                        local placement=table.clone(d);placement.level=nil;add("place",placement)
                     else
                         d.key=old.key
-                        if d.level>old.level then add("upgrade",table.clone(d))end
                     end
                     current[id]=d
                 end
@@ -532,15 +531,6 @@ local function ensureUnit(d)
         if not ok or type(result)~="table"or not result.ok then return false,type(result)=="table"and tostring(result.reason)or tostring(result)end
         return false,"รอตัวปรากฏ"
     end
-    local target=tonumber(d.level)or 1
-    if (tonumber(t.level)or 1)<target then
-        local def=ctx.UNITS and ctx.UNITS[t.unit]
-        local nextLevel=def and def.LEVELS and def.LEVELS[(t.level or 1)+1]
-        if not nextLevel then return true end
-        if (gameState().money or 0)<(tonumber(nextLevel.cost)or 0)then return false,"money"end
-        local result=act("upgrade",t.id)
-        return false,result.ok and "รออัปเกรด"or tostring(result.reason)
-    end
     return true
 end
 local pendingTimeline
@@ -564,11 +554,12 @@ startSmartPlace=function(slot)
                 if not s.over then
                     if State.planPlayback=="record"then
                         timelinePlaying=true
+                        while SavedRecords[slot][index]and(SavedRecords[slot][index].action=="upgrade"or SavedRecords[slot][index].action=="start")do index=index+1 end
                         local event=SavedRecords[slot][index]
                         pendingTimeline=event and {event=event,reason="time"}or nil
                         if event and (currentWave>event.wave or(currentWave==event.wave and clock()-waveAt>=(event.at or 0)))then
                             local done,reason=false,nil
-                            if event.action=="place"or event.action=="upgrade"then done,reason=ensureUnit(event)
+                            if event.action=="place"then done,reason=ensureUnit(event)
                             elseif event.action=="sell"then local t=findUnit(event);done=not t or act("sell",t.id).ok
                             elseif event.action=="start"then done=s.running or act("start").ok
                             else done=true end
@@ -638,7 +629,7 @@ if isMatch then
                 end
             else
                 endedAt=0;voted=false
-                if ctx and MatchNet and State.autoUpgrade and not timelinePlaying then
+                if ctx and MatchNet then
                     local candidates={}
                     for _,t in ipairs(mine())do
                         local def=ctx.UNITS and ctx.UNITS[t.unit]
@@ -650,10 +641,7 @@ if isMatch then
                         end
                     end
                     table.sort(candidates,function(a,b)if a.power==b.power then return tostring(a.tower.id)<tostring(b.tower.id)end;return a.power>b.power end)
-                    local chosen
-                    for _,candidate in ipairs(candidates)do if candidate.tower==upgradeFocus then chosen=candidate;break end end
-                    chosen=chosen or candidates[1]
-                    upgradeFocus=chosen and chosen.tower or nil
+                    local chosen=candidates[1]
                     if chosen and (gameState().money or 0)>=chosen.cost then act("upgrade",chosen.tower.id)end
                 end
                 if ctx and MatchNet and State.autoStartWave and not s.running and os.clock()-lastVote>1.5 then
@@ -876,7 +864,7 @@ end
 
 -- ═══════════ UI SETUP ═══════════
 local Window = Rayfield:CreateWindow({
-    Name = "CandyTD Auto-All v6.6 • Record + Retry",
+    Name = "CandyTD Auto-All v6.7 • Record + Retry",
     LoadingTitle = isMatch and "Match Mode" or "Lobby Mode",
     ConfigurationSaving = { Enabled = false },
     KeySystem = false,
@@ -895,8 +883,7 @@ if isMatch then
     Main:CreateSection("AUTO IN MATCH")
     Main:CreateToggle({ Name="⚔️ เริ่มเวฟอัตโนมัติ", CurrentValue=State.autoStartWave,
         Callback=function(v) State.autoStartWave=v; saveData() end })
-    Main:CreateToggle({ Name="⬆️ อัพเกรดฮีโร่อัตโนมัติ", CurrentValue=State.autoUpgrade,
-        Callback=function(v) State.autoUpgrade=v; saveData() end })
+    Main:CreateLabel("⬆️ อัปเกรดออโต้เปิดตลอด • ตัวแรงสุดก่อน")
     Main:CreateToggle({ Name="🗑️ ขายตัวที่ไม่อยู่ในแผน (Auto-Sell)", CurrentValue=State.autoSellExcess,
         Callback=function(v) State.autoSellExcess=v; saveData() end })
     Main:CreateDropdown({ Name="🔁 เมื่อชนะ / จบเกม", Options={"ไม่ทำอะไร","เล่นซ้ำด่านเดิม","ไปด่านถัดไป"},
@@ -912,7 +899,7 @@ if isMatch then
     task.spawn(function()while true do task.wait(1);resultStatus:Set(matchStatus.." • "..playbackStatus)end end)
     local SlotsTab=Window:CreateTab("Auto Slots",6034689657)
     SlotsTab:CreateSection("จำกระดาน + อัดการวาง")
-    SlotsTab:CreateLabel("อัดเฉพาะวาง/อัปเกรด/ขาย • ออโต้ทำงานต่อ • ไม่อัดเริ่มเวฟ")
+    SlotsTab:CreateLabel("อัดเฉพาะวาง/ขาย/วางใหม่ • อัปเกรดออโต้จากตัวแรงสุดตลอด")
     SlotsTab:CreateDropdown({Name="วิธีเล่นแผน",Options={"จำกระดานตามเวฟ","เล่นเทปที่อัด"},
         CurrentOption={State.planPlayback=="record"and "เล่นเทปที่อัด"or "จำกระดานตามเวฟ"},
         Callback=function(o)
