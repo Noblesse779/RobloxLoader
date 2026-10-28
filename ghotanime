@@ -1,4 +1,4 @@
--- CandyTD v6.17 • Remember / Record / Retry | SINGLE-FILE SOURCE BUNDLE
+-- CandyTD v6.18 • Remember / Record / Retry | SINGLE-FILE SOURCE BUNDLE
 -- No external Lua/data downloads; Roblox gameplay and Roblox-hosted assets remain online.
 -- WindUI
 -- MIT License
@@ -199,6 +199,7 @@ loadData()
 -- ═══════════ MATCH / LOBBY CHECK ═══════════
 local MATCH_PLACE = 90286053025127
 local isMatch = (game.PlaceId == MATCH_PLACE) or (RS:FindFirstChild("CandyTD") and not RS:FindFirstChild("Hub"))
+if not isMatch then task.wait(10)end
 
 local ClientSettings={status="พร้อม",graphics=setmetatable({},{__mode="k"}),graphicsGeneration=0}
 local SettingsLighting=game:GetService("Lighting")
@@ -687,14 +688,14 @@ if isMatch then
                 local action
                 local returnChallenge=State.autoReturnChallenge and MatchInfo.challenge~=nil and MatchInfo.challenge~=false
                 if returnChallenge then
-                    if os.clock()-endedAt>3 and os.clock()-lastVote>10 then
+                    if os.clock()-endedAt>3 and os.clock()-lastVote>10 and(not State._farmRewardPending or os.clock()-endedAt>20)then
                         lastVote=os.clock();ClientSettings.home()
                         matchStatus="จบ Challenge แล้ว • กลับล็อบบี้เพื่อเลือกด่านใหม่"
                     end
                 elseif State.autoRetryLoss and won==false then action="again"
                 elseif State.autoReplay=="again"then action="again"
                 elseif State.autoReplay=="next"then action=won==true and "next"or "again"end
-                if action and not voted and os.clock()-endedAt>2.5 and os.clock()-lastVote>4 then
+                if action and not voted and os.clock()-endedAt>2.5 and os.clock()-lastVote>4 and(not State._farmRewardPending or os.clock()-endedAt>20)then
                     lastVote=os.clock();saveData()
                     local result=act(action)
                     voted=result.ok==true
@@ -1261,6 +1262,114 @@ if not isMatch then
 end
 if State.autoBattle then AutoBattle.enable(true)end
 
+local FarmStats={path="CandyTD_FarmStats_"..LocalPlayer.UserId.."_v1.json",data={version=1,startedAt=os.time(),stages={},rounds={},jobRounds={},history={}},status="เริ่มติดตามแล้ว",roundStarted=os.time(),awaiting=nil}
+do
+    if type(readfile)=="function"then
+        local ok,text=pcall(readfile,FarmStats.path)
+        if ok then local valid,data=pcall(HttpService.JSONDecode,HttpService,text)
+            if valid and type(data)=="table"and data.version==1 then
+                for _,field in ipairs({"stages","rounds","jobRounds","history"})do if type(data[field])~="table"then data[field]={}end end
+                FarmStats.data=data
+            end
+        end
+    end
+end
+function FarmStats.save()
+    if type(writefile)~="function"then FarmStats.status="ตัวรันไม่รองรับบันทึกไฟล์ • สถิติอยู่เฉพาะรอบเปิดสคริปต์นี้";return end
+    local ok,reason=pcall(writefile,FarmStats.path,HttpService:JSONEncode(FarmStats.data))
+    if not ok then FarmStats.status="บันทึกสถิติไม่สำเร็จ: "..tostring(reason)end
+end
+function FarmStats.roundKey()
+    return tostring(game.JobId)..":"..tostring(FarmStats.data.jobRounds[game.JobId]or 0)
+end
+function FarmStats.stageKey()
+    local id=tonumber(MatchInfo.stage or MatchInfo.stageId)or 0
+    local challenge=MatchInfo.challenge~=nil and MatchInfo.challenge~=false
+    local special=challenge and "Challenge"or(type(MatchInfo.tourney)=="table"and "Tournament"or(type(MatchInfo.battle)=="table"and "Battles"or(MatchInfo.infinite and "Infinite"or "Stage")))
+    return special..":"..id,id,special
+end
+function FarmStats.stage(key,id,mode)
+    if not FarmStats.data.stages[key]then
+        local def=Catalog and Catalog.stage and Catalog.stage(id)
+        FarmStats.data.stages[key]={id=id,mode=mode,name=def and def.name or("ด่าน "..id),completed=0,wins=0,losses=0,gems=0,items={},seconds=0,reports=0}
+    end
+    return FarmStats.data.stages[key]
+end
+function FarmStats.finish(payload)
+    local key=FarmStats.roundKey()
+    FarmStats.awaiting=key
+    State._farmRewardPending=true
+    if FarmStats.data.rounds[key]then return end
+    local stageKey,id,mode=FarmStats.stageKey()
+    local stage=FarmStats.stage(stageKey,id,mode)
+    local duration=math.max(0,os.time()-FarmStats.roundStarted)
+    local won=payload.won==true
+    local record={key=key,stage=stageKey,won=won,endedAt=os.time(),seconds=duration,gems=0,items={},reported=false}
+    FarmStats.data.rounds[key]=record
+    stage.completed=stage.completed+1;stage.wins=stage.wins+(won and 1 or 0);stage.losses=stage.losses+(won and 0 or 1);stage.seconds=stage.seconds+duration
+    table.insert(FarmStats.data.history,1,key)
+    -- Keep recent per-round receipts bounded; stage totals remain cumulative.
+    while #FarmStats.data.history>200 do
+        local old=table.remove(FarmStats.data.history)
+        if not old:find(tostring(game.JobId),1,true)then FarmStats.data.rounds[old]=nil end
+    end
+    FarmStats.status="บันทึกผลแล้ว • รอเกมแจ้งรางวัลจริง"
+    FarmStats.save()
+end
+function FarmStats.reward(payload)
+    if type(payload)~="table"then return end
+    local key=FarmStats.awaiting or FarmStats.roundKey()
+    local record=FarmStats.data.rounds[key]
+    if not record then return end
+    State._farmRewardPending=false
+    if payload.ok~=true then
+        record.reported=true;record.reason=tostring(payload.reason or "ไม่มีรางวัล")
+        FarmStats.status="เกมแจ้ง: "..record.reason;FarmStats.save();return
+    end
+    local stage=FarmStats.data.stages[record.stage]
+    if not stage then return end
+    local gems=math.max(0,tonumber(payload.gems)or 0)
+    stage.gems=stage.gems+gems-record.gems;record.gems=gems
+    for id,count in pairs(type(payload.items)=="table"and payload.items or {})do
+        count=math.max(0,tonumber(count)or 0)
+        stage.items[id]=(stage.items[id]or 0)+count-(record.items[id]or 0);record.items[id]=count
+    end
+    if not record.reported then stage.reports=stage.reports+1 end
+    record.reported=true;record.first=payload.first==true
+    FarmStats.status="อัปเดตรางวัลจริงแล้ว • +"..gems.." gems"
+    FarmStats.save()
+end
+function FarmStats.itemText(items)
+    local lines={}
+    for id,count in pairs(items or {})do
+        if count>0 then local def=Catalog and Catalog.ITEMS and Catalog.ITEMS[id];lines[#lines+1]=(def and def.name or id).." ×"..count end
+    end
+    table.sort(lines)
+    return #lines>0 and table.concat(lines," • ")or "ยังไม่มีไอเทมที่เกมแจ้ง"
+end
+function FarmStats.reset()
+    FarmStats.data={version=1,startedAt=os.time(),stages={},rounds={},jobRounds=FarmStats.data.jobRounds,history={}}
+    FarmStats.awaiting=nil;FarmStats.roundStarted=os.time();FarmStats.status="เริ่มนับสถิติใหม่แล้ว";FarmStats.save()
+end
+if isMatch then
+    task.spawn(function()
+        local remotes=RS:FindFirstChild("MatchRemotes")or RS:WaitForChild("MatchRemotes",20)
+        local event=remotes and remotes:FindFirstChild("Event")
+        if not event then FarmStats.status="ไม่พบเหตุการณ์ผลเกม จึงยังเก็บสถิติไม่ได้";return end
+        local current=FarmStats.data.rounds[FarmStats.roundKey()]
+        if current then FarmStats.awaiting=current.key end
+        event.OnClientEvent:Connect(function(_,kind,payload)
+            if kind=="over"and type(payload)=="table"then FarmStats.finish(payload)
+            elseif kind=="result"then FarmStats.reward(payload)
+            elseif kind=="reset"then
+                State._farmRewardPending=false
+                FarmStats.data.jobRounds[game.JobId]=(FarmStats.data.jobRounds[game.JobId]or 0)+1
+                FarmStats.roundStarted=os.time();FarmStats.save()
+            end
+        end)
+    end)
+end
+
 -- ═══════════ LOBBY LOGIC ═══════════
 if not isMatch then
     local Loop = { lastSummon=0, lastClaim=0, lastPlay=0, lastReroll=0, lastEvolve=0, 
@@ -1323,7 +1432,7 @@ if not isMatch then
 end
 -- ═══════════ UI SETUP ═══════════
 local Window = Rayfield:CreateWindow({
-    Name = "CandyTD Auto-All v6.17 • Record + Retry",
+    Name = "CandyTD Auto-All v6.18 • Record + Retry",
     LoadingTitle = isMatch and "Match Mode" or "Lobby Mode",
     ConfigurationSaving = { Enabled = false },
     KeySystem = false,
@@ -1753,6 +1862,52 @@ else
 end
 AutoTab:CreateLabel("หลังย้ายเซิร์ฟเวอร์จะรันต่อให้เมื่อรองรับ queue_on_teleport มิฉะนั้นต้องรันลิงก์เดิมใหม่ • ไม่รับประกันชัยชนะทุกทีม/ทุกเงื่อนไข")
 task.spawn(function()while true do task.wait(1);autoStatus:Set(AutoBattle.status)end end)
+
+local FarmTab=Window:CreateTab("สถิติฟาร์ม",4483362460)
+FarmTab:CreateLabel("เริ่มเก็บตั้งแต่เปิดรุ่นนี้ • นับรอบที่จบ แยกด่านปกติ/Challenge • รางวัลนับเฉพาะผลจริงจากเซิร์ฟเวอร์")
+local farmCurrent=FarmTab:CreateLabel("กำลังอ่านด่านปัจจุบัน")
+local farmSummary=FarmTab:CreateLabel("ยังไม่มีรอบที่จบ")
+local farmItems=FarmTab:CreateLabel("ยังไม่มีรางวัล")
+local farmStages=FarmTab:CreateLabel("ยังไม่มีสถิติแยกด่าน")
+local farmHistory=FarmTab:CreateLabel("ยังไม่มีประวัติรอบ")
+local farmStatus=FarmTab:CreateLabel(FarmStats.status)
+local function refreshFarmStats()
+    local completed,wins,losses,gems,seconds=0,0,0,0,0
+    local items,stages={},{}
+    for _,stage in pairs(FarmStats.data.stages)do
+        completed=completed+stage.completed;wins=wins+stage.wins;losses=losses+stage.losses;gems=gems+stage.gems;seconds=seconds+stage.seconds
+        for id,count in pairs(stage.items)do items[id]=(items[id]or 0)+count end
+        stages[#stages+1]=string.format("%s • %s: %d รอบ | ชนะ %d แพ้ %d | %d gems",stage.mode,stage.name,stage.completed,stage.wins,stage.losses,stage.gems)
+    end
+    table.sort(stages)
+    if isMatch then
+        local key,id,mode=FarmStats.stageKey()
+        local stage=FarmStats.data.stages[key];local def=Catalog and Catalog.stage and Catalog.stage(id)
+        farmCurrent:Set(string.format("ด่านปัจจุบัน: %s • %s\nจบแล้ว %d รอบ | ชนะ %d แพ้ %d | ได้ %d gems",mode,def and def.name or tostring(id),stage and stage.completed or 0,stage and stage.wins or 0,stage and stage.losses or 0,stage and stage.gems or 0).."\n"..FarmStats.itemText(stage and stage.items or {}))
+    else farmCurrent:Set("อยู่ล็อบบี้ • สถิติเก็บต่อจากสนามต่อสู้และไฟล์เดิม")end
+    farmSummary:Set(string.format("รวม %d รอบ | ชนะ %d แพ้ %d\nได้รับ %d gems | เวลาที่ติดตามในรอบจบ %d นาที %d วินาที",completed,wins,losses,gems,math.floor(seconds/60),seconds%60))
+    farmItems:Set("ไอเทมรวม: "..FarmStats.itemText(items))
+    farmStages:Set(#stages>0 and table.concat(stages,"\n")or "ยังไม่มีสถิติแยกด่าน")
+    local history={}
+    for index,key in ipairs(FarmStats.data.history)do
+        if index>10 then break end
+        local record=FarmStats.data.rounds[key]
+        if record then local stage=FarmStats.data.stages[record.stage]
+            history[#history+1]=string.format("%s • %s • %s • +%d gems • %s",os.date("%H:%M",record.endedAt),stage and stage.name or record.stage,record.won and "ชนะ"or "แพ้",record.gems,record.reported and(record.reason or FarmStats.itemText(record.items))or "ยังไม่ได้รับรายงานรางวัล")
+        end
+    end
+    farmHistory:Set(#history>0 and table.concat(history,"\n")or "ยังไม่มีประวัติรอบ")
+    farmStatus:Set(FarmStats.status)
+end
+FarmTab:CreateButton({Name="รีเฟรชสถิติ",Callback=refreshFarmStats})
+local confirmReset=false
+FarmTab:CreateToggle({Name="ยืนยันล้างสถิติฟาร์ม",CurrentValue=false,Callback=function(value)confirmReset=value end})
+FarmTab:CreateButton({Name="ล้างสถิติและเริ่มนับใหม่",Callback=function()
+    if not confirmReset then Rayfield:Notify({Title="ล้างสถิติ",Content="เปิดยืนยันล้างสถิติก่อน",Duration=3});return end
+    FarmStats.reset();refreshFarmStats()
+end})
+refreshFarmStats()
+task.spawn(function()while true do task.wait(2);local ok,reason=pcall(refreshFarmStats);if not ok then FarmStats.status="แสดงสถิติไม่สำเร็จ: "..tostring(reason)end end end)
 ]=],
 ["lib:WindUI"]=[=[--[[
      _      ___         ____  ______
