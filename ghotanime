@@ -1,4 +1,4 @@
--- CandyTD v6.19 • Remember / Record / Retry | SINGLE-FILE SOURCE BUNDLE
+-- CandyTD v6.20 • Remember / Record / Retry | SINGLE-FILE SOURCE BUNDLE
 -- No external Lua/data downloads; Roblox gameplay and Roblox-hosted assets remain online.
 -- WindUI
 -- MIT License
@@ -1445,7 +1445,7 @@ if not isMatch then
 end
 -- ═══════════ UI SETUP ═══════════
 local Window = Rayfield:CreateWindow({
-    Name = "CandyTD Auto-All v6.19 • Record + Retry",
+    Name = "CandyTD Auto-All v6.20 • Record + Retry",
     LoadingTitle = isMatch and "Match Mode" or "Lobby Mode",
     ConfigurationSaving = { Enabled = false },
     KeySystem = false,
@@ -1826,6 +1826,17 @@ task.spawn(function()while true do task.wait(0.5);SettingsStatus:Set(ClientSetti
 
 local AutoTab=Window:CreateTab("เล่นอัตโนมัติ",4483362460)
 AutoTab:CreateLabel("ไม่ต้องอัด • เลือกตัวแรงจากทีมที่นำลงสนาม • วางใกล้จุดเกิดศัตรูและให้ระยะยิงครอบคลุมทางโค้ง")
+AutoTab:CreateToggle({Name="เข้าด่านอัตโนมัติเมื่ออยู่ล็อบบี้ — ค่าเดียวกันทุกแมพ",CurrentValue=State.autoEnterBattle,Callback=function(on)
+    State.autoEnterBattle=on
+    State.autoPlay=false
+    if on then
+        AutoBattle.nextEnter=0
+        if not isMatch then AutoBattle.enable(true);AutoBattle.armLobbyCooldown()
+        else AutoBattle.queue();AutoBattle.status="เปิดเข้าออโต้แล้ว • จะใช้เมื่อกลับล็อบบี้"end
+    else AutoBattle.status="ปิดเข้าออโต้แล้ว • กลับล็อบบี้จะไม่เข้าด่านเอง"end
+    saveData()
+end})
+AutoTab:CreateLabel("ปิดสวิตช์นี้จากในด่านได้ ค่าบันทึกเชื่อมกับล็อบบี้ • ไม่หยุดการเล่นรอบปัจจุบัน")
 AutoTab:CreateToggle({Name="เปิดเล่นอัตโนมัติ",CurrentValue=State.autoBattle,Callback=AutoBattle.enable})
 AutoTab:CreateToggle({Name="ชนะแล้วไปด่านถัดไป (ปิด = ฟาร์มด่านเดิม)",CurrentValue=State.autoBattleNext,Callback=function(on)
     State.autoBattleNext=on
@@ -1863,12 +1874,7 @@ if not isMatch then
         challenges:Set(#lines>0 and table.concat(lines,"\n")or "รอข้อมูล Challenges")
     end
     AutoTab:CreateButton({Name="รีเฟรช Challenges",Callback=refreshChallenges})
-    AutoTab:CreateToggle({Name="เข้าด่านที่เลือกอัตโนมัติ",CurrentValue=State.autoEnterBattle,Callback=function(on)
-        State.autoEnterBattle=on
-        if on then State.autoPlay=false;AutoBattle.enable(true);AutoBattle.nextEnter=0;AutoBattle.armLobbyCooldown()
-        else AutoBattle.status="ปิดเข้าด่านอัตโนมัติแล้ว"end
-        saveData()
-    end})
+
     refreshChallenges()
 else
     AutoTab:CreateLabel("อยู่ในด่านแล้ว: เปิดสวิตช์เพื่อเริ่มวางตัวได้ทันที • หากกำลังอัดหรือเล่นเทป ให้หยุดก่อน")
