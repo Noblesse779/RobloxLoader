@@ -1,4 +1,4 @@
--- CandyTD v6.13 • Remember / Record / Retry | SINGLE-FILE SOURCE BUNDLE
+-- CandyTD v6.14 • Remember / Record / Retry | SINGLE-FILE SOURCE BUNDLE
 -- No external Lua/data downloads; Roblox gameplay and Roblox-hosted assets remain online.
 -- WindUI
 -- MIT License
@@ -137,7 +137,7 @@ local SAVE_FILE = "CandyTD_AutoAll_v1.json"
 -- ═══════════ STATE ═══════════
 local DefaultState = {
     autoUpgrade=true, autoStartWave=false, autoReplay="off", activeSlot=0, autoSellExcess=false,
-    autoRetryLoss=true,planPlayback="snapshot",recordSlot=1,autoSkills=false,antiAFK=true,fpsLimit=false,fpsCap=30,lowGraphics=true,
+    autoRetryLoss=true,planPlayback="snapshot",recordSlot=1,autoBattle=false,autoBattleNext=false,autoBattleMode="stage",autoBattleStage=1,autoChallenge=1,autoSkills=false,antiAFK=true,fpsLimit=false,fpsCap=30,lowGraphics=true,
     traitUnitId="",traitTargets={},statsUnitId="",statsTargets={dmg="S",range="ไม่กำหนด",spa="ไม่กำหนด"},statsLocks={},craftRecipe="",summonBanner="normal",lobbyRewardsVersion=0,evolveUnitId="",evolveTarget="",evolvePartner="",
     autoSummon=false, summonMode="10",
     autoClaimDaily=false, autoClaimLevels=false, autoClaimQuests=false, autoClaimPass=false,
@@ -1085,6 +1085,138 @@ if not isMatch then
     end)
 end
 
+local AutoBattle={status="ปิดเล่นอัตโนมัติ",map=nil,points={},blocked={},queued=false,challengeStatus="รอข้อมูล Challenges"}
+function AutoBattle.queue()
+    if AutoBattle.queued then return end
+    local queue=queue_on_teleport or queueonteleport or(type(syn)=="table"and syn.queue_on_teleport)
+    if type(queue)=="function"then
+        local ok=pcall(queue,"loadstring(__BUNDLE_READ('https://raw.githubusercontent.com/Noblesse779/RobloxLoader/refs/heads/main/ghotanime'))()")
+        AutoBattle.queued=ok
+    end
+end
+function AutoBattle.enable(on)
+    State.autoBattle=on;saveData()
+    if on then
+        if isMatch then stopSmartPlace()end
+        State.autoStartWave=true;State.autoUpgrade=true;State.autoSkills=true;State.autoRetryLoss=true
+        State.autoReplay=State.autoBattleNext and "next"or "again"
+        saveData();AutoBattle.queue()
+        AutoBattle.status="เปิดแล้ว • วางตัวแรงใกล้จุดเกิดศัตรู"
+    else AutoBattle.status="หยุดวางอัตโนมัติแล้ว • ปิดเวฟ/อัปเกรด/สกิลแยกได้ใน Main"end
+end
+function AutoBattle.challengeList()
+    if not Catalog or not Catalog.challengesAt then return {}end
+    local ok,list=pcall(Catalog.challengesAt,workspace:GetServerTimeNow())
+    return ok and type(list)=="table"and list or {}
+end
+function AutoBattle.enter()
+    if isMatch then AutoBattle.status="อยู่ในด่านแล้ว เปิดสวิตช์เพื่อเริ่มวาง";return end
+    local native=LobbyExtras.context()
+    if State.autoBattleMode=="challenge"then
+        local selected
+        for _,challenge in ipairs(AutoBattle.challengeList())do if challenge.n==State.autoChallenge then selected=challenge;break end end
+        if not selected then AutoBattle.status="ยังไม่มี Challenge ช่องที่เลือก";return end
+        local lobby=native and native.lobby
+        if not lobby then AutoBattle.status="รอระบบห้องเกมโหลดเสร็จ";return end
+        local mine=lobby.mine()
+        if mine and mine.challenge~=selected.id then AutoBattle.status="อยู่ในห้องอื่น กรุณาออกห้องเดิมก่อน";return end
+        if not mine then
+            local response=lobby.create(selected.stage,selected.id)
+            if not response or not response.ok then AutoBattle.status=tostring(response and response.reason or "สร้างห้องไม่สำเร็จ");return end
+        end
+        AutoBattle.queue();local response=lobby.start()
+        AutoBattle.status=response and response.ok and "กำลังเข้า Challenge"or tostring(response and response.reason or "เริ่มห้องไม่สำเร็จ")
+    else
+        AutoBattle.queue()
+        local response=LobbyExtras.call(HubRemotes,"Play",tonumber(State.autoBattleStage)or 1)
+        AutoBattle.status=response.ok and "กำลังเข้าด่าน"or tostring(response.reason)
+    end
+end
+if isMatch then
+    task.spawn(function()
+        local world=1/3
+        while not ctx or not Catalog or not MatchNet do task.wait(0.5)end
+        local kit=CandyTD and CandyTD:FindFirstChild("ToonKit")
+        if kit then local ok,value=pcall(require,kit);if ok then world=tonumber(value.WORLD)or world end end
+        while true do
+            task.wait(1)
+            if State.autoBattle and not gameState().over then
+                if State.activeSlot>0 or Recorder.active then AutoBattle.status="พักขณะอัดหรือเล่นแผน • หยุดแผนเพื่อวางเองอัตโนมัติ"
+                elseif type(MatchInfo.battle)=="table"then AutoBattle.status="Battles มีเลนเฉพาะ จึงไม่วางด้วยแผนนี้"
+                elseif not ctx.map or not ctx.map.path or type(ctx.map.canPlace)~="function"then AutoBattle.status="ด่านนี้ยังไม่มีข้อมูลจุดวางที่รองรับ"
+                else
+                    local map=ctx.map;local path=map.path
+                    if AutoBattle.map~=map then
+                        AutoBattle.map=map;AutoBattle.points={};AutoBattle.blocked={}
+                        local length=tonumber(path.length)or 0
+                        for distance=0,math.min(length,90*world),12*world do
+                            local center=path:at(distance)
+                            for radius=12,42,6 do
+                                for angle=0,330,30 do
+                                    local a=math.rad(angle)
+                                    AutoBattle.points[#AutoBattle.points+1]=Vector3.new(center.X+math.cos(a)*radius*world,ctx.groundY or center.Y,center.Z+math.sin(a)*radius*world)
+                                end
+                            end
+                            task.wait()
+                        end
+                    end
+                    local counts,total={},0
+                    for _,tower in ipairs(mine())do counts[tower.unit]=(counts[tower.unit]or 0)+1;total=total+1 end
+                    local heroes={};local slots=MatchInfo.slots
+                    if type(slots)~="table"then
+                        local ok,data=pcall(game:GetService("TeleportService").GetLocalPlayerTeleportData,game:GetService("TeleportService"))
+                        if ok and type(data)=="table"then slots=data.slots end
+                    end
+                    local seen={}
+                    for _,kind in pairs(type(slots)=="table"and slots or {})do
+                        local def=type(kind)=="string"and ctx.UNITS[kind]
+                        if def and def.LEVELS and def.LEVELS[1]and not seen[kind]then
+                            seen[kind]=true
+                            local cap=Catalog.placeCap and Catalog.placeCap(kind)or 3
+                            if (counts[kind]or 0)<cap then
+                                local row=def.LEVELS[1]
+                                heroes[#heroes+1]={kind=kind,row=row,power=(tonumber(row.dmg)or 0)*(row.attack=="tornado"and 7 or 1)/math.max(tonumber(row.cd)or 1,0.05)}
+                            end
+                        end
+                    end
+                    table.sort(heroes,function(a,b)if a.power==b.power then return a.kind<b.kind end;return a.power>b.power end)
+                    local hero=heroes[1]
+                    if total>=(tonumber(MatchInfo.maxTowers)or 20)then AutoBattle.status="วางครบจำนวนสูงสุดแล้ว"
+                    elseif not hero then AutoBattle.status=type(slots)=="table"and "วางครบโควตาทีมแล้ว"or "รอข้อมูลตัวละครที่นำลงสนาม"
+                    elseif (tonumber(gameState().money)or 0)<(placeCost(hero.kind)or math.huge)then AutoBattle.status="เก็บเงินรอวาง "..tostring(hero.kind)
+                    else
+                        local best,bestScore,bestKey
+                        local spawn=path:at(0)
+                        local range=(tonumber(hero.row.range)or 20)*world
+                        for index,position in ipairs(AutoBattle.points)do
+                            local key=hero.kind..":"..index
+                            if (AutoBattle.blocked[key]or 0)<os.clock()then
+                                local ok,valid=pcall(map.canPlace,map,position,ctx.towers)
+                                if ok and valid then
+                                    local coverage=0
+                                    for distance=0,math.min(tonumber(path.length)or 0,160*world),8*world do
+                                        local point=path:at(distance)
+                                        if(position-point).Magnitude<=range then coverage=coverage+1/(1+distance/(80*world))end
+                                    end
+                                    local score=coverage*10-(position-spawn).Magnitude
+                                    if coverage>0 and(not bestScore or score>bestScore)then best=position;bestScore=score;bestKey=key end
+                                end
+                            end
+                            if index%120==0 then task.wait()end
+                        end
+                        if best and State.autoBattle then
+                            local response=MatchNet.place(hero.kind,best)
+                            AutoBattle.status=response.ok and("วาง "..hero.kind.." ใกล้ทางเข้าแล้ว")or tostring(response.reason)
+                            AutoBattle.blocked[bestKey]=os.clock()+(response.ok and 2 or 30)
+                        else AutoBattle.status="ยังไม่พบตำแหน่งที่วางได้ใกล้ทางเข้า"end
+                    end
+                end
+            end
+        end
+    end)
+end
+if State.autoBattle then AutoBattle.enable(true)end
+
 -- ═══════════ LOBBY LOGIC ═══════════
 if not isMatch then
     local Loop = { lastSummon=0, lastClaim=0, lastPlay=0, lastReroll=0, lastEvolve=0, 
@@ -1147,7 +1279,7 @@ if not isMatch then
 end
 -- ═══════════ UI SETUP ═══════════
 local Window = Rayfield:CreateWindow({
-    Name = "CandyTD Auto-All v6.13 • Record + Retry",
+    Name = "CandyTD Auto-All v6.14 • Record + Retry",
     LoadingTitle = isMatch and "Match Mode" or "Lobby Mode",
     ConfigurationSaving = { Enabled = false },
     KeySystem = false,
@@ -1525,6 +1657,49 @@ SettingsTab:CreateButton({Name="กลับหน้าหลัก / ล็อ
 SettingsTab:CreateLabel("บันทึกข้อมูลก่อนย้าย • หลังย้ายเซิร์ฟเวอร์ให้รันสคริปต์ใหม่ • Anti-AFK ไม่ป้องกันเน็ตหลุด")
 local SettingsStatus=SettingsTab:CreateLabel(ClientSettings.status)
 task.spawn(function()while true do task.wait(0.5);SettingsStatus:Set(ClientSettings.status)end end)
+
+local AutoTab=Window:CreateTab("เล่นอัตโนมัติ",4483362460)
+AutoTab:CreateLabel("ไม่ต้องอัด • เลือกตัวแรงจากทีมที่นำลงสนาม • วางใกล้จุดเกิดศัตรูและให้ระยะยิงครอบคลุมทางโค้ง")
+AutoTab:CreateToggle({Name="เปิดเล่นอัตโนมัติ",CurrentValue=State.autoBattle,Callback=AutoBattle.enable})
+AutoTab:CreateToggle({Name="ชนะแล้วไปด่านถัดไป (ปิด = ฟาร์มด่านเดิม)",CurrentValue=State.autoBattleNext,Callback=function(on)
+    State.autoBattleNext=on
+    if State.autoBattle then State.autoReplay=on and "next"or "again"end
+    saveData()
+end})
+AutoTab:CreateLabel("เปิดระบบนี้จะเปิดเวฟ/อัปเกรด/สกิล/แพ้เล่นซ้ำ • ใช้เฉพาะทีมที่ใส่มา ไม่เปลี่ยนทีมและไม่ขายตัวเอง")
+local autoStatus=AutoTab:CreateLabel(AutoBattle.status)
+if not isMatch then
+    AutoTab:CreateDropdown({Name="รูปแบบ",Options={"ด่านปกติ","Challenges"},CurrentOption={State.autoBattleMode=="challenge"and "Challenges"or "ด่านปกติ"},Callback=function(o)
+        State.autoBattleMode=(type(o)=="table"and o[1]or o)=="Challenges"and "challenge"or "stage";saveData()
+    end})
+    local stageOptions,stageMap={},{}
+    for _,stage in ipairs(StageList)do stageOptions[#stageOptions+1]=stage.name;stageMap[stage.name]=stage.id end
+    local current=stageOptions[1]
+    for name,id in pairs(stageMap)do if id==State.autoBattleStage then current=name end end
+    AutoTab:CreateDropdown({Name="ด่านปกติ",Options=stageOptions,CurrentOption={current},Callback=function(o)
+        local name=type(o)=="table"and o[1]or o;State.autoBattleStage=stageMap[name]or 1;saveData()
+    end})
+    AutoTab:CreateDropdown({Name="Challenge ที่หมุนอยู่",Options={"1","2","3"},CurrentOption={tostring(State.autoChallenge)},Callback=function(o)
+        State.autoChallenge=tonumber(type(o)=="table"and o[1]or o)or 1;saveData()
+    end})
+    local challenges=AutoTab:CreateLabel("กำลังอ่าน Challenges")
+    local function refreshChallenges()
+        local lines={}
+        for _,challenge in ipairs(AutoBattle.challengeList())do
+            local stage=Catalog.stage(challenge.stage);local mods={}
+            for _,mod in ipairs(challenge.mods or {})do local def=Catalog.CHALLENGE_MODS[mod];mods[#mods+1]=def and def.name or mod end
+            lines[#lines+1]=challenge.n..". "..tostring(stage and stage.name or challenge.stage).." • "..table.concat(mods,", ")
+        end
+        challenges:Set(#lines>0 and table.concat(lines,"\n")or "รอข้อมูล Challenges")
+    end
+    AutoTab:CreateButton({Name="รีเฟรช Challenges",Callback=refreshChallenges})
+    AutoTab:CreateButton({Name="เปิดออโต้และเข้าด่านที่เลือก",Callback=function()AutoBattle.enable(true);task.spawn(AutoBattle.enter)end})
+    refreshChallenges()
+else
+    AutoTab:CreateLabel("อยู่ในด่านแล้ว: เปิดสวิตช์เพื่อเริ่มวางตัวได้ทันที • หากกำลังอัดหรือเล่นเทป ให้หยุดก่อน")
+end
+AutoTab:CreateLabel("หลังย้ายเซิร์ฟเวอร์จะรันต่อให้เมื่อรองรับ queue_on_teleport มิฉะนั้นต้องรันลิงก์เดิมใหม่ • ไม่รับประกันชัยชนะทุกทีม/ทุกเงื่อนไข")
+task.spawn(function()while true do task.wait(1);autoStatus:Set(AutoBattle.status)end end)
 ]=],
 ["lib:WindUI"]=[=[--[[
      _      ___         ____  ______
