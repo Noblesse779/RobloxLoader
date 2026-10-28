@@ -1,4 +1,4 @@
--- CandyTD v6.15 • Remember / Record / Retry | SINGLE-FILE SOURCE BUNDLE
+-- CandyTD v6.16 • Remember / Record / Retry | SINGLE-FILE SOURCE BUNDLE
 -- No external Lua/data downloads; Roblox gameplay and Roblox-hosted assets remain online.
 -- WindUI
 -- MIT License
@@ -137,7 +137,7 @@ local SAVE_FILE = "CandyTD_AutoAll_v1.json"
 -- ═══════════ STATE ═══════════
 local DefaultState = {
     autoUpgrade=true, autoStartWave=false, autoReplay="off", activeSlot=0, autoSellExcess=false,
-    autoRetryLoss=true,planPlayback="snapshot",recordSlot=1,autoBattle=false,autoEnterBattle=false,autoBattleNext=false,autoBattleMode="stage",autoBattleStage=1,autoChallenge=1,autoSkills=false,antiAFK=true,fpsLimit=false,fpsCap=30,lowGraphics=true,
+    autoRetryLoss=true,planPlayback="snapshot",recordSlot=1,autoBattle=false,autoEnterBattle=false,autoReturnChallenge=false,autoBattleNext=false,autoBattleMode="stage",autoBattleStage=1,autoChallenge=1,autoSkills=false,antiAFK=true,fpsLimit=false,fpsCap=30,lowGraphics=true,
     traitUnitId="",traitTargets={},statsUnitId="",statsTargets={dmg="S",range="ไม่กำหนด",spa="ไม่กำหนด"},statsLocks={},craftRecipe="",summonBanner="normal",lobbyRewardsVersion=0,evolveUnitId="",evolveTarget="",evolvePartner="",
     autoSummon=false, summonMode="10",
     autoClaimDaily=false, autoClaimLevels=false, autoClaimQuests=false, autoClaimPass=false,
@@ -678,7 +678,13 @@ if isMatch then
                     end
                 end
                 local action
-                if State.autoRetryLoss and won==false then action="again"
+                local returnChallenge=State.autoReturnChallenge and MatchInfo.challenge~=nil and MatchInfo.challenge~=false
+                if returnChallenge then
+                    if os.clock()-endedAt>3 and os.clock()-lastVote>10 then
+                        lastVote=os.clock();ClientSettings.home()
+                        matchStatus="จบ Challenge แล้ว • กลับล็อบบี้เพื่อเลือกด่านใหม่"
+                    end
+                elseif State.autoRetryLoss and won==false then action="again"
                 elseif State.autoReplay=="again"then action="again"
                 elseif State.autoReplay=="next"then action=won==true and "next"or "again"end
                 if action and not voted and os.clock()-endedAt>2.5 and os.clock()-lastVote>4 then
@@ -1295,7 +1301,7 @@ if not isMatch then
 end
 -- ═══════════ UI SETUP ═══════════
 local Window = Rayfield:CreateWindow({
-    Name = "CandyTD Auto-All v6.15 • Record + Retry",
+    Name = "CandyTD Auto-All v6.16 • Record + Retry",
     LoadingTitle = isMatch and "Match Mode" or "Lobby Mode",
     ConfigurationSaving = { Enabled = false },
     KeySystem = false,
@@ -1682,6 +1688,10 @@ AutoTab:CreateToggle({Name="ชนะแล้วไปด่านถัดไ�
     if State.autoBattle then State.autoReplay=on and "next"or "again"end
     saveData()
 end})
+AutoTab:CreateToggle({Name="จบ Challenge แล้วกลับล็อบบี้อัตโนมัติ",CurrentValue=State.autoReturnChallenge,Callback=function(on)
+    State.autoReturnChallenge=on;saveData();if on then AutoBattle.queue()end
+end})
+AutoTab:CreateLabel("ถ้าเปิดกลับล็อบบี้ จะไม่กดเล่นซ้ำ/ด่านถัดไปใน Challenge • เปิดเข้าด่านอัตโนมัติไว้ด้วยเพื่อเข้าใหม่")
 AutoTab:CreateLabel("เปิดระบบนี้จะเปิดเวฟ/อัปเกรด/สกิล/แพ้เล่นซ้ำ • ใช้เฉพาะทีมที่ใส่มา ไม่เปลี่ยนทีมและไม่ขายตัวเอง")
 local autoStatus=AutoTab:CreateLabel(AutoBattle.status)
 if not isMatch then
