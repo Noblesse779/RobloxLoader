@@ -1,4 +1,4 @@
--- CandyTD v6.5 • Remember / Record / Retry | SINGLE-FILE SOURCE BUNDLE
+-- CandyTD v6.6 • Remember / Record / Retry | SINGLE-FILE SOURCE BUNDLE
 -- No external Lua/data downloads; Roblox gameplay and Roblox-hosted assets remain online.
 -- WindUI
 -- MIT License
@@ -402,6 +402,7 @@ local MatchInfo={}
 local matchStatus="พร้อม"
 local playbackStatus="ยังไม่เปิดแผน"
 local onPlanChanged
+local upgradeFocus
 local startSmartPlace,stopSmartPlace
 local function gameState()
     if ctx and type(ctx.state)=="function"then local ok,s=pcall(ctx.state);if ok and type(s)=="table"then return s end end
@@ -638,10 +639,22 @@ if isMatch then
             else
                 endedAt=0;voted=false
                 if ctx and MatchNet and State.autoUpgrade and not timelinePlaying then
+                    local candidates={}
                     for _,t in ipairs(mine())do
                         local def=ctx.UNITS and ctx.UNITS[t.unit]
-                        if def and def.LEVELS and def.LEVELS[(t.level or 1)+1]then act("upgrade",t.id);task.wait(0.12)end
+                        local level=tonumber(t.level)or 1
+                        if def and def.LEVELS and def.LEVELS[level+1]then
+                            local row=def.LEVELS[level]or {}
+                            local power=(tonumber(row.dmg)or 0)*(row.attack=="tornado"and 7 or 1)
+                            candidates[#candidates+1]={tower=t,power=power,cost=tonumber(def.LEVELS[level+1].cost)or 0}
+                        end
                     end
+                    table.sort(candidates,function(a,b)if a.power==b.power then return tostring(a.tower.id)<tostring(b.tower.id)end;return a.power>b.power end)
+                    local chosen
+                    for _,candidate in ipairs(candidates)do if candidate.tower==upgradeFocus then chosen=candidate;break end end
+                    chosen=chosen or candidates[1]
+                    upgradeFocus=chosen and chosen.tower or nil
+                    if chosen and (gameState().money or 0)>=chosen.cost then act("upgrade",chosen.tower.id)end
                 end
                 if ctx and MatchNet and State.autoStartWave and not s.running and os.clock()-lastVote>1.5 then
                     local ready=false
@@ -863,7 +876,7 @@ end
 
 -- ═══════════ UI SETUP ═══════════
 local Window = Rayfield:CreateWindow({
-    Name = "CandyTD Auto-All v6.5 • Record + Retry",
+    Name = "CandyTD Auto-All v6.6 • Record + Retry",
     LoadingTitle = isMatch and "Match Mode" or "Lobby Mode",
     ConfigurationSaving = { Enabled = false },
     KeySystem = false,
