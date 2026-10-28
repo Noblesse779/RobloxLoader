@@ -1,4 +1,4 @@
--- CandyTD v6.10 • Remember / Record / Retry | SINGLE-FILE SOURCE BUNDLE
+-- CandyTD v6.11 • Remember / Record / Retry | SINGLE-FILE SOURCE BUNDLE
 -- No external Lua/data downloads; Roblox gameplay and Roblox-hosted assets remain online.
 -- WindUI
 -- MIT License
@@ -424,7 +424,7 @@ local function mine()
     table.sort(out,function(a,b)return tostring(a.id)<tostring(b.id)end)
     return out
 end
-local function unitData(t)return {kind=t.unit,x=t.pos.X,y=t.pos.Y,z=t.pos.Z,level=tonumber(t.level)or 1}end
+local function unitData(t)return {kind=t.unit,x=t.pos.X,y=t.pos.Y,z=t.pos.Z,level=tonumber(t.level)or 1,targeting=t.targeting or "first"}end
 local function findUnit(d)
     for _,t in ipairs(mine())do if t.unit==d.kind and (t.pos-Vector3.new(d.x,d.y,d.z)).Magnitude<1.5 then return t end end
 end
@@ -460,10 +460,10 @@ local function startRecording(slot)
     if not ctx or gameState().over then return false,"เริ่มอัดได้เฉพาะขณะเล่น"end
     if not validStage(slot)then return false,"ช่องนี้เป็นคนละด่าน กรุณาล้างช่องหรือเลือกช่องอื่น"end
     stopSmartPlace()
-    Recorder={active=true,slot=slot,known={},nextKey=0,wave=tonumber(gameState().wave)or 0,waveAt=clock(),running=gameState().running==true}
+    Recorder={active=true,slot=slot,known={},nextKey=0,wave=tonumber(gameState().wave)or 0,waveAt=clock(),running=gameState().running==true,speed=nil}
     SavedRecords[slot]={};SavedMeta[slot]={stage=stageId(),version=2}
     saveData();changed(slot)
-    matchStatus="กำลังอัดช่อง "..slot.." • วาง/ขาย • อัปเกรดออโต้ตลอด"
+    matchStatus="กำลังอัดช่อง "..slot.." • วาง/อัปเกรด/ขาย/เป้าหมาย/สกิล/เวฟ/ความเร็ว"
     return true,"เริ่มอัดใหม่แล้ว แผนแบบจำกระดานเดิมยังอยู่"
 end
 task.spawn(function()
@@ -476,11 +476,15 @@ task.spawn(function()
             else
                 local wave=tonumber(s.wave)or 0
                 local now=clock()
+                local oldWave,oldAt=Recorder.wave,Recorder.waveAt
                 local list=SavedRecords[Recorder.slot]
                 local function add(action,data,eventWave,eventAt)
                     data.action=action;data.wave=eventWave or wave;data.at=eventAt or math.max(0,now-Recorder.waveAt)
                     list[#list+1]=data
                 end
+                if s.running and not Recorder.running then add("start",{},oldWave,math.max(0,now-oldAt))end
+                local speed=tonumber(MatchNet and MatchNet.speed)or 1
+                if speed~=Recorder.speed then add("speed",{speed=speed});Recorder.speed=speed end
                 if wave~=Recorder.wave then Recorder.wave=wave;Recorder.waveAt=now end
                 local current={}
                 local owned=mine()
@@ -492,9 +496,13 @@ task.spawn(function()
                     local d=unitData(t);local old=Recorder.known[id]
                     if not old then
                         Recorder.nextKey=Recorder.nextKey+1;d.key=tostring(Recorder.nextKey)
-                        local placement=table.clone(d);placement.level=nil;add("place",placement)
+                        local placement=table.clone(d);placement.level=1;add("place",placement)
+                        if d.targeting~="first"then add("target",table.clone(d))end
+                        if d.level>1 then add("upgrade",table.clone(d))end
                     else
                         d.key=old.key
+                        if d.level>old.level then add("upgrade",table.clone(d))end
+                        if d.targeting~=old.targeting then add("target",table.clone(d))end
                     end
                     current[id]=d
                 end
@@ -535,6 +543,7 @@ local function ensureUnit(d)
         if not ok or type(result)~="table"or not result.ok then return false,type(result)=="table"and tostring(result.reason)or tostring(result)end
         return false,"รอตัวปรากฏ"
     end
+    if d.targeting and t.targeting~=d.targeting then return act("target",t.id,d.targeting).ok end
     return true
 end
 local pendingTimeline
@@ -558,12 +567,22 @@ startSmartPlace=function(slot)
                 if not s.over then
                     if State.planPlayback=="record"then
                         timelinePlaying=true
-                        while SavedRecords[slot][index]and(SavedRecords[slot][index].action=="upgrade"or SavedRecords[slot][index].action=="start")do index=index+1 end
+                        while State.autoUpgrade and SavedRecords[slot][index]and SavedRecords[slot][index].action=="upgrade"do index=index+1 end
                         local event=SavedRecords[slot][index]
                         pendingTimeline=event and {event=event,reason="time"}or nil
                         if event and (currentWave>event.wave or(currentWave==event.wave and clock()-waveAt>=(event.at or 0)))then
                             local done,reason=false,nil
                             if event.action=="place"then done,reason=ensureUnit(event)
+                            elseif event.action=="upgrade"then
+                                local t=findUnit(event)
+                                if t and (tonumber(t.level)or 1)>=(tonumber(event.level)or 1)then done=true
+                                elseif t then local result=act("upgrade",t.id);reason=result.ok and "รออัปเกรด"or tostring(result.reason)end
+                            elseif event.action=="target"then
+                                local t=findUnit(event);done=t and(t.targeting==event.targeting or act("target",t.id,event.targeting).ok)
+                            elseif event.action=="ability"then
+                                local t=findUnit(event);done=t and act("ability",t.id).ok
+                            elseif event.action=="speed"then
+                                if ctx and ctx.setSpeed then ctx.setSpeed(event.speed);done=true end
                             elseif event.action=="sell"then local t=findUnit(event);done=not t or act("sell",t.id).ok
                             elseif event.action=="start"then done=s.running or act("start").ok
                             else done=true end
@@ -588,6 +607,26 @@ startSmartPlace=function(slot)
                     end
                 end
             end
+        end
+    end)
+end
+if isMatch then
+    task.spawn(function()
+        while not MatchNet do task.wait(0.2)end
+        local original=MatchNet.request
+        MatchNet.request=function(action,...)
+            local data,recorder
+            if action=="ability"and Recorder.active then
+                recorder=Recorder
+                local id=select(1,...)
+                for _,t in ipairs(mine())do if t.id==id then data=unitData(t);break end end
+                if data then data.action="ability";data.wave=tonumber(gameState().wave)or 0;data.at=math.max(0,clock()-recorder.waveAt)end
+            end
+            local result=original(action,...)
+            if data and result and result.ok and recorder==Recorder and recorder.active then
+                local list=SavedRecords[recorder.slot];list[#list+1]=data;saveData();changed(recorder.slot)
+            end
+            return result
         end
     end)
 end
@@ -1026,7 +1065,7 @@ if not isMatch then
 end
 -- ═══════════ UI SETUP ═══════════
 local Window = Rayfield:CreateWindow({
-    Name = "CandyTD Auto-All v6.10 • Record + Retry",
+    Name = "CandyTD Auto-All v6.11 • Record + Retry",
     LoadingTitle = isMatch and "Match Mode" or "Lobby Mode",
     ConfigurationSaving = { Enabled = false },
     KeySystem = false,
@@ -1061,7 +1100,7 @@ if isMatch then
     task.spawn(function()while true do task.wait(1);resultStatus:Set(matchStatus.." • "..playbackStatus)end end)
     local SlotsTab=Window:CreateTab("Auto Slots",6034689657)
     SlotsTab:CreateSection("จำกระดาน + อัดการวาง")
-    SlotsTab:CreateLabel("อัดเฉพาะวาง/ขาย/วางใหม่ • อัปเกรดออโต้จากตัวแรงสุดตลอด")
+    SlotsTab:CreateLabel("อัดวาง/อัปเกรด/ขาย/เป้าหมาย/สกิล/เวฟ/ความเร็ว • ปิดออโต้อัปเกรดเมื่อต้องการเล่นตามลำดับอัปในเทป")
     SlotsTab:CreateDropdown({Name="วิธีเล่นแผน",Options={"จำกระดานตามเวฟ","เล่นเทปที่อัด"},
         CurrentOption={State.planPlayback=="record"and "เล่นเทปที่อัด"or "จำกระดานตามเวฟ"},
         Callback=function(o)
