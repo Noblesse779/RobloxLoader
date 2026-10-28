@@ -1,4 +1,4 @@
--- CandyTD v6.16 • Remember / Record / Retry | SINGLE-FILE SOURCE BUNDLE
+-- CandyTD v6.17 • Remember / Record / Retry | SINGLE-FILE SOURCE BUNDLE
 -- No external Lua/data downloads; Roblox gameplay and Roblox-hosted assets remain online.
 -- WindUI
 -- MIT License
@@ -305,7 +305,7 @@ local ctx = _G.CandyCtx
 local function isCtx(t)
     if type(t) ~= "table" then return false end
     local ok, tw, en, uf = pcall(function() return rawget(t,"towers"), rawget(t,"enemies"), rawget(t,"unitsFolder") end)
-    return ok and type(tw)=="table" and type(en)=="table" and typeof(uf)=="Instance" and type(rawget(t,"state"))=="function"
+    return ok and type(tw)=="table" and type(en)=="table" and typeof(uf)=="Instance" and uf:IsDescendantOf(workspace) and type(rawget(t,"state"))=="function"
 end
 
 if isMatch then
@@ -318,7 +318,7 @@ if isMatch then
                 if ok then ctx = _G.CandyCtx; found = true end
             end
             if not found then
-                local gc = getgc and getgc(true) or {}
+                local gcOK,gc=pcall(function()return getgc and getgc(true)or {}end);if not gcOK then gc={}end
                 for _, v in pairs(gc) do 
                     if isCtx(v) then 
                         local ok, over = pcall(function() return v.state and v.state().over end)
@@ -350,7 +350,14 @@ local function initModules()
         PassRemotes = PassRemotes or RS:FindFirstChild("PassRemotes") or RS:WaitForChild("PassRemotes", 15)
     end
 end
-task.spawn(initModules)
+task.spawn(function()
+    while true do
+        local ok,reason=pcall(initModules)
+        if not ok then warn("[CandyTD Modules] "..tostring(reason))end
+        if not isMatch or(Catalog and MatchNet)then break end
+        task.wait(3)
+    end
+end)
 
 local function hr(n) return HubRemotes and HubRemotes:FindFirstChild(n, 5) end
 local function rr(n) return RewardRemotes and RewardRemotes:FindFirstChild(n, 5) end
@@ -1142,11 +1149,15 @@ end
 if isMatch then
     task.spawn(function()
         local world=1/3
-        while not ctx or not Catalog or not MatchNet do task.wait(0.5)end
+        while not ctx or not Catalog or not MatchNet do
+            if State.autoBattle then AutoBattle.status="รอเชื่อม "..(not ctx and "Context "or "")..(not Catalog and "Catalog "or "")..(not MatchNet and "MatchNet"or "")end
+            task.wait(0.5)
+        end
         local kit=CandyTD and CandyTD:FindFirstChild("ToonKit")
         if kit then local ok,value=pcall(require,kit);if ok then world=tonumber(value.WORLD)or world end end
         while true do
             task.wait(1)
+            local tickOK,tickError=pcall(function()
             if State.autoBattle and not gameState().over then
                 if State.activeSlot>0 or Recorder.active then AutoBattle.status="พักขณะอัดหรือเล่นแผน • หยุดแผนเพื่อวางเองอัตโนมัติ"
                 elseif type(MatchInfo.battle)=="table"then AutoBattle.status="Battles มีเลนเฉพาะ จึงไม่วางด้วยแผนนี้"
@@ -1154,7 +1165,8 @@ if isMatch then
                 else
                     local map=ctx.map;local path=map.path
                     if AutoBattle.map~=map then
-                        AutoBattle.map=map;AutoBattle.points={};AutoBattle.blocked={}
+                        AutoBattle.status="กำลังคำนวณจุดวางจากเส้นทาง"
+                        AutoBattle.points={};AutoBattle.blocked={}
                         local length=tonumber(path.length)or 0
                         for distance=0,math.min(length,90*world),12*world do
                             local center=path:at(distance)
@@ -1167,6 +1179,7 @@ if isMatch then
                             task.wait()
                         end
                     end
+                        AutoBattle.map=map
                     local counts,total={},0
                     for _,tower in ipairs(mine())do counts[tower.unit]=(counts[tower.unit]or 0)+1;total=total+1 end
                     local heroes={};local slots=MatchInfo.slots
@@ -1212,12 +1225,21 @@ if isMatch then
                             if index%120==0 then task.wait()end
                         end
                         if best and State.autoBattle then
+                            AutoBattle.status="กำลังวาง "..hero.kind
                             local response=MatchNet.place(hero.kind,best)
+                            if type(response)~="table"then error("เซิร์ฟเวอร์ไม่ส่งผลวางกลับมา")end
                             AutoBattle.status=response.ok and("วาง "..hero.kind.." ใกล้ทางเข้าแล้ว")or tostring(response.reason)
                             AutoBattle.blocked[bestKey]=os.clock()+(response.ok and 2 or 30)
                         else AutoBattle.status="ยังไม่พบตำแหน่งที่วางได้ใกล้ทางเข้า"end
                     end
                 end
+            elseif State.autoBattle then AutoBattle.status="รอเกมเริ่มรอบใหม่"end
+            end)
+            if not tickOK then
+                AutoBattle.status="ตัววางจะลองใหม่: "..tostring(tickError)
+                warn("[CandyTD AutoBattle] "..tostring(tickError))
+                AutoBattle.map=nil;AutoBattle.points={}
+                task.wait(2)
             end
         end
     end)
@@ -1301,7 +1323,7 @@ if not isMatch then
 end
 -- ═══════════ UI SETUP ═══════════
 local Window = Rayfield:CreateWindow({
-    Name = "CandyTD Auto-All v6.16 • Record + Retry",
+    Name = "CandyTD Auto-All v6.17 • Record + Retry",
     LoadingTitle = isMatch and "Match Mode" or "Lobby Mode",
     ConfigurationSaving = { Enabled = false },
     KeySystem = false,
