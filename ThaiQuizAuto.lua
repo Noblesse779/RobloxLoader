@@ -1,4 +1,4 @@
--- ThaiQuizAuto V7 | WindUI by Footagesus (MIT), native UI fallback
+-- ThaiQuizAuto V8 | WindUI by Footagesus (MIT), native UI fallback
 -- https://github.com/Footagesus/WindUI
 -- Dictionary-based answers; server decides validity. No Time Attack support.
 local RS = game:GetService("ReplicatedStorage")
@@ -41,7 +41,7 @@ local shell = make("ScreenGui", {
 }, player:WaitForChild("PlayerGui"))
 local launcher = make("TextButton", {
     Size = UDim2.fromOffset(180, 40), Position = UDim2.new(0, 18, 0.18, 0),
-    Text = "ก–ฮ V7 • กำลังโหลด UI", TextSize = 15,
+    Text = "ก–ฮ V8 • กำลังโหลด UI", TextSize = 15,
     Font = Enum.Font.Gotham, TextColor3 = Color3.fromRGB(255,255,255),
     BackgroundColor3 = Color3.fromRGB(28, 38, 57), BorderSizePixel = 0,
 }, shell)
@@ -200,7 +200,7 @@ else
     pcall(function()WindUI:SetParent(player.PlayerGui)end)
     hint.Text="พร้อมใช้งาน • แตะปุ่มเพื่อเปิดเมนู"
 end
-launcher.Text="ก–ฮ V7 • เปิดเมนู"
+launcher.Text="ก–ฮ V8 • เปิดเมนู"
 
 
 local words = {
@@ -400,6 +400,11 @@ local vocabularyState="กำลังโหลดคลังคำ..."
 local vocabularyCard
 local sentByCategory={}
 local validationCache={}
+local learned={}
+local learnedPath="ThaiQuiz_ValidatedWords_v1.json"
+local function saveLearned()
+    if type(writefile)=="function"then pcall(writefile,learnedPath,HttpService:JSONEncode(learned))end
+end
 local requestRemote=R:FindFirstChild("Request")
 
 local extra={
@@ -474,11 +479,33 @@ for cat,list in pairs(curated)do
     end
 end
 
+if type(readfile)=="function"then
+    local ok,text=pcall(readfile,learnedPath)
+    if ok then local decoded,data=pcall(HttpService.JSONDecode,HttpService,text);if decoded and type(data)=="table"then learned=data;for cat,list in pairs(learned)do if type(list)=="table"then for _,word in ipairs(list)do if type(word)=="string"then addCandidate(cat,word)end end end end end end
+end
+-- Allocate all 44 consonants for each category advertised by the game.
+local shared=game:GetService("ReplicatedStorage"):FindFirstChild("Shared")
+local official=shared and shared:FindFirstChild("Categories")
+if official then
+    local ok,data=pcall(require,official)
+    if ok and type(data)=="table"then
+        for _,category in ipairs(data.List or {})do
+            bank[category.id]=bank[category.id]or {}
+            for _,cp in utf8.codes("กขฃคฅฆงจฉชซฌญฎฏฐฑฒณดตถทธนบปผฝพฟภมยรลวศษสหฬอฮ")do local l=utf8.char(cp);bank[category.id][l]=bank[category.id][l]or {}end
+        end
+    end
+end
 local checksThisRound=0
+local lastValidationAt=0
 local function checked(cat,l,word,token,fresh)
     local key=cat.."/"..l.."/"..word
     if not fresh and validationCache[key] then return validationCache[key] end
-    if checksThisRound>=80 then return "rate_limited" end
+    -- No fixed per-round ceiling: continue while the round is open.
+    while os.clock()-lastValidationAt<0.3 do
+        if not alive or generation~=token then return "cancelled"end
+        task.wait(0.05)
+    end
+    lastValidationAt=os.clock()
     checksThisRound=checksThisRound+1
     if not requestRemote then return "unavailable" end
     local done=false
@@ -495,6 +522,7 @@ local function checked(cat,l,word,token,fresh)
     if not done then pcall(task.cancel,call)end
     if done and (status=="valid" or status=="unknown_word" or status=="wrong_letter" or status=="nonsense") then
         validationCache[key]=status
+        if status=="valid"then learned[cat]=learned[cat]or {};if not table.find(learned[cat],word)then learned[cat][#learned[cat]+1]=word;saveLearned()end end
     end
     return status
 end
@@ -551,7 +579,7 @@ end
 
 answer=function()
     cancel()
-    if legacyRunning then setStatus("มีสคริปต์รุ่นเก่าทำงานอยู่ — เข้าเกมใหม่ก่อนใช้ V7");return end
+    if legacyRunning then setStatus("มีสคริปต์รุ่นเก่าทำงานอยู่ — เข้าเกมใหม่ก่อนใช้ V8");return end
     if not isOpen()then setStatus("รอช่วงตอบคำถามของรอบใหม่");return end
     local token=generation
     local roundLetter,roundCategories=letter,categories
@@ -562,6 +590,7 @@ answer=function()
         cacheText=state and "เชื่อมข้อมูลคำตอบในเกมแล้ว" or "เชื่อมข้อมูลไม่ได้ — เกมอาจเขียนทับคำตอบตอนจบรอบ"
         setDesc(cacheCard,cacheText)
         local cursor={}
+        local sortedSizes={}
         local function active()return alive and generation==token and isOpen()end
         local function key(id,word)return id.."/"..roundLetter.."/"..word end
         local function renderResults()
@@ -593,7 +622,7 @@ answer=function()
             end
         end
         -- Give every category a candidate before trying a second candidate.
-        for pass=1,16 do
+        while active()do
             if not active()then return end
             local pending=false
             for index,cat in ipairs(roundCategories)do
@@ -602,6 +631,7 @@ answer=function()
                     local id=type(cat)=="table" and cat.id or cat
                     local name=type(cat)=="table" and (cat.name or id) or id
                     local list=bank[id] and bank[id][roundLetter] or {}
+                    if sortedSizes[id]~=#list then table.sort(list,function(a,b)local al,bl=utf8.len(a)or 0,utf8.len(b)or 0;if al==bl then return a<b end;return al>bl end);sortedSizes[id]=#list end
                     cursor[index]=cursor[index] or 1
                     local word=list[cursor[index]]
                     cursor[index]=cursor[index]+1
@@ -631,7 +661,7 @@ answer=function()
                         elseif status=="rate_limited" or status=="unavailable" then
                             log("ตรวจคำยังไม่สำเร็จ: "..tostring(name).." / "..status)
                             cursor[index]=cursor[index]-1
-                            task.wait(0.6)
+                            task.wait(status=="rate_limited"and 1.5 or 0.6)
                         else
                             log(tostring(name)..": "..word.." → "..tostring(status))
                         end
@@ -650,7 +680,7 @@ answer=function()
     end)
 end
 
-statusCard = Main:Paragraph({ Title = "สถานะ • V7", Desc = statusText })
+statusCard = Main:Paragraph({ Title = "สถานะ • V8", Desc = statusText })
 roundCard = Main:Paragraph({ Title = "รอบปัจจุบัน", Desc = "รอเริ่มรอบ" })
 Main:Toggle({
     Title = "ตอบคำถามอัตโนมัติ",
@@ -799,8 +829,8 @@ if current and current.canType and type(current.categories) == "table"
     setStatus("พบรอบที่กำลังเล่น — เปิดสวิตช์เพื่อเริ่มตอบ")
 end
 player:SetAttribute("__ThaiQuizAutoRunning", true)
-log("เปิดหน้าต่าง V7 แล้ว — เปิดสวิตช์เพื่อใช้งาน")
-if legacyRunning then setStatus("มีสคริปต์รุ่นเก่าทำงานอยู่ — เข้าเกมใหม่ก่อนใช้ V7")end
+log("เปิดหน้าต่าง V8 แล้ว — เปิดสวิตช์เพื่อใช้งาน")
+if legacyRunning then setStatus("มีสคริปต์รุ่นเก่าทำงานอยู่ — เข้าเกมใหม่ก่อนใช้ V8")end
 startVocabulary()
 return controller
 
