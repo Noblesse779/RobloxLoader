@@ -1,4 +1,4 @@
--- CandyTD v6.18 • Remember / Record / Retry | SINGLE-FILE SOURCE BUNDLE
+-- CandyTD v6.19 • Remember / Record / Retry | SINGLE-FILE SOURCE BUNDLE
 -- No external Lua/data downloads; Roblox gameplay and Roblox-hosted assets remain online.
 -- WindUI
 -- MIT License
@@ -199,7 +199,6 @@ loadData()
 -- ═══════════ MATCH / LOBBY CHECK ═══════════
 local MATCH_PLACE = 90286053025127
 local isMatch = (game.PlaceId == MATCH_PLACE) or (RS:FindFirstChild("CandyTD") and not RS:FindFirstChild("Hub"))
-if not isMatch then task.wait(10)end
 
 local ClientSettings={status="พร้อม",graphics=setmetatable({},{__mode="k"}),graphicsGeneration=0}
 local SettingsLighting=game:GetService("Lighting")
@@ -1100,6 +1099,17 @@ if not isMatch then
 end
 
 local AutoBattle={status="ปิดเล่นอัตโนมัติ",map=nil,points={},blocked={},queued=false,challengeStatus="รอข้อมูล Challenges"}
+AutoBattle.entryDeadline=math.huge
+function AutoBattle.cooldownRemaining()
+    if AutoBattle.entryDeadline==math.huge then return 10 end
+    return math.max(0,math.ceil(AutoBattle.entryDeadline-os.clock()))
+end
+function AutoBattle.canEnter()
+    return isMatch or(AutoBattle.entryDeadline~=math.huge and os.clock()>=AutoBattle.entryDeadline)
+end
+function AutoBattle.armLobbyCooldown()
+    AutoBattle.entryDeadline=os.clock()+10
+end
 function AutoBattle.queue()
     if AutoBattle.queued then return end
     local queue=queue_on_teleport or queueonteleport or(type(syn)=="table"and syn.queue_on_teleport)
@@ -1125,6 +1135,7 @@ function AutoBattle.challengeList()
 end
 function AutoBattle.enter()
     if isMatch or not State.autoEnterBattle then return end
+    if not AutoBattle.canEnter()then AutoBattle.status="รอก่อนวาร์ป "..AutoBattle.cooldownRemaining().." วินาที";return end
     local native=LobbyExtras.context()
     if State.autoBattleMode=="challenge"then
         local selected
@@ -1249,7 +1260,9 @@ if not isMatch then
     task.spawn(function()
         while true do
             task.wait(1)
-            if State.autoEnterBattle and Catalog and Profile and HubRemotes and os.clock()>=(AutoBattle.nextEnter or 0)then
+            if State.autoEnterBattle and not AutoBattle.canEnter()then
+                AutoBattle.status="คูลดาวน์ก่อนวาร์ป "..AutoBattle.cooldownRemaining().." วินาที • ปรับตั้งค่าได้"
+            elseif State.autoEnterBattle and Catalog and Profile and HubRemotes and os.clock()>=(AutoBattle.nextEnter or 0)then
                 local native=LobbyExtras.context()
                 if not(native and(native.travelling or native.busy))then
                     AutoBattle.nextEnter=os.clock()+15
@@ -1380,7 +1393,7 @@ if not isMatch then
             if not ctx and HubRemotes and Profile and Catalog then
                 local now = os.clock()
                 
-                if State.autoPlay and now - Loop.lastPlay > 8 then
+                if State.autoPlay and AutoBattle.canEnter() and now - Loop.lastPlay > 8 then
                     Loop.lastPlay = now
                     local tid = nil
                     if State.autoPlayAll and #StageList > 0 then
@@ -1432,7 +1445,7 @@ if not isMatch then
 end
 -- ═══════════ UI SETUP ═══════════
 local Window = Rayfield:CreateWindow({
-    Name = "CandyTD Auto-All v6.18 • Record + Retry",
+    Name = "CandyTD Auto-All v6.19 • Record + Retry",
     LoadingTitle = isMatch and "Match Mode" or "Lobby Mode",
     ConfigurationSaving = { Enabled = false },
     KeySystem = false,
@@ -1790,7 +1803,7 @@ else
     for _, s in ipairs(StageList) do if s.id==State.autoPlayStageId then curStageName=s.name break end end
     ST:CreateSection("เลือกด่าน")
     ST:CreateDropdown({ Name="🎯 ด่าน", Options=stageOpts, CurrentOption={ curStageName }, MultipleOptions=false, Callback=function(o) local v = type(o)=="table" and o[1] or o; for _, s in ipairs(StageList) do if s.name == v then State.autoPlayStageId = s.id; saveData(); break end end end })
-    ST:CreateButton({ Name="🚀 วาป+เล่นเลย", Callback=function() local play = hr("Play"); if play then pcall(play.InvokeServer, play, State.autoPlayStageId); Rayfield:Notify({ Title="วาป", Content="ID "..State.autoPlayStageId, Duration=2 }) end end })
+    ST:CreateButton({ Name="🚀 วาป+เล่นเลย", Callback=function() if not AutoBattle.canEnter()then return end;local play = hr("Play"); if play then pcall(play.InvokeServer, play, State.autoPlayStageId); Rayfield:Notify({ Title="วาป", Content="ID "..State.autoPlayStageId, Duration=2 }) end end })
     ST:CreateButton({ Name="🔄 Refresh Profile & Stages", Callback=function() refreshProfile(); buildStageList(); buildKindLists(); Rayfield:Notify({ Title="Refresh", Content="อัพเดทแล้ว", Duration=2 }) end })
 end
 
@@ -1852,7 +1865,7 @@ if not isMatch then
     AutoTab:CreateButton({Name="รีเฟรช Challenges",Callback=refreshChallenges})
     AutoTab:CreateToggle({Name="เข้าด่านที่เลือกอัตโนมัติ",CurrentValue=State.autoEnterBattle,Callback=function(on)
         State.autoEnterBattle=on
-        if on then State.autoPlay=false;AutoBattle.enable(true);AutoBattle.nextEnter=0
+        if on then State.autoPlay=false;AutoBattle.enable(true);AutoBattle.nextEnter=0;AutoBattle.armLobbyCooldown()
         else AutoBattle.status="ปิดเข้าด่านอัตโนมัติแล้ว"end
         saveData()
     end})
@@ -1862,6 +1875,28 @@ else
 end
 AutoTab:CreateLabel("หลังย้ายเซิร์ฟเวอร์จะรันต่อให้เมื่อรองรับ queue_on_teleport มิฉะนั้นต้องรันลิงก์เดิมใหม่ • ไม่รับประกันชัยชนะทุกทีม/ทุกเงื่อนไข")
 task.spawn(function()while true do task.wait(1);autoStatus:Set(AutoBattle.status)end end)
+
+if not isMatch then
+    AutoBattle.armLobbyCooldown()
+    local banner=Instance.new("ScreenGui")
+    banner.Name="CandyTD_WarpCooldown";banner.ResetOnSpawn=false;banner.DisplayOrder=1000;banner.Parent=PlayerGui
+    local frame=Instance.new("Frame");frame.Size=UDim2.fromOffset(420,94);frame.Position=UDim2.new(0.5,-210,0,18);frame.BackgroundColor3=Color3.fromRGB(25,28,40);frame.Parent=banner
+    local corner=Instance.new("UICorner");corner.CornerRadius=UDim.new(0,12);corner.Parent=frame
+    local text=Instance.new("TextLabel");text.Size=UDim2.new(1,-16,0,48);text.Position=UDim2.fromOffset(8,2);text.BackgroundTransparency=1;text.TextColor3=Color3.new(1,1,1);text.TextSize=18;text.TextWrapped=true;text.Font=Enum.Font.GothamMedium;text.Parent=frame
+    local stop=Instance.new("TextButton");stop.Size=UDim2.new(1,-24,0,32);stop.Position=UDim2.fromOffset(12,54);stop.BackgroundColor3=Color3.fromRGB(180,65,65);stop.TextColor3=Color3.new(1,1,1);stop.TextSize=16;stop.Text="หยุดวาร์ปอัตโนมัติ";stop.Font=Enum.Font.GothamMedium;stop.Parent=frame
+    local stopCorner=Instance.new("UICorner");stopCorner.CornerRadius=UDim.new(0,8);stopCorner.Parent=stop
+    stop.Activated:Connect(function()
+        State.autoEnterBattle=false;State.autoPlay=false;saveData()
+        AutoBattle.status="หยุดวาร์ปแล้ว • ปรับตั้งค่าได้";banner:Destroy()
+    end)
+    task.spawn(function()
+        while banner.Parent and not AutoBattle.canEnter()do
+            text.Text="รอก่อนวาร์ป "..AutoBattle.cooldownRemaining().." วินาที\nUI พร้อมแล้ว — ปรับตั้งค่าได้ตอนนี้"
+            task.wait(0.1)
+        end
+        if banner.Parent then banner:Destroy()end
+    end)
+end
 
 local FarmTab=Window:CreateTab("สถิติฟาร์ม",4483362460)
 FarmTab:CreateLabel("เริ่มเก็บตั้งแต่เปิดรุ่นนี้ • นับรอบที่จบ แยกด่านปกติ/Challenge • รางวัลนับเฉพาะผลจริงจากเซิร์ฟเวอร์")
