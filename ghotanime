@@ -1,4 +1,4 @@
--- CandyTD v6.14 • Remember / Record / Retry | SINGLE-FILE SOURCE BUNDLE
+-- CandyTD v6.15 • Remember / Record / Retry | SINGLE-FILE SOURCE BUNDLE
 -- No external Lua/data downloads; Roblox gameplay and Roblox-hosted assets remain online.
 -- WindUI
 -- MIT License
@@ -137,7 +137,7 @@ local SAVE_FILE = "CandyTD_AutoAll_v1.json"
 -- ═══════════ STATE ═══════════
 local DefaultState = {
     autoUpgrade=true, autoStartWave=false, autoReplay="off", activeSlot=0, autoSellExcess=false,
-    autoRetryLoss=true,planPlayback="snapshot",recordSlot=1,autoBattle=false,autoBattleNext=false,autoBattleMode="stage",autoBattleStage=1,autoChallenge=1,autoSkills=false,antiAFK=true,fpsLimit=false,fpsCap=30,lowGraphics=true,
+    autoRetryLoss=true,planPlayback="snapshot",recordSlot=1,autoBattle=false,autoEnterBattle=false,autoBattleNext=false,autoBattleMode="stage",autoBattleStage=1,autoChallenge=1,autoSkills=false,antiAFK=true,fpsLimit=false,fpsCap=30,lowGraphics=true,
     traitUnitId="",traitTargets={},statsUnitId="",statsTargets={dmg="S",range="ไม่กำหนด",spa="ไม่กำหนด"},statsLocks={},craftRecipe="",summonBanner="normal",lobbyRewardsVersion=0,evolveUnitId="",evolveTarget="",evolvePartner="",
     autoSummon=false, summonMode="10",
     autoClaimDaily=false, autoClaimLevels=false, autoClaimQuests=false, autoClaimPass=false,
@@ -1110,7 +1110,7 @@ function AutoBattle.challengeList()
     return ok and type(list)=="table"and list or {}
 end
 function AutoBattle.enter()
-    if isMatch then AutoBattle.status="อยู่ในด่านแล้ว เปิดสวิตช์เพื่อเริ่มวาง";return end
+    if isMatch or not State.autoEnterBattle then return end
     local native=LobbyExtras.context()
     if State.autoBattleMode=="challenge"then
         local selected
@@ -1124,6 +1124,7 @@ function AutoBattle.enter()
             local response=lobby.create(selected.stage,selected.id)
             if not response or not response.ok then AutoBattle.status=tostring(response and response.reason or "สร้างห้องไม่สำเร็จ");return end
         end
+        if not State.autoEnterBattle or State.autoBattleMode~="challenge"or State.autoChallenge~=selected.n then return end
         AutoBattle.queue();local response=lobby.start()
         AutoBattle.status=response and response.ok and "กำลังเข้า Challenge"or tostring(response and response.reason or "เริ่มห้องไม่สำเร็จ")
     else
@@ -1215,6 +1216,21 @@ if isMatch then
         end
     end)
 end
+if not isMatch then
+    task.spawn(function()
+        while true do
+            task.wait(1)
+            if State.autoEnterBattle and Catalog and Profile and HubRemotes and os.clock()>=(AutoBattle.nextEnter or 0)then
+                local native=LobbyExtras.context()
+                if not(native and(native.travelling or native.busy))then
+                    AutoBattle.nextEnter=os.clock()+15
+                    local ok,reason=pcall(AutoBattle.enter)
+                    if not ok then AutoBattle.status="เข้าด่านไม่สำเร็จ: "..tostring(reason)end
+                end
+            end
+        end
+    end)
+end
 if State.autoBattle then AutoBattle.enable(true)end
 
 -- ═══════════ LOBBY LOGIC ═══════════
@@ -1279,7 +1295,7 @@ if not isMatch then
 end
 -- ═══════════ UI SETUP ═══════════
 local Window = Rayfield:CreateWindow({
-    Name = "CandyTD Auto-All v6.14 • Record + Retry",
+    Name = "CandyTD Auto-All v6.15 • Record + Retry",
     LoadingTitle = isMatch and "Match Mode" or "Lobby Mode",
     ConfigurationSaving = { Enabled = false },
     KeySystem = false,
@@ -1693,7 +1709,12 @@ if not isMatch then
         challenges:Set(#lines>0 and table.concat(lines,"\n")or "รอข้อมูล Challenges")
     end
     AutoTab:CreateButton({Name="รีเฟรช Challenges",Callback=refreshChallenges})
-    AutoTab:CreateButton({Name="เปิดออโต้และเข้าด่านที่เลือก",Callback=function()AutoBattle.enable(true);task.spawn(AutoBattle.enter)end})
+    AutoTab:CreateToggle({Name="เข้าด่านที่เลือกอัตโนมัติ",CurrentValue=State.autoEnterBattle,Callback=function(on)
+        State.autoEnterBattle=on
+        if on then State.autoPlay=false;AutoBattle.enable(true);AutoBattle.nextEnter=0
+        else AutoBattle.status="ปิดเข้าด่านอัตโนมัติแล้ว"end
+        saveData()
+    end})
     refreshChallenges()
 else
     AutoTab:CreateLabel("อยู่ในด่านแล้ว: เปิดสวิตช์เพื่อเริ่มวางตัวได้ทันที • หากกำลังอัดหรือเล่นเทป ให้หยุดก่อน")
