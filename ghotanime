@@ -1,4 +1,4 @@
--- CandyTD v6.4 • Remember / Record / Retry | SINGLE-FILE SOURCE BUNDLE
+-- CandyTD v6.5 • Remember / Record / Retry | SINGLE-FILE SOURCE BUNDLE
 -- No external Lua/data downloads; Roblox gameplay and Roblox-hosted assets remain online.
 -- WindUI
 -- MIT License
@@ -458,7 +458,7 @@ local function startRecording(slot)
     Recorder={active=true,slot=slot,known={},nextKey=0,wave=tonumber(gameState().wave)or 0,waveAt=clock(),running=gameState().running==true}
     SavedRecords[slot]={};SavedMeta[slot]={stage=stageId(),version=2}
     saveData();changed(slot)
-    matchStatus="กำลังอัดช่อง "..slot.." • วาง/อัปเกรด/ขาย/เริ่มเวฟ"
+    matchStatus="กำลังอัดช่อง "..slot.." • วาง/อัปเกรด/ขาย • ออโต้ทำงานต่อ"
     return true,"เริ่มอัดใหม่แล้ว แผนแบบจำกระดานเดิมยังอยู่"
 end
 task.spawn(function()
@@ -471,16 +471,18 @@ task.spawn(function()
             else
                 local wave=tonumber(s.wave)or 0
                 local now=clock()
-                local oldWave,oldAt=Recorder.wave,Recorder.waveAt
                 local list=SavedRecords[Recorder.slot]
                 local function add(action,data,eventWave,eventAt)
                     data.action=action;data.wave=eventWave or wave;data.at=eventAt or math.max(0,now-Recorder.waveAt)
                     list[#list+1]=data
                 end
-                if s.running and not Recorder.running then add("start",{},oldWave,math.max(0,now-oldAt))end
                 if wave~=Recorder.wave then Recorder.wave=wave;Recorder.waveAt=now end
                 local current={}
-                for _,t in ipairs(mine())do
+                local owned=mine()
+                local present={}
+                for _,t in ipairs(owned)do present[tostring(t.id or t)]=true end
+                for id,d in pairs(Recorder.known)do if not present[id]then add("sell",table.clone(d))end end
+                for _,t in ipairs(owned)do
                     local id=tostring(t.id or t)
                     local d=unitData(t);local old=Recorder.known[id]
                     if not old then
@@ -492,7 +494,6 @@ task.spawn(function()
                     end
                     current[id]=d
                 end
-                for id,d in pairs(Recorder.known)do if not current[id]then add("sell",table.clone(d))end end
                 Recorder.known=current;Recorder.running=s.running==true
                 changed(Recorder.slot)
                 if os.clock()-lastSave>=1 then saveData();lastSave=os.clock()end
@@ -636,13 +637,13 @@ if isMatch then
                 end
             else
                 endedAt=0;voted=false
-                if ctx and MatchNet and State.autoUpgrade and not Recorder.active and not timelinePlaying then
+                if ctx and MatchNet and State.autoUpgrade and not timelinePlaying then
                     for _,t in ipairs(mine())do
                         local def=ctx.UNITS and ctx.UNITS[t.unit]
                         if def and def.LEVELS and def.LEVELS[(t.level or 1)+1]then act("upgrade",t.id);task.wait(0.12)end
                     end
                 end
-                if ctx and MatchNet and State.autoStartWave and not Recorder.active and not s.running and os.clock()-lastVote>1.5 then
+                if ctx and MatchNet and State.autoStartWave and not s.running and os.clock()-lastVote>1.5 then
                     local ready=false
                     if timelinePlaying then
                         ready=(not pendingTimeline and #mine()>0)or(pendingTimeline and(pendingTimeline.event.wave>(s.wave or 0)or pendingTimeline.reason=="money"))
@@ -862,7 +863,7 @@ end
 
 -- ═══════════ UI SETUP ═══════════
 local Window = Rayfield:CreateWindow({
-    Name = "CandyTD Auto-All v6.4 • Record + Retry",
+    Name = "CandyTD Auto-All v6.5 • Record + Retry",
     LoadingTitle = isMatch and "Match Mode" or "Lobby Mode",
     ConfigurationSaving = { Enabled = false },
     KeySystem = false,
@@ -898,7 +899,7 @@ if isMatch then
     task.spawn(function()while true do task.wait(1);resultStatus:Set(matchStatus.." • "..playbackStatus)end end)
     local SlotsTab=Window:CreateTab("Auto Slots",6034689657)
     SlotsTab:CreateSection("จำกระดาน + อัดการวาง")
-    SlotsTab:CreateLabel("เริ่มอัดก่อนวางตัว/เริ่มเวฟ • ขณะอัดจะพักระบบออโต้ที่แทรกแผน")
+    SlotsTab:CreateLabel("อัดเฉพาะวาง/อัปเกรด/ขาย • ออโต้ทำงานต่อ • ไม่อัดเริ่มเวฟ")
     SlotsTab:CreateDropdown({Name="วิธีเล่นแผน",Options={"จำกระดานตามเวฟ","เล่นเทปที่อัด"},
         CurrentOption={State.planPlayback=="record"and "เล่นเทปที่อัด"or "จำกระดานตามเวฟ"},
         Callback=function(o)
