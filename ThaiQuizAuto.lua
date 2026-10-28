@@ -1,4 +1,4 @@
--- ThaiQuizAuto V9 | WindUI by Footagesus (MIT), native UI fallback
+-- ThaiQuizAuto V10 | WindUI by Footagesus (MIT), native UI fallback
 -- https://github.com/Footagesus/WindUI
 -- Dictionary-based answers; server decides validity. No Time Attack support.
 local RS = game:GetService("ReplicatedStorage")
@@ -41,7 +41,7 @@ local shell = make("ScreenGui", {
 }, player:WaitForChild("PlayerGui"))
 local launcher = make("TextButton", {
     Size = UDim2.fromOffset(180, 40), Position = UDim2.new(0, 18, 0.18, 0),
-    Text = "ก–ฮ V9 • กำลังโหลด UI", TextSize = 15,
+    Text = "ก–ฮ V10 • กำลังโหลด UI", TextSize = 15,
     Font = Enum.Font.Gotham, TextColor3 = Color3.fromRGB(255,255,255),
     BackgroundColor3 = Color3.fromRGB(28, 38, 57), BorderSizePixel = 0,
 }, shell)
@@ -200,7 +200,7 @@ else
     pcall(function()WindUI:SetParent(player.PlayerGui)end)
     hint.Text="พร้อมใช้งาน • แตะปุ่มเพื่อเปิดเมนู"
 end
-launcher.Text="ก–ฮ V9 • เปิดเมนู"
+launcher.Text="ก–ฮ V10 • เปิดเมนู"
 
 
 local words = {
@@ -400,6 +400,13 @@ local vocabularyState="กำลังโหลดคลังคำ..."
 local vocabularyCard
 local sentByCategory={}
 local validationCache={}
+local rareOnly=true
+local wordRatings={}
+local ratingsPath="ThaiQuiz_WordRatings_v1.json"
+if type(readfile)=="function"then
+    local ok,text=pcall(readfile,ratingsPath)
+    if ok then local good,value=pcall(HttpService.JSONDecode,HttpService,text);if good and type(value)=="table"then wordRatings=value end end
+end
 local learned={}
 local learnedPath="ThaiQuiz_ValidatedWords_v1.json"
 local function saveLearned()
@@ -547,13 +554,22 @@ local function checked(cat,l,word,token,fresh)
         local ok,result=pcall(function()
             return requestRemote:InvokeServer("checkAnswer",{category=cat,letter=l,text=word})
         end)
-        if ok and type(result)=="table" and type(result.status)=="string" then status=result.status end
+        if ok and type(result)=="table" and type(result.status)=="string" then
+            status=result.status
+            if status=="valid"then
+                local rating={rarity=tonumber(result.rarity)or 0,points=tonumber(result.points)}
+                local prior=wordRatings[key]
+                wordRatings[key]=rating
+                if type(writefile)=="function"and(not prior or prior.rarity~=rating.rarity or prior.points~=rating.points)then pcall(writefile,ratingsPath,HttpService:JSONEncode(wordRatings))end
+                if rareOnly and not(rating.points and rating.points>=10 or rating.rarity>=3)then status="below_target_score"end
+            end
+        end
         done=true
     end)
     local limit=os.clock()+1.5
     while not done and alive and generation==token and os.clock()<limit do task.wait(0.05)end
     if not done then pcall(task.cancel,call)end
-    if done and (status=="valid" or status=="unknown_word" or status=="wrong_letter" or status=="nonsense") then
+    if done and (status=="valid" or status=="unknown_word" or status=="wrong_letter" or status=="nonsense" or status=="below_target_score") then
         validationCache[key]=status
         if status=="valid"then learned[cat]=learned[cat]or {};if not table.find(learned[cat],word)then learned[cat][#learned[cat]+1]=word;saveLearned()end end
     end
@@ -612,7 +628,7 @@ end
 
 answer=function()
     cancel()
-    if legacyRunning then setStatus("มีสคริปต์รุ่นเก่าทำงานอยู่ — เข้าเกมใหม่ก่อนใช้ V9");return end
+    if legacyRunning then setStatus("มีสคริปต์รุ่นเก่าทำงานอยู่ — เข้าเกมใหม่ก่อนใช้ V10");return end
     if not isOpen()then setStatus("รอช่วงตอบคำถามของรอบใหม่");return end
     local token=generation
     local roundLetter,roundCategories=letter,categories
@@ -664,7 +680,7 @@ answer=function()
                     local id=type(cat)=="table" and cat.id or cat
                     local name=type(cat)=="table" and (cat.name or id) or id
                     local list=bank[id] and bank[id][roundLetter] or {}
-                    if sortedSizes[id]~=#list then table.sort(list,function(a,b)local al,bl=utf8.len(a)or 0,utf8.len(b)or 0;if al==bl then return a<b end;return al>bl end);sortedSizes[id]=#list end
+                    if sortedSizes[id]~=#list then table.sort(list,function(a,b)local ar=wordRatings[id.."/"..roundLetter.."/"..a];local br=wordRatings[id.."/"..roundLetter.."/"..b];local ap=ar and(ar.rarity>=3 or(ar.points or 0)>=10)or false;local bp=br and(br.rarity>=3 or(br.points or 0)>=10)or false;if ap~=bp then return ap end;local al,bl=utf8.len(a)or 0,utf8.len(b)or 0;if al==bl then return a<b end;return al>bl end);sortedSizes[id]=#list end
                     cursor[index]=cursor[index] or 1
                     local word=list[cursor[index]]
                     cursor[index]=cursor[index]+1
@@ -713,7 +729,7 @@ answer=function()
     end)
 end
 
-statusCard = Main:Paragraph({ Title = "สถานะ • V9", Desc = statusText })
+statusCard = Main:Paragraph({ Title = "สถานะ • V10", Desc = statusText })
 roundCard = Main:Paragraph({ Title = "รอบปัจจุบัน", Desc = "รอเริ่มรอบ" })
 Main:Toggle({
     Title = "ตอบคำถามอัตโนมัติ",
@@ -751,6 +767,15 @@ Logs:Button({
         setDesc(logCard, "ล้างบันทึกแล้ว")
     end,
 })
+Settings:Toggle({
+    Title="เฉพาะคำหายาก / คะแนนตรวจคำ 10+",
+    Value=true,
+    Callback=function(value)
+        rareOnly=value;validationCache={}
+        if enabled and isOpen()then answer()end
+    end,
+})
+Settings:Paragraph({Title="โหมดคำหายาก",Desc="ดู rarity หรือ points ที่เกมส่งกลับ ไม่ใช้ความยาวตัดสินคะแนน • ถ้าไม่พบคำถึงเป้า จะเว้นช่องไว้"})
 Settings:Slider({
     Title = "เว้นช่วงส่งคำตอบ (วินาที)",
     Step = 0.05,
@@ -862,8 +887,8 @@ if current and current.canType and type(current.categories) == "table"
     setStatus("พบรอบที่กำลังเล่น — เปิดสวิตช์เพื่อเริ่มตอบ")
 end
 player:SetAttribute("__ThaiQuizAutoRunning", true)
-log("เปิดหน้าต่าง V9 แล้ว — เปิดสวิตช์เพื่อใช้งาน")
-if legacyRunning then setStatus("มีสคริปต์รุ่นเก่าทำงานอยู่ — เข้าเกมใหม่ก่อนใช้ V9")end
+log("เปิดหน้าต่าง V10 แล้ว — เปิดสวิตช์เพื่อใช้งาน")
+if legacyRunning then setStatus("มีสคริปต์รุ่นเก่าทำงานอยู่ — เข้าเกมใหม่ก่อนใช้ V10")end
 startVocabulary()
 return controller
 
