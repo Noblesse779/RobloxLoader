@@ -1,4 +1,4 @@
--- ThaiQuizAuto V10 | WindUI by Footagesus (MIT), native UI fallback
+-- ThaiQuizAuto V11 | WindUI by Footagesus (MIT), native UI fallback
 -- https://github.com/Footagesus/WindUI
 -- Dictionary-based answers; server decides validity. No Time Attack support.
 local RS = game:GetService("ReplicatedStorage")
@@ -41,7 +41,7 @@ local shell = make("ScreenGui", {
 }, player:WaitForChild("PlayerGui"))
 local launcher = make("TextButton", {
     Size = UDim2.fromOffset(180, 40), Position = UDim2.new(0, 18, 0.18, 0),
-    Text = "ก–ฮ V10 • กำลังโหลด UI", TextSize = 15,
+    Text = "ก–ฮ V11 • กำลังโหลด UI", TextSize = 15,
     Font = Enum.Font.Gotham, TextColor3 = Color3.fromRGB(255,255,255),
     BackgroundColor3 = Color3.fromRGB(28, 38, 57), BorderSizePixel = 0,
 }, shell)
@@ -200,7 +200,7 @@ else
     pcall(function()WindUI:SetParent(player.PlayerGui)end)
     hint.Text="พร้อมใช้งาน • แตะปุ่มเพื่อเปิดเมนู"
 end
-launcher.Text="ก–ฮ V10 • เปิดเมนู"
+launcher.Text="ก–ฮ V11 • เปิดเมนู"
 
 
 local words = {
@@ -571,7 +571,7 @@ local function checked(cat,l,word,token,fresh)
     if not done then pcall(task.cancel,call)end
     if done and (status=="valid" or status=="unknown_word" or status=="wrong_letter" or status=="nonsense" or status=="below_target_score") then
         validationCache[key]=status
-        if status=="valid"then learned[cat]=learned[cat]or {};if not table.find(learned[cat],word)then learned[cat][#learned[cat]+1]=word;saveLearned()end end
+        if status=="valid"or status=="below_target_score"then learned[cat]=learned[cat]or {};if not table.find(learned[cat],word)then learned[cat][#learned[cat]+1]=word;saveLearned()end end
     end
     return status
 end
@@ -628,7 +628,7 @@ end
 
 answer=function()
     cancel()
-    if legacyRunning then setStatus("มีสคริปต์รุ่นเก่าทำงานอยู่ — เข้าเกมใหม่ก่อนใช้ V10");return end
+    if legacyRunning then setStatus("มีสคริปต์รุ่นเก่าทำงานอยู่ — เข้าเกมใหม่ก่อนใช้ V11");return end
     if not isOpen()then setStatus("รอช่วงตอบคำถามของรอบใหม่");return end
     local token=generation
     local roundLetter,roundCategories=letter,categories
@@ -638,6 +638,7 @@ answer=function()
         local state=discoverState()
         cacheText=state and "เชื่อมข้อมูลคำตอบในเกมแล้ว" or "เชื่อมข้อมูลไม่ได้ — เกมอาจเขียนทับคำตอบตอนจบรอบ"
         setDesc(cacheCard,cacheText)
+        local highScore={}
         local cursor={}
         local sortedSizes={}
         local function active()return alive and generation==token and isOpen()end
@@ -660,7 +661,8 @@ answer=function()
                 local id=type(cat)=="table" and cat.id or cat
                 local status=checked(id,roundLetter,old,token,true)
                 if not active()then return end
-                if status~="valid" and status~="unavailable" then
+                if status=="valid"then highScore[index]=true end
+                if status~="valid" and status~="below_target_score" and status~="unavailable" then
                     sentByCategory[index]=nil
                     validationCache[key(id,old)]=status
                     if state and state.answers[index]==old then state.answers[index]="" end
@@ -676,7 +678,7 @@ answer=function()
             local pending=false
             for index,cat in ipairs(roundCategories)do
                 if not active()then return end
-                if not sentByCategory[index]then
+                if not highScore[index]then
                     local id=type(cat)=="table" and cat.id or cat
                     local name=type(cat)=="table" and (cat.name or id) or id
                     local list=bank[id] and bank[id][roundLetter] or {}
@@ -689,7 +691,7 @@ answer=function()
                         setStatus("ตรวจ "..tostring(name)..": "..word)
                         local status=checked(id,roundLetter,word,token)
                         if not active()then return end
-                        if status=="valid" then
+                        if status=="valid"or(status=="below_target_score"and(not sentByCategory[index]or(utf8.len(word)or 0)>(utf8.len(sentByCategory[index])or 0)))then
                             if state and state.letter==roundLetter and state.canType then state.answers[index]=word end
                             local sentOK,err=pcall(function()input:FireServer({type="answer",cat=index,text=word})end)
                             if sentOK then
@@ -697,8 +699,9 @@ answer=function()
                                 if not active()then return end
                                 local final=checked(id,roundLetter,word,token,true)
                                 if not active()then return end
-                                if final=="valid" or final=="unavailable" then
+                                if final=="valid" or final=="below_target_score" or final=="unavailable" then
                                     sentByCategory[index]=word
+                                    highScore[index]=final=="valid"
                                     log(tostring(name).." → "..word..(final=="valid" and " ✓" or " • ส่งแล้ว รอตรวจซ้ำ"))
                                 else
                                     validationCache[key(id,word)]=final
@@ -719,7 +722,10 @@ answer=function()
                     end
                 end
             end
-            if renderResults()==#roundCategories or not pending then break end
+            renderResults()
+            local allHigh=true
+            for i=1,#roundCategories do if not highScore[i]then allHigh=false;break end end
+            if allHigh or not pending then break end
         end
         if active()then
             local n=renderResults()
@@ -729,7 +735,7 @@ answer=function()
     end)
 end
 
-statusCard = Main:Paragraph({ Title = "สถานะ • V10", Desc = statusText })
+statusCard = Main:Paragraph({ Title = "สถานะ • V11", Desc = statusText })
 roundCard = Main:Paragraph({ Title = "รอบปัจจุบัน", Desc = "รอเริ่มรอบ" })
 Main:Toggle({
     Title = "ตอบคำถามอัตโนมัติ",
@@ -768,14 +774,14 @@ Logs:Button({
     end,
 })
 Settings:Toggle({
-    Title="เฉพาะคำหายาก / คะแนนตรวจคำ 10+",
+    Title="หาคำหายาก / 10+ ก่อน แล้วใช้คำยาวสำรอง",
     Value=true,
     Callback=function(value)
         rareOnly=value;validationCache={}
         if enabled and isOpen()then answer()end
     end,
 })
-Settings:Paragraph({Title="โหมดคำหายาก",Desc="ดู rarity หรือ points ที่เกมส่งกลับ ไม่ใช้ความยาวตัดสินคะแนน • ถ้าไม่พบคำถึงเป้า จะเว้นช่องไว้"})
+Settings:Paragraph({Title="โหมดคำหายาก",Desc="ดู rarity หรือ points ที่เกมส่งกลับ ไม่ใช้ความยาวตัดสินคะแนน • ใส่คำที่ผ่านตรวจไว้ก่อน แล้วหาคำคะแนนสูงต่อ • คำสำรองเลือกยาวก่อนสั้น"})
 Settings:Slider({
     Title = "เว้นช่วงส่งคำตอบ (วินาที)",
     Step = 0.05,
@@ -887,8 +893,8 @@ if current and current.canType and type(current.categories) == "table"
     setStatus("พบรอบที่กำลังเล่น — เปิดสวิตช์เพื่อเริ่มตอบ")
 end
 player:SetAttribute("__ThaiQuizAutoRunning", true)
-log("เปิดหน้าต่าง V10 แล้ว — เปิดสวิตช์เพื่อใช้งาน")
-if legacyRunning then setStatus("มีสคริปต์รุ่นเก่าทำงานอยู่ — เข้าเกมใหม่ก่อนใช้ V10")end
+log("เปิดหน้าต่าง V11 แล้ว — เปิดสวิตช์เพื่อใช้งาน")
+if legacyRunning then setStatus("มีสคริปต์รุ่นเก่าทำงานอยู่ — เข้าเกมใหม่ก่อนใช้ V11")end
 startVocabulary()
 return controller
 
