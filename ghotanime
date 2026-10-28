@@ -1,4 +1,4 @@
--- CandyTD v6.9 • Remember / Record / Retry | SINGLE-FILE SOURCE BUNDLE
+-- CandyTD v6.10 • Remember / Record / Retry | SINGLE-FILE SOURCE BUNDLE
 -- No external Lua/data downloads; Roblox gameplay and Roblox-hosted assets remain online.
 -- WindUI
 -- MIT License
@@ -406,6 +406,7 @@ local MatchInfo={}
 local matchStatus="พร้อม"
 local playbackStatus="ยังไม่เปิดแผน"
 local onPlanChanged
+local upgradePlan={primary=nil,secondaryUsed=false,pending=nil}
 local startSmartPlace,stopSmartPlace
 local function gameState()
     if ctx and type(ctx.state)=="function"then local ok,s=pcall(ctx.state);if ok and type(s)=="table"then return s end end
@@ -603,6 +604,7 @@ if isMatch then
             lastWon=payload.won==true;endedAt=os.clock();voted=false
             stopRecording();matchStatus=lastWon and "ชนะแล้ว"or "แพ้แล้ว — รอเล่นซ้ำด่านเดิม"
         elseif kind=="reset"then
+            upgradePlan={primary=nil,secondaryUsed=false,pending=nil}
             roundGeneration=roundGeneration+1;endedAt=0;lastWon=nil;voted=false;pendingTimeline=nil
             matchStatus="เริ่มรอบใหม่";task.defer(function()saveData()end)
         end
@@ -644,13 +646,42 @@ if isMatch then
                         end
                     end
                     table.sort(candidates,function(a,b)if a.power==b.power then return tostring(a.tower.id)<tostring(b.tower.id)end;return a.power>b.power end)
-                    local budget=tonumber(gameState().money)or 0
+                    local primary
                     for _,candidate in ipairs(candidates)do
-                        if candidate.cost<=budget then
-                            act("upgrade",candidate.tower.id)
-                            break
+                        if candidate.tower==upgradePlan.primary then primary=candidate;break end
+                    end
+                    if not primary then
+                        primary=candidates[1]
+                        upgradePlan.primary=primary and primary.tower or nil
+                        upgradePlan.secondaryUsed=false
+                    end
+                    local pending=upgradePlan.pending
+                    if pending and ((tonumber(pending.tower.level)or 1)>pending.level or pending.tower.alive==false or os.clock()-pending.at>2)then
+                        upgradePlan.pending=nil
+                    end
+                    if primary and not upgradePlan.pending then
+                        local budget=tonumber(gameState().money)or 0
+                        local chosen,isSecondary=primary,false
+                        if primary.cost>budget then
+                            chosen=nil
+                            if not upgradePlan.secondaryUsed then
+                                for _,candidate in ipairs(candidates)do
+                                    if candidate.tower~=primary.tower and candidate.cost<=budget then chosen=candidate;isSecondary=true;break end
+                                end
+                            end
+                        end
+                        if chosen then
+                            local level=tonumber(chosen.tower.level)or 1
+                            local result=act("upgrade",chosen.tower.id)
+                            if result.ok then
+                                upgradePlan.pending={tower=chosen.tower,level=level,at=os.clock()}
+                                if isSecondary then upgradePlan.secondaryUsed=true
+                                else upgradePlan.primary=nil;upgradePlan.secondaryUsed=false end
+                            end
                         end
                     end
+                elseif not State.autoUpgrade then
+                    upgradePlan={primary=nil,secondaryUsed=false,pending=nil}
                 end
                 if ctx and MatchNet and State.autoStartWave and not s.running and os.clock()-lastVote>1.5 then
                     local ready=false
@@ -995,7 +1026,7 @@ if not isMatch then
 end
 -- ═══════════ UI SETUP ═══════════
 local Window = Rayfield:CreateWindow({
-    Name = "CandyTD Auto-All v6.9 • Record + Retry",
+    Name = "CandyTD Auto-All v6.10 • Record + Retry",
     LoadingTitle = isMatch and "Match Mode" or "Lobby Mode",
     ConfigurationSaving = { Enabled = false },
     KeySystem = false,
@@ -1014,7 +1045,7 @@ if isMatch then
     Main:CreateSection("AUTO IN MATCH")
     Main:CreateToggle({ Name="⚔️ เริ่มเวฟอัตโนมัติ", CurrentValue=State.autoStartWave,
         Callback=function(v) State.autoStartWave=v; saveData() end })
-    Main:CreateToggle({Name="⬆️ อัปเกรดออโต้ • ตัวแรงสุดที่เงินพอก่อน",CurrentValue=State.autoUpgrade,Callback=function(v)State.autoUpgrade=v;saveData()end})
+    Main:CreateToggle({Name="⬆️ อัปเกรดออโต้ • ตัวรอง 1 ครั้ง แล้วรอตัวแรง",CurrentValue=State.autoUpgrade,Callback=function(v)State.autoUpgrade=v;saveData()end})
     Main:CreateToggle({ Name="🗑️ ขายตัวที่ไม่อยู่ในแผน (Auto-Sell)", CurrentValue=State.autoSellExcess,
         Callback=function(v) State.autoSellExcess=v; saveData() end })
     Main:CreateDropdown({ Name="🔁 เมื่อชนะ / จบเกม", Options={"ไม่ทำอะไร","เล่นซ้ำด่านเดิม","ไปด่านถัดไป"},
