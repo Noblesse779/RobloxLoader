@@ -1,4 +1,4 @@
--- CandyTD v6.25 • Remember / Record / Retry | SINGLE-FILE SOURCE BUNDLE
+-- CandyTD v6.26 • Remember / Record / Retry | SINGLE-FILE SOURCE BUNDLE
 -- No external Lua/data downloads; Roblox gameplay and Roblox-hosted assets remain online.
 -- WindUI
 -- MIT License
@@ -1628,7 +1628,7 @@ if not isMatch then
 end
 -- ═══════════ UI SETUP ═══════════
 local Window = Rayfield:CreateWindow({
-    Name = "CandyTD Auto-All v6.25 • Record + Retry",
+    Name = "CandyTD Auto-All v6.26 • Record + Retry",
     LoadingTitle = isMatch and "Match Mode" or "Lobby Mode",
     ConfigurationSaving = { Enabled = false },
     KeySystem = false,
@@ -2071,33 +2071,55 @@ task.spawn(function()while true do task.wait(1);infiniteStatus:Set(InfiniteTarge
 AutoTab:CreateLabel("เปิดระบบนี้จะเปิดเวฟ/อัปเกรด/สกิล/แพ้เล่นซ้ำ • ใช้เฉพาะทีมที่ใส่มา ไม่เปลี่ยนทีมและไม่ขายตัวเอง")
 local autoStatus=AutoTab:CreateLabel(AutoBattle.status)
 if not isMatch then
+    local entryPicker,entryMap,refreshEntryOptions
+    local refreshingEntry=false
     EntryTab:CreateDropdown({Name="รูปแบบ",Options={"ด่านปกติ","Challenges","Infinite"},CurrentOption={State.autoBattleMode=="infinite"and "Infinite"or(State.autoBattleMode=="challenge"and "Challenges"or "ด่านปกติ")},Callback=function(o)
-        local mode=type(o)=="table"and o[1]or o;State.autoBattleMode=mode=="Infinite"and "infinite"or(mode=="Challenges"and "challenge"or "stage");if mode=="Infinite"and State.autoBattle then State.autoReplay="again"end;saveData()
+        local mode=type(o)=="table"and o[1]or o
+        State.autoBattleMode=mode=="Infinite"and "infinite"or(mode=="Challenges"and "challenge"or "stage")
+        if mode=="Infinite"and State.autoBattle then State.autoReplay="again"end
+        AutoBattle.armLobbyCooldown();AutoBattle.nextEnter=0;saveData()
+        if refreshEntryOptions then refreshEntryOptions()end
     end})
-    local infiniteOptions,infiniteMap={},{}
-    local currentInfinite
-    for _,world in ipairs(Catalog and Catalog.WORLDS or {})do
-        local stage=Catalog.infiniteStage(world.id)
-        if stage and not world.portalOnly then
-            local label=world.name.." • "..stage.name..(Catalog.infiniteOpen(Profile,world.id)and " • พร้อมเล่น"or " • ยังล็อก")
-            infiniteOptions[#infiniteOptions+1]=label;infiniteMap[label]=world.id
-            if world.id==State.autoInfiniteWorld then currentInfinite=label end
+    local function entryOptions()
+        local options,current={},nil;entryMap={}
+        local function add(label,value,selected)
+            options[#options+1]=label;entryMap[label]=value;if selected then current=label end
         end
+        if State.autoBattleMode=="infinite"then
+            for _,world in ipairs(Catalog and Catalog.WORLDS or {})do
+                local stage=Catalog.infiniteStage(world.id)
+                if stage and not world.portalOnly then
+                    add("Infinite • "..world.name..(Catalog.infiniteOpen(Profile,world.id)and " • พร้อมเล่น"or(" • ต้องผ่าน "..stage.name)),world.id,world.id==State.autoInfiniteWorld)
+                end
+            end
+        elseif State.autoBattleMode=="challenge"then
+            for _,challenge in ipairs(AutoBattle.challengeList())do
+                local stage=Catalog.stage(challenge.stage)
+                add("Challenge "..challenge.n.." • "..tostring(stage and stage.name or challenge.stage),challenge.n,challenge.n==State.autoChallenge)
+            end
+        else
+            for _,stage in ipairs(StageList)do add(stage.name,stage.id,stage.id==State.autoBattleStage)end
+        end
+        if #options==0 then options={"ยังไม่มีข้อมูล — กดรีเฟรชรายการ"}end
+        return options,current or options[1]
     end
-    InfiniteTab:CreateDropdown({Name="โลก / ด่าน Infinite",Options=infiniteOptions,CurrentOption={currentInfinite or infiniteOptions[1]},Callback=function(o)
-        local label=type(o)=="table"and o[1]or o;local world=infiniteMap[label];if world then State.autoInfiniteWorld=world;saveData()end
+    local options,current=entryOptions()
+    entryPicker=EntryTab:CreateDropdown({Name="ด่าน / โลกที่จะเข้า (ตามโหมดที่เลือก)",Options=options,CurrentOption={current},Callback=function(o)
+        if refreshingEntry then return end
+        local label=type(o)=="table"and o[1]or o;local value=entryMap[label]
+        if not value then return end
+        if State.autoBattleMode=="infinite"then State.autoInfiniteWorld=value
+        elseif State.autoBattleMode=="challenge"then State.autoChallenge=value
+        else State.autoBattleStage=value end
+        AutoBattle.armLobbyCooldown();AutoBattle.nextEnter=0;saveData()
     end})
-    InfiniteTab:CreateLabel("Infinite เป็นด่านเฉพาะของแต่ละโลก • ต้องผ่านด่านปลดล็อกก่อน • แพ้แล้วเล่น Infinite โลกเดิม ไม่ไปด่านถัดไป")
-    local stageOptions,stageMap={},{}
-    for _,stage in ipairs(StageList)do stageOptions[#stageOptions+1]=stage.name;stageMap[stage.name]=stage.id end
-    local current=stageOptions[1]
-    for name,id in pairs(stageMap)do if id==State.autoBattleStage then current=name end end
-    EntryTab:CreateDropdown({Name="ด่านปกติ",Options=stageOptions,CurrentOption={current},Callback=function(o)
-        local name=type(o)=="table"and o[1]or o;State.autoBattleStage=stageMap[name]or 1;saveData()
-    end})
-    ChallengeTab:CreateDropdown({Name="Challenge ที่หมุนอยู่",Options={"1","2","3"},CurrentOption={tostring(State.autoChallenge)},Callback=function(o)
-        State.autoChallenge=tonumber(type(o)=="table"and o[1]or o)or 1;saveData()
-    end})
+    refreshEntryOptions=function()
+        local list,selected=entryOptions();refreshingEntry=true
+        entryPicker:Refresh(list);entryPicker:Set({selected});refreshingEntry=false
+    end
+    EntryTab:CreateButton({Name="รีเฟรชรายการด่าน / โลก",Callback=function()refreshProfile();buildStageList();refreshEntryOptions()end})
+    EntryTab:CreateLabel("เลือก Infinite แล้วรายการจะแสดงโลก Infinite เท่านั้น • ตั้งเวฟเป้าหมายในแท็บ Infinite")
+    InfiniteTab:CreateLabel("เลือกโลกได้ที่ เข้าด่าน / โหมด → Infinite → ด่าน / โลกที่จะเข้า")
     local challenges=ChallengeTab:CreateLabel("กำลังอ่าน Challenges")
     local function refreshChallenges()
         local lines={}
