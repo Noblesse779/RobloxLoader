@@ -1,4 +1,4 @@
--- CandyTD v6.26 • Remember / Record / Retry | SINGLE-FILE SOURCE BUNDLE
+-- CandyTD v6.27 • Remember / Record / Retry | SINGLE-FILE SOURCE BUNDLE
 -- No external Lua/data downloads; Roblox gameplay and Roblox-hosted assets remain online.
 -- WindUI
 -- MIT License
@@ -1463,14 +1463,37 @@ if isMatch then
 end
 
 local HalloweenReplay={status="ปิดเล่นต่อฮาโลวีน",have=nil,cost=1,waitingReset=false,overAt=nil,nextCheck=0}
+local replayEnvironment=type(getgenv)=="function"and getgenv()or _G
+local previousReplayWorker=replayEnvironment.__CandyTDHalloweenReplay
+if previousReplayWorker and previousReplayWorker.connection then pcall(function()previousReplayWorker.connection:Disconnect()end)end
+replayEnvironment.__CandyTDHalloweenReplay=HalloweenReplay
+HalloweenReplay.lastRequest=0;HalloweenReplay.backoff=10
+function HalloweenReplay.call(remote,action)
+    while os.clock()-HalloweenReplay.lastRequest<2 do
+        if replayEnvironment.__CandyTDHalloweenReplay~=HalloweenReplay or not State.autoHalloweenReplay then return false,"cancelled"end
+        task.wait(0.1)
+    end
+    if not State.autoHalloweenReplay or replayEnvironment.__CandyTDHalloweenReplay~=HalloweenReplay then return false,"cancelled"end
+    HalloweenReplay.lastRequest=os.clock()
+    return pcall(remote.InvokeServer,remote,action)
+end
+function HalloweenReplay.failed(prefix,result)
+    local reason=tostring(type(result)=="table"and result.reason or result)
+    local lower=reason:lower()
+    if lower:find("slow",1,true)or lower:find("rate",1,true)or lower:find("too fast",1,true)then
+        HalloweenReplay.nextCheck=os.clock()+HalloweenReplay.backoff
+        HalloweenReplay.status="เกมให้รอ • จะลองใหม่ใน "..HalloweenReplay.backoff.." วินาที"
+        HalloweenReplay.backoff=math.min(60,HalloweenReplay.backoff*2)
+    else HalloweenReplay.status=prefix..reason end
+end
 if isMatch then
     task.spawn(function()
         local remotes=RS:FindFirstChild("MatchRemotes")or RS:WaitForChild("MatchRemotes",20)
         local event=remotes and remotes:FindFirstChild("Event")
-        if event then event.OnClientEvent:Connect(function(_,kind)
-            if kind=="reset"then HalloweenReplay.waitingReset=false;HalloweenReplay.overAt=nil;HalloweenReplay.nextCheck=0 end
+        if event then HalloweenReplay.connection=event.OnClientEvent:Connect(function(_,kind)
+            if kind=="reset"then HalloweenReplay.waitingReset=false;HalloweenReplay.overAt=nil;HalloweenReplay.nextCheck=0;HalloweenReplay.backoff=10 end
         end)end
-        while true do
+        while replayEnvironment.__CandyTDHalloweenReplay==HalloweenReplay do
             task.wait(1)
             local replay=MatchInfo.replay
             if not State.autoHalloweenReplay then HalloweenReplay.status="ปิดเล่นต่อฮาโลวีน"
@@ -1484,8 +1507,8 @@ if isMatch then
                     local remote=remotes and remotes:FindFirstChild("Replay")
                     if not remote then HalloweenReplay.status="ไม่พบคำสั่ง Replay ของกิจกรรม"
                     else
-                        local ok,info=pcall(remote.InvokeServer,remote,"info")
-                        if not ok or type(info)~="table"or not info.ok then HalloweenReplay.status="อ่านนมไม่สำเร็จ จะตรวจใหม่"
+                        local ok,info=HalloweenReplay.call(remote,"info")
+                        if not ok or type(info)~="table"or not info.ok then HalloweenReplay.failed("อ่านนมไม่สำเร็จ: ",info)
                         else
                             HalloweenReplay.have=math.max(0,tonumber(info.have)or 0)
                             HalloweenReplay.cost=math.max(1,math.floor(tonumber(replay.cost)or 1))
@@ -1494,11 +1517,12 @@ if isMatch then
                             elseif HalloweenReplay.have<HalloweenReplay.cost then HalloweenReplay.status="Bug Milk ไม่พอ • มี "..HalloweenReplay.have.." ต้องใช้ "..HalloweenReplay.cost
                             elseif State.autoHalloweenReplay then
                                 saveData()
-                                local paid,result=pcall(remote.InvokeServer,remote,"pay")
+                                HalloweenReplay.status="รอยืนยัน YES / ใช้นมเล่นต่อ"
+                                local paid,result=HalloweenReplay.call(remote,"pay")
                                 if paid and type(result)=="table"and result.ok then
                                     HalloweenReplay.have=tonumber(result.have)or HalloweenReplay.have
-                                    HalloweenReplay.waitingReset=true;HalloweenReplay.status="ใช้นมเล่นต่อแล้ว • รอรอบใหม่"
-                                else HalloweenReplay.status="เล่นต่อไม่สำเร็จ: "..tostring(type(result)=="table"and result.reason or result)end
+                                    HalloweenReplay.backoff=10;HalloweenReplay.waitingReset=true;HalloweenReplay.status="ใช้นมเล่นต่อแล้ว • รอรอบใหม่"
+                                else HalloweenReplay.failed("เล่นต่อไม่สำเร็จ: ",result)end
                             end
                         end
                     end
@@ -1628,7 +1652,7 @@ if not isMatch then
 end
 -- ═══════════ UI SETUP ═══════════
 local Window = Rayfield:CreateWindow({
-    Name = "CandyTD Auto-All v6.26 • Record + Retry",
+    Name = "CandyTD Auto-All v6.27 • Record + Retry",
     LoadingTitle = isMatch and "Match Mode" or "Lobby Mode",
     ConfigurationSaving = { Enabled = false },
     KeySystem = false,
