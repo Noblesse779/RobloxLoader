@@ -1,4 +1,4 @@
--- ThaiQuizAuto V12 | WindUI by Footagesus (MIT), native UI fallback
+-- ThaiQuizAuto V13 | WindUI by Footagesus (MIT), native UI fallback
 -- https://github.com/Footagesus/WindUI
 -- Dictionary-based answers; server decides validity. No Time Attack support.
 local RS = game:GetService("ReplicatedStorage")
@@ -41,7 +41,7 @@ local shell = make("ScreenGui", {
 }, player:WaitForChild("PlayerGui"))
 local launcher = make("TextButton", {
     Size = UDim2.fromOffset(180, 40), Position = UDim2.new(0, 18, 0.18, 0),
-    Text = "ก–ฮ V12 • กำลังโหลด UI", TextSize = 15,
+    Text = "ก–ฮ V13 • กำลังโหลด UI", TextSize = 15,
     Font = Enum.Font.Gotham, TextColor3 = Color3.fromRGB(255,255,255),
     BackgroundColor3 = Color3.fromRGB(28, 38, 57), BorderSizePixel = 0,
 }, shell)
@@ -200,7 +200,7 @@ else
     pcall(function()WindUI:SetParent(player.PlayerGui)end)
     hint.Text="พร้อมใช้งาน • แตะปุ่มเพื่อเปิดเมนู"
 end
-launcher.Text="ก–ฮ V12 • เปิดเมนู"
+launcher.Text="ก–ฮ V13 • เปิดเมนู"
 
 
 local words = {
@@ -634,7 +634,7 @@ end
 
 answer=function()
     cancel()
-    if legacyRunning then setStatus("มีสคริปต์รุ่นเก่าทำงานอยู่ — เข้าเกมใหม่ก่อนใช้ V12");return end
+    if legacyRunning then setStatus("มีสคริปต์รุ่นเก่าทำงานอยู่ — เข้าเกมใหม่ก่อนใช้ V13");return end
     if not isOpen()then setStatus("รอช่วงตอบคำถามของรอบใหม่");return end
     local token=generation
     local roundLetter,roundCategories=letter,categories
@@ -669,7 +669,7 @@ answer=function()
                     local id=type(cat)=="table" and cat.id or cat
                     local name=type(cat)=="table" and (cat.name or id) or id
                     local list=bank[id] and bank[id][roundLetter] or {}
-                    if sortedSizes[id]~=#list then table.sort(list,function(a,b)local ar=wordRatings[id.."/"..roundLetter.."/"..a];local br=wordRatings[id.."/"..roundLetter.."/"..b];local ap=ar and(ar.rarity>=3 or(ar.points or 0)>=10)or false;local bp=br and(br.rarity>=3 or(br.points or 0)>=10)or false;if rareOnly and ap~=bp then return ap end;if (ar~=nil)~=(br~=nil)then return ar~=nil end;local af,bf=fastCandidates[id.."/"..a]==true,fastCandidates[id.."/"..b]==true;if af~=bf then return af end;local al,bl=utf8.len(a)or 0,utf8.len(b)or 0;if al==bl then return a<b end;return al>bl end);sortedSizes[id]=#list end
+                    if sortedSizes[id]~=#list then table.sort(list,function(a,b)local al,bl=utf8.len(a)or 0,utf8.len(b)or 0;if al~=bl then return al>bl end;return a<b end);sortedSizes[id]=#list end
                     cursor[index]=cursor[index] or 1
                     while list[cursor[index]]do
                         local cached=validationCache[id.."/"..roundLetter.."/"..list[cursor[index]]]
@@ -715,7 +715,7 @@ answer=function()
     end)
 end
 
-statusCard = Main:Paragraph({ Title = "สถานะ • V12", Desc = statusText })
+statusCard = Main:Paragraph({ Title = "สถานะ • V13", Desc = statusText })
 roundCard = Main:Paragraph({ Title = "รอบปัจจุบัน", Desc = "รอเริ่มรอบ" })
 Main:Toggle({
     Title = "ตอบคำถามอัตโนมัติ",
@@ -754,14 +754,14 @@ Logs:Button({
     end,
 })
 Settings:Toggle({
-    Title="ให้คำหายากที่เคยผ่านมาก่อน • ตอบครบให้เร็ว",
+    Title="แสดงระดับคำหายาก • เรียงคำยาวก่อนเสมอ",
     Value=true,
     Callback=function(value)
         rareOnly=value;validationCache={}
         if enabled and isOpen()then answer()end
     end,
 })
-Settings:Paragraph({Title="โหมดคำหายาก",Desc="ดู rarity หรือ points ที่เกมส่งกลับ ไม่ใช้ความยาวตัดสินคะแนน • ส่งคำที่ผ่านแล้วข้ามหมวดทันที ไม่ย้อนเปลี่ยน • เลือกคำจริงในคลังก่อนวลียาวที่ยังไม่ผ่าน"})
+Settings:Paragraph({Title="โหมดคำหายาก",Desc="ดู rarity หรือ points ที่เกมส่งกลับ ไม่ใช้ความยาวตัดสินคะแนน • ลองคำยาวที่สุดก่อน ไม่ผ่านค่อยสั้นลง • ส่งคำที่ผ่านแล้วข้ามหมวดทันที ไม่ตรวจซ้ำหลังส่ง"})
 Settings:Slider({
     Title = "เว้นช่วงส่งคำตอบ (วินาที)",
     Step = 0.05,
@@ -873,8 +873,8 @@ if current and current.canType and type(current.categories) == "table"
     setStatus("พบรอบที่กำลังเล่น — เปิดสวิตช์เพื่อเริ่มตอบ")
 end
 player:SetAttribute("__ThaiQuizAutoRunning", true)
-log("เปิดหน้าต่าง V12 แล้ว — เปิดสวิตช์เพื่อใช้งาน")
-if legacyRunning then setStatus("มีสคริปต์รุ่นเก่าทำงานอยู่ — เข้าเกมใหม่ก่อนใช้ V12")end
+log("เปิดหน้าต่าง V13 แล้ว — เปิดสวิตช์เพื่อใช้งาน")
+if legacyRunning then setStatus("มีสคริปต์รุ่นเก่าทำงานอยู่ — เข้าเกมใหม่ก่อนใช้ V13")end
 startVocabulary()
 return controller
 
