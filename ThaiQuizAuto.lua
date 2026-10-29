@@ -1,4 +1,4 @@
--- ThaiQuizAuto V13 | WindUI by Footagesus (MIT), native UI fallback
+-- ThaiQuizAuto V14 | WindUI by Footagesus (MIT), native UI fallback
 -- https://github.com/Footagesus/WindUI
 -- Dictionary-based answers; server decides validity. No Time Attack support.
 local RS = game:GetService("ReplicatedStorage")
@@ -41,7 +41,7 @@ local shell = make("ScreenGui", {
 }, player:WaitForChild("PlayerGui"))
 local launcher = make("TextButton", {
     Size = UDim2.fromOffset(180, 40), Position = UDim2.new(0, 18, 0.18, 0),
-    Text = "ก–ฮ V13 • กำลังโหลด UI", TextSize = 15,
+    Text = "ก–ฮ V14 • กำลังโหลด UI", TextSize = 15,
     Font = Enum.Font.Gotham, TextColor3 = Color3.fromRGB(255,255,255),
     BackgroundColor3 = Color3.fromRGB(28, 38, 57), BorderSizePixel = 0,
 }, shell)
@@ -200,7 +200,7 @@ else
     pcall(function()WindUI:SetParent(player.PlayerGui)end)
     hint.Text="พร้อมใช้งาน • แตะปุ่มเพื่อเปิดเมนู"
 end
-launcher.Text="ก–ฮ V13 • เปิดเมนู"
+launcher.Text="ก–ฮ V14 • เปิดเมนู"
 
 
 local words = {
@@ -536,11 +536,48 @@ local regionalVocabulary={
 }
 for cat,list in pairs(regionalVocabulary)do for _,word in ipairs(list)do addCandidate(cat,word)end end
 -- Prefer ordinary dictionary entries over long generated phrases while filling empty slots.
+local supplementalVocabulary={
+    body="ทวารหนัก ท่อปัสสาวะ ท่อน้ำดี ท่อนำไข่ ท่อไต ท่ออาหาร ท่อลม เท้า เทสทิส",
+    fruit="สตรอว์เบอร์รี บลูเบอร์รี แบล็กเบอร์รี ราสป์เบอร์รี อะโวคาโด",
+    vegetable="บรอกโคลี เคล เซเลอรี",
+    thaifood="ยำมักกะโรนี ข้าวผัดแฮม",
+    drink="คาปูชิโน เอสเปรสโซ ลาเต้ มิลก์เชก สมูทตี",
+    thaidessert="ขนมเค้กฝอยทอง",
+    snack="ป๊อปคอร์น แครกเกอร์ คุกกี้ แซนด์วิช",
+    landanimal="แพนด้า โคอาลา ชิมแปนซี กอริลลา",
+    wateranimal="แซลมอน ทูนา พิรันยา",
+    bird="ฟลามิงโก เพนกวิน นกคีวี",
+    insect="ด้วงเฮอร์คิวลีส",
+    flower="ทิวลิป ลาเวนเดอร์ ไฮเดรนเยีย",
+    tree="ยูคาลิปตัส เมเปิล โอ๊ก",
+    province="กรุงเทพมหานคร",
+    country="ทาจิกิสถาน คอสตาริกา ลักเซมเบิร์ก",
+    cityplace="ซูเปอร์มาร์เก็ต ไฮเปอร์มาร์เก็ต คลินิก",
+    worldcity="ซานฟรานซิสโก โคเปนเฮเกน ลอสแอนเจลิส",
+    thaitravel="ซาฟารีเวิลด์ ดรีมเวิลด์",
+    job="โปรแกรมเมอร์ ดีไซเนอร์ บาริสต้า",
+    family="ปู่ทวด ย่าทวด ตาทวด ยายทวด",
+    folktale="ซินเดอเรลลา สโนว์ไวต์ ราพันเซล",
+    sport="แบดมินตัน บาสเกตบอล วอลเลย์บอล เทเบิลเทนนิส",
+    house="โซฟา เคาน์เตอร์",
+    school="คอมพิวเตอร์ แท็บเล็ต โปรแทรกเตอร์",
+    clothes="คาร์ดิแกน เบลเซอร์ ทักซิโด",
+    vehicle="เฮลิคอปเตอร์ มอเตอร์ไซค์",
+    appliance="ไมโครเวฟ โทรทัศน์ คอมพิวเตอร์",
+    instrument="แซกโซโฟน คลาริเน็ต ทรอมโบน",
+    color="เทอร์ควอยซ์ ครีม",
+    verb="ยืน ยิ้ม ยก ย้าย ยืม เย็บ ย่าง ยืนยัน ยอมรับ ยักไหล่",
+    adjective="ยาว ยาก ยิ่งใหญ่ ยอดเยี่ยม",
+    subject="แคลคูลัส สถิติ คอมพิวเตอร์",
+    festival="คริสต์มาส ฮาโลวีน วาเลนไทน์",
+}
+for cat,text in pairs(supplementalVocabulary)do for word in text:gmatch("%S+")do addCandidate(cat,word)end end
 local fastCandidates={}
 for cat,text in pairs(words)do
     for word in text:gmatch("%S+")do fastCandidates[cat.."/"..word]=true end
 end
 for word in ("รับ รัก ร้อง รอ รำ ริน รีด รู้ ระบาย ระบุ ระวัง รักษา รังแก รบ รื้อ รวบรวม รับประทาน ร้องเพลง"):gmatch("%S+")do addCandidate("verb",word);fastCandidates["verb/"..word]=true end
+for cat,text in pairs(supplementalVocabulary)do for word in text:gmatch("%S+")do fastCandidates[cat.."/"..word]=true end end
 local checksThisRound=0
 local lastValidationAt=0
 local function checked(cat,l,word,token,fresh)
@@ -634,7 +671,7 @@ end
 
 answer=function()
     cancel()
-    if legacyRunning then setStatus("มีสคริปต์รุ่นเก่าทำงานอยู่ — เข้าเกมใหม่ก่อนใช้ V13");return end
+    if legacyRunning then setStatus("มีสคริปต์รุ่นเก่าทำงานอยู่ — เข้าเกมใหม่ก่อนใช้ V14");return end
     if not isOpen()then setStatus("รอช่วงตอบคำถามของรอบใหม่");return end
     local token=generation
     local roundLetter,roundCategories=letter,categories
@@ -647,6 +684,11 @@ answer=function()
         local highScore={}
         local cursor={}
         local sortedSizes={}
+        local improving=false
+        local function goodEnough(id,word)
+            local rating=wordRatings[id.."/"..roundLetter.."/"..word]
+            return rating and ((rating.points or 0)>=10 or (rating.rarity or 0)>=3)
+        end
         local function active()return alive and generation==token and isOpen()end
         local function key(id,word)return id.."/"..roundLetter.."/"..word end
         local function renderResults()
@@ -665,11 +707,24 @@ answer=function()
             local pending=false
             for index,cat in ipairs(roundCategories)do
                 if not active()then return end
-                if not sentByCategory[index]then
+                if not sentByCategory[index]or(improving and not highScore[index])then
                     local id=type(cat)=="table" and cat.id or cat
                     local name=type(cat)=="table" and (cat.name or id) or id
                     local list=bank[id] and bank[id][roundLetter] or {}
-                    if sortedSizes[id]~=#list then table.sort(list,function(a,b)local al,bl=utf8.len(a)or 0,utf8.len(b)or 0;if al~=bl then return al>bl end;return a<b end);sortedSizes[id]=#list end
+                    if sortedSizes[id]~=#list then
+                        list=table.clone(list)
+                        table.sort(list,function(a,b)
+                            if not improving then
+                                local ak,bk=validationCache[key(id,a)],validationCache[key(id,b)]
+                                local av=(ak=="valid"or ak=="below_target_score")and 2 or(fastCandidates[id.."/"..a]and 1 or 0)
+                                local bv=(bk=="valid"or bk=="below_target_score")and 2 or(fastCandidates[id.."/"..b]and 1 or 0)
+                                if av~=bv then return av>bv end
+                            end
+                            local al,bl=utf8.len(a)or 0,utf8.len(b)or 0;if al~=bl then return al>bl end;return a<b
+                        end)
+                        sortedSizes[id]=#list
+                        sortedSizes[id.."list"]=list
+                    else list=sortedSizes[id.."list"]end
                     cursor[index]=cursor[index] or 1
                     while list[cursor[index]]do
                         local cached=validationCache[id.."/"..roundLetter.."/"..list[cursor[index]]]
@@ -677,7 +732,7 @@ answer=function()
                     end
                     local word=list[cursor[index]]
                     cursor[index]=cursor[index]+1
-                    if word then
+                    if word and(not improving or not sentByCategory[index]or(utf8.len(word)or 0)>(utf8.len(sentByCategory[index])or 0))then
                         pending=true
                         setStatus("ตรวจ "..tostring(name)..": "..word)
                         local status=checked(id,roundLetter,word,token)
@@ -687,7 +742,7 @@ answer=function()
                             local sentOK,err=pcall(function()input:FireServer({type="answer",cat=index,text=word})end)
                             if sentOK then
                                 sentByCategory[index]=word
-                                highScore[index]=true
+                                highScore[index]=goodEnough(id,word)or false
                                 log(tostring(name).." → "..word.." ✓ • ไปหมวดถัดไป")
                             else log("ส่งไม่สำเร็จ: "..tostring(err))end
                         elseif status=="rate_limited" or status=="unavailable" then
@@ -705,7 +760,10 @@ answer=function()
             renderResults()
             local allHigh=true
             for i=1,#roundCategories do if not sentByCategory[i]then allHigh=false;break end end
-            if allHigh or not pending then break end
+            if allHigh and not improving then
+                improving=true;cursor={};sortedSizes={}
+                setStatus("ครบทุกช่องแล้ว • กำลังหาคำที่ดีกว่า")
+            elseif not pending then break end
         end
         if active()then
             local n=renderResults()
@@ -715,11 +773,11 @@ answer=function()
     end)
 end
 
-statusCard = Main:Paragraph({ Title = "สถานะ • V13", Desc = statusText })
+statusCard = Main:Paragraph({ Title = "สถานะ • V14", Desc = statusText })
 roundCard = Main:Paragraph({ Title = "รอบปัจจุบัน", Desc = "รอเริ่มรอบ" })
 Main:Toggle({
     Title = "ตอบคำถามอัตโนมัติ",
-    Desc = "ตรวจครั้งเดียวก่อนส่ง • ตอบแล้วข้ามหมวดทันที",
+    Desc = "เติมให้ครบก่อน • แล้วหาคำยาวกว่า • คำหายากเก็บไว้",
     Value = false,
     Callback = function(value)
         enabled = value == true
@@ -873,8 +931,8 @@ if current and current.canType and type(current.categories) == "table"
     setStatus("พบรอบที่กำลังเล่น — เปิดสวิตช์เพื่อเริ่มตอบ")
 end
 player:SetAttribute("__ThaiQuizAutoRunning", true)
-log("เปิดหน้าต่าง V13 แล้ว — เปิดสวิตช์เพื่อใช้งาน")
-if legacyRunning then setStatus("มีสคริปต์รุ่นเก่าทำงานอยู่ — เข้าเกมใหม่ก่อนใช้ V13")end
+log("เปิดหน้าต่าง V14 แล้ว — เปิดสวิตช์เพื่อใช้งาน")
+if legacyRunning then setStatus("มีสคริปต์รุ่นเก่าทำงานอยู่ — เข้าเกมใหม่ก่อนใช้ V14")end
 startVocabulary()
 return controller
 
