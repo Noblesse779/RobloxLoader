@@ -1,4 +1,4 @@
--- CandyTD v6.21 • Remember / Record / Retry | SINGLE-FILE SOURCE BUNDLE
+-- CandyTD v6.22 • Remember / Record / Retry | SINGLE-FILE SOURCE BUNDLE
 -- No external Lua/data downloads; Roblox gameplay and Roblox-hosted assets remain online.
 -- WindUI
 -- MIT License
@@ -137,7 +137,7 @@ local SAVE_FILE = "CandyTD_AutoAll_v1.json"
 -- ═══════════ STATE ═══════════
 local DefaultState = {
     autoUpgrade=true, autoStartWave=false, autoReplay="off", activeSlot=0, autoSellExcess=false,
-    autoRetryLoss=true,planPlayback="snapshot",recordSlot=1,autoBattle=false,autoEnterBattle=false,autoReturnChallenge=false,autoBattleNext=false,autoBattleMode="stage",autoInfiniteWorld="candy",autoBattleStage=1,autoChallenge=1,autoSkills=false,antiAFK=true,fpsLimit=false,fpsCap=30,lowGraphics=true,
+    autoRetryLoss=true,planPlayback="snapshot",recordSlot=1,autoBattle=false,autoEnterBattle=false,autoReturnChallenge=false,autoBattleNext=false,autoBattleMode="stage",autoInfiniteWorld="candy",autoReturnInfinite=false,infiniteTargetWave=50,autoBattleStage=1,autoChallenge=1,autoSkills=false,antiAFK=true,fpsLimit=false,fpsCap=30,lowGraphics=true,
     traitUnitId="",traitTargets={},statsUnitId="",statsTargets={dmg="S",range="ไม่กำหนด",spa="ไม่กำหนด"},statsLocks={},craftRecipe="",summonBanner="normal",lobbyRewardsVersion=0,evolveUnitId="",evolveTarget="",evolvePartner="",
     autoSummon=false, summonMode="10",
     autoClaimDaily=false, autoClaimLevels=false, autoClaimQuests=false, autoClaimPass=false,
@@ -752,7 +752,7 @@ if isMatch then
                 elseif not State.autoUpgrade then
                     upgradePlan={primary=nil,secondaryUsed=false,pending=nil}
                 end
-                if ctx and MatchNet and State.autoStartWave and not s.running and os.clock()-lastVote>1.5 then
+                if ctx and MatchNet and State.autoStartWave and not State._infiniteExitPending and not s.running and os.clock()-lastVote>1.5 then
                     local ready=false
                     if timelinePlaying then
                         ready=(not pendingTimeline and #mine()>0)or(pendingTimeline and(pendingTimeline.event.wave>(s.wave or 0)or pendingTimeline.reason=="money"))
@@ -1401,6 +1401,47 @@ if isMatch then
     end)
 end
 
+local InfiniteTarget={cleared=0,reachedAt=nil,lastReturn=0,status="ปิดออกตามเวฟเป้าหมาย"}
+if isMatch then
+    task.spawn(function()
+        local remotes=RS:FindFirstChild("MatchRemotes")or RS:WaitForChild("MatchRemotes",20)
+        local event=remotes and remotes:FindFirstChild("Event")
+        if event then event.OnClientEvent:Connect(function(_,kind,payload)
+            if kind=="cleared"and type(payload)=="table"then
+                InfiniteTarget.cleared=math.max(InfiniteTarget.cleared,tonumber(payload.wave)or 0)
+                if State.autoReturnInfinite and MatchInfo.infinite==true and InfiniteTarget.cleared>=(tonumber(State.infiniteTargetWave)or 50)then State._infiniteExitPending=true end
+            elseif kind=="reset"then
+                InfiniteTarget.cleared=0;InfiniteTarget.reachedAt=nil;InfiniteTarget.lastReturn=0;State._infiniteExitPending=false
+            end
+        end)end
+        while true do
+            task.wait(0.5)
+            if State.autoReturnInfinite and MatchInfo.infinite==true then
+                local s=gameState();local wave=tonumber(s.wave)or 0
+                local target=math.max(1,math.floor(tonumber(State.infiniteTargetWave)or 50))
+                if not s.over then
+                    local completed=s.running and math.max(0,wave-1)or wave
+                    InfiniteTarget.cleared=math.max(InfiniteTarget.cleared,completed)
+                end
+                if InfiniteTarget.cleared>=target then
+                    State._infiniteExitPending=true
+                    InfiniteTarget.reachedAt=InfiniteTarget.reachedAt or os.clock()
+                    InfiniteTarget.status="จบเวฟ "..target.." แล้ว • กำลังกลับล็อบบี้"
+                    if os.clock()-InfiniteTarget.reachedAt>=2 and os.clock()-InfiniteTarget.lastReturn>=10 then
+                        InfiniteTarget.lastReturn=os.clock();AutoBattle.queue();saveData();ClientSettings.home()
+                    end
+                else
+                    State._infiniteExitPending=false;InfiniteTarget.reachedAt=nil
+                    InfiniteTarget.status="Infinite • จบแล้ว "..InfiniteTarget.cleared.." / เป้าหมาย "..target.." เวฟ"
+                end
+            else
+                State._infiniteExitPending=false;InfiniteTarget.reachedAt=nil
+                InfiniteTarget.status=State.autoReturnInfinite and "รอเข้าโหมด Infinite"or "ปิดออกตามเวฟเป้าหมาย"
+            end
+        end
+    end)
+end
+
 -- ═══════════ LOBBY LOGIC ═══════════
 if not isMatch then
     local Loop = { lastSummon=0, lastClaim=0, lastPlay=0, lastReroll=0, lastEvolve=0, 
@@ -1463,7 +1504,7 @@ if not isMatch then
 end
 -- ═══════════ UI SETUP ═══════════
 local Window = Rayfield:CreateWindow({
-    Name = "CandyTD Auto-All v6.21 • Record + Retry",
+    Name = "CandyTD Auto-All v6.22 • Record + Retry",
     LoadingTitle = isMatch and "Match Mode" or "Lobby Mode",
     ConfigurationSaving = { Enabled = false },
     KeySystem = false,
@@ -1865,6 +1906,19 @@ AutoTab:CreateToggle({Name="จบ Challenge แล้วกลับล็อ�
     State.autoReturnChallenge=on;saveData();if on then AutoBattle.queue()end
 end})
 AutoTab:CreateLabel("ถ้าเปิดกลับล็อบบี้ จะไม่กดเล่นซ้ำ/ด่านถัดไปใน Challenge • เปิดเข้าด่านอัตโนมัติไว้ด้วยเพื่อเข้าใหม่")
+AutoTab:CreateToggle({Name="Infinite: กลับล็อบบี้เมื่อจบเวฟเป้าหมาย",CurrentValue=State.autoReturnInfinite,Callback=function(on)
+    State.autoReturnInfinite=on;saveData();if on then AutoBattle.queue()end
+end})
+AutoTab:CreateDropdown({Name="Infinite: เวฟเป้าหมาย",Options={"10","20","30","40","50","60","80","100","150","200","300","500","1000"},CurrentOption={tostring(State.infiniteTargetWave)},Callback=function(o)
+    State.infiniteTargetWave=math.max(1,math.floor(tonumber(type(o)=="table"and o[1]or o)or 50));saveData()
+end})
+AutoTab:CreateInput({Name="Infinite: กรอกเวฟอื่นเอง",Placeholder="เช่น 25",CurrentValue=tostring(State.infiniteTargetWave),Callback=function(value)
+    local wave=tonumber(value)
+    if wave and wave>=1 and wave<=100000 then State.infiniteTargetWave=math.floor(wave);saveData()end
+end})
+AutoTab:CreateLabel("นับเมื่อจบเวฟนั้นแล้ว ไม่ออกตอนเพิ่งเริ่ม • เปิดเข้าด่านอัตโนมัติไว้เพื่อวน Infinite โลกเดิมหลังกลับล็อบบี้")
+local infiniteStatus=AutoTab:CreateLabel(InfiniteTarget.status)
+task.spawn(function()while true do task.wait(1);infiniteStatus:Set(InfiniteTarget.status)end end)
 AutoTab:CreateLabel("เปิดระบบนี้จะเปิดเวฟ/อัปเกรด/สกิล/แพ้เล่นซ้ำ • ใช้เฉพาะทีมที่ใส่มา ไม่เปลี่ยนทีมและไม่ขายตัวเอง")
 local autoStatus=AutoTab:CreateLabel(AutoBattle.status)
 if not isMatch then
