@@ -1,4 +1,4 @@
--- CandyTD v6.23 • Remember / Record / Retry | SINGLE-FILE SOURCE BUNDLE
+-- CandyTD v6.24 • Remember / Record / Retry | SINGLE-FILE SOURCE BUNDLE
 -- No external Lua/data downloads; Roblox gameplay and Roblox-hosted assets remain online.
 -- WindUI
 -- MIT License
@@ -855,6 +855,24 @@ function LobbyRoll.modules()
     if not UnitStats and Hub then local m=Hub:FindFirstChild("UnitStats");if m then local ok,value=pcall(require,m);if ok then UnitStats=value end end end
     return Catalog and UnitStats
 end
+function LobbyRoll.team()
+    local profile=Profile
+    local native=LobbyRoll.extras and LobbyRoll.extras.context()
+    if native and type(native.profile)=="table"then profile=native.profile end
+    local out,seen={},{}
+    for slot=1,6 do
+        local id=profile and profile.slots and(profile.slots[slot]or profile.slots[tostring(slot)])
+        local unit=id and profile.units and(profile.units[id]or profile.units[tostring(id)])
+        if id and id~=""and type(unit)=="table"and unit.kind and not seen[tostring(id)]then
+            seen[tostring(id)]=true;out[#out+1]={slot=slot,id=tostring(id),unit=unit}
+        end
+    end
+    return out
+end
+function LobbyRoll.isEquipped(id)
+    for _,entry in ipairs(LobbyRoll.team())do if entry.id==tostring(id)then return true end end
+    return false
+end
 function LobbyRoll.unit(id)return Profile and Profile.units and Profile.units[id]end
 function LobbyRoll.count(item)
     if not Catalog or not Profile then return 0 end
@@ -887,6 +905,7 @@ function LobbyRoll.start(mode)
     LobbyRoll.stop(mode=="trait"and "stats"or "trait","พักขณะใช้อีกระบบ")
     refreshProfile();LobbyRoll.modules()
     local id=mode=="trait"and State.traitUnitId or State.statsUnitId
+    if not LobbyRoll.isEquipped(id)then LobbyRoll[mode.."Status"]="เลือกเฉพาะตัวละครที่ใส่ในช่องทีมก่อน";return end
     if not LobbyRoll.unit(id)then LobbyRoll[mode.."Status"]="เลือกตัวละครที่มีอยู่จริงในกระเป๋า";return end
     local wanted={}
     if mode=="trait"then
@@ -904,6 +923,7 @@ function LobbyRoll.start(mode)
         while LobbyRoll[mode.."Running"]and generation==LobbyRoll.generation[mode]do
             while LobbyRoll.extras and LobbyRoll.extras.rewardBusy do task.wait(0.1)end
             if generation~=LobbyRoll.generation[mode]then break end
+            if not LobbyRoll.isEquipped(id)then LobbyRoll.stop(mode,"ตัวที่เลือกถูกถอดจากทีมแล้ว จึงหยุดสุ่ม");break end
             local unit=LobbyRoll.unit(id)
             if not unit then LobbyRoll.stop(mode,"ตัวละครที่เลือกไม่อยู่ในกระเป๋าแล้ว");break end
             local locks={};local item,cost,gems
@@ -1519,7 +1539,7 @@ if not isMatch then
                         local kindFilter = State.feedKindFilter
                         local candidates = {}
                         for uid, u in pairs(Profile.units or {}) do
-                            if type(u)=="table" and u.kind then
+                            if type(u)=="table" and u.kind and LobbyRoll.isEquipped(uid)then
                                 local lvl, uord = u.level or 1, RARITY_ORDER[rarityOf(u.kind)] or 1
                                 local okLvl, okRar = lvl < maxFeedLvl, (State.feedRarityFilter=="all") or (uord >= minRarOrd)
                                 local okKind = (kindFilter=="all") or (u.kind == kindFilter)
@@ -1551,7 +1571,7 @@ if not isMatch then
 end
 -- ═══════════ UI SETUP ═══════════
 local Window = Rayfield:CreateWindow({
-    Name = "CandyTD Auto-All v6.23 • Record + Retry",
+    Name = "CandyTD Auto-All v6.24 • Record + Retry",
     LoadingTitle = isMatch and "Match Mode" or "Lobby Mode",
     ConfigurationSaving = { Enabled = false },
     KeySystem = false,
@@ -1652,24 +1672,29 @@ if isMatch then
 
 else
     -- ─────────────── [LOBBY UI] ───────────────
-    local LB = Window:CreateTab("ล็อบบี้", 4483362459)
-    LB:CreateSection("สุ่มตัวละคร")
-    LB:CreateToggle({ Name="🎲 สุ่มฮีโร่", CurrentValue=State.autoSummon, Callback=function(v) State.autoSummon=v; saveData() end })
-    LB:CreateDropdown({ Name="จำนวน", Options={"1 ตัว","10 ตัว"}, CurrentOption={ State.summonMode=="10" and "10 ตัว" or "1 ตัว" }, MultipleOptions=false, Callback=function(o) State.summonMode = ((type(o)=="table" and o[1] or o)=="10 ตัว") and "10" or "1"; saveData() end })
-    LB:CreateSection("รับรางวัล")
-    LB:CreateToggle({ Name="🎁 รางวัลรายวัน", CurrentValue=State.autoClaimDaily, Callback=function(v) State.autoClaimDaily=v; saveData() end })
-    LB:CreateToggle({ Name="🏆 รางวัลเลเวล", CurrentValue=State.autoClaimLevels, Callback=function(v) State.autoClaimLevels=v; saveData() end })
-    LB:CreateToggle({ Name="📜 รางวัลภารกิจ", CurrentValue=State.autoClaimQuests, Callback=function(v) State.autoClaimQuests=v; saveData() end })
-    LB:CreateToggle({ Name="🎫 รางวัล Battle Pass", CurrentValue=State.autoClaimPass, Callback=function(v) State.autoClaimPass=v; saveData() end })
-    LB:CreateButton({Name="รับรางวัลที่พร้อมทั้งหมดตอนนี้",Callback=function()task.spawn(function()LobbyExtras.rewards(true)end)end})
+    local LB = Window:CreateTab("ทีม / ล็อบบี้", 4483362459)
+    local SummonTab=Window:CreateTab("สุ่มตัวละคร",4483362459)
+    local RewardsTab=Window:CreateTab("รับรางวัล",4483362459)
+    LB:CreateLabel("เมนูตัวละครใช้เฉพาะทีม 6 ช่องด้านล่าง • เปลี่ยนทีมแล้วกดรีเฟรชทีมในเมนูที่ต้องการ")
+    local teamSummary=LB:CreateLabel("กำลังอ่านทีม")
+    task.spawn(function()while true do task.wait(2);local lines={};for _,entry in ipairs(LobbyRoll.team())do lines[#lines+1]="ช่อง "..entry.slot.." • "..LobbyRoll.unitName(entry.unit.kind).." • Lv."..tostring(entry.unit.level or 1)end;teamSummary:Set(#lines>0 and table.concat(lines,"\n")or "ยังไม่ได้ใส่ตัวละครในทีม")end end)
+    SummonTab:CreateSection("สุ่มตัวละคร")
+    SummonTab:CreateToggle({ Name="🎲 สุ่มฮีโร่", CurrentValue=State.autoSummon, Callback=function(v) State.autoSummon=v; saveData() end })
+    SummonTab:CreateDropdown({ Name="จำนวน", Options={"1 ตัว","10 ตัว"}, CurrentOption={ State.summonMode=="10" and "10 ตัว" or "1 ตัว" }, MultipleOptions=false, Callback=function(o) State.summonMode = ((type(o)=="table" and o[1] or o)=="10 ตัว") and "10" or "1"; saveData() end })
+    RewardsTab:CreateSection("รับรางวัล")
+    RewardsTab:CreateToggle({ Name="🎁 รางวัลรายวัน", CurrentValue=State.autoClaimDaily, Callback=function(v) State.autoClaimDaily=v; saveData() end })
+    RewardsTab:CreateToggle({ Name="🏆 รางวัลเลเวล", CurrentValue=State.autoClaimLevels, Callback=function(v) State.autoClaimLevels=v; saveData() end })
+    RewardsTab:CreateToggle({ Name="📜 รางวัลภารกิจ", CurrentValue=State.autoClaimQuests, Callback=function(v) State.autoClaimQuests=v; saveData() end })
+    RewardsTab:CreateToggle({ Name="🎫 รางวัล Battle Pass", CurrentValue=State.autoClaimPass, Callback=function(v) State.autoClaimPass=v; saveData() end })
+    RewardsTab:CreateButton({Name="รับรางวัลที่พร้อมทั้งหมดตอนนี้",Callback=function()task.spawn(function()LobbyExtras.rewards(true)end)end})
     local summonBannerChoices={"ปกติ"}
     if Catalog.EVENT_BANNER and Catalog.eventCost then summonBannerChoices[#summonBannerChoices+1]="กิจกรรม"end
-    LB:CreateDropdown({Name="แบนเนอร์สุ่ม",Options=summonBannerChoices,CurrentOption={State.summonBanner=="event"and "กิจกรรม"or "ปกติ"},Callback=function(o)
+    SummonTab:CreateDropdown({Name="แบนเนอร์สุ่ม",Options=summonBannerChoices,CurrentOption={State.summonBanner=="event"and "กิจกรรม"or "ปกติ"},Callback=function(o)
         local selected=type(o)=="table"and o[1]or o;State.summonBanner=selected=="กิจกรรม"and "event"or "normal";saveData()
     end})
-    local summonStatus=LB:CreateLabel("รอเปิดสุ่มตัวละคร")
+    local summonStatus=SummonTab:CreateLabel("รอเปิดสุ่มตัวละคร")
     task.spawn(function()while true do task.wait(1);summonStatus:Set(LobbyExtras.summonStatus or "รอเปิดสุ่มตัวละคร")end end)
-    local rewardStatus=LB:CreateLabel(LobbyExtras.rewardStatus)
+    local rewardStatus=RewardsTab:CreateLabel(LobbyExtras.rewardStatus)
     LB:CreateButton({Name="รีเฟรชข้อมูลล็อบบี้",Callback=function()
         local response=LobbyExtras.call(HubRemotes,"GetProfile")
         Rayfield:Notify({Title=response.profile and "อัปเดตแล้ว"or "รีเฟรชไม่ได้",Content=response.profile and "อ่านข้อมูลล่าสุดจากเกมแล้ว"or tostring(response.reason),Duration=3})
@@ -1736,7 +1761,7 @@ else
     end})
 
     local EVO=Window:CreateTab("วิวัฒนาการ",4483362461)
-    EVO:CreateLabel("เลือกตัวละครจริงและร่างปลายทาง • สูตรผสมต้องเลือกตัวคู่ด้วย • กดครั้งเดียวต่อการวิวัฒนาการ")
+    EVO:CreateLabel("เลือกเฉพาะตัวที่ใส่ในทีมและร่างปลายทาง • สูตรผสมต้องเลือกตัวคู่ด้วย • กดครั้งเดียวต่อการวิวัฒนาการ")
     local evolveUnits,evolvePaths,evolvePartners={},{},{}
     local sourcePicker,pathPicker,partnerPicker
     local evolveStatus=EVO:CreateLabel("เลือกตัวละครก่อน")
@@ -1752,7 +1777,7 @@ else
         local selected
         for _,entry in pairs(evolvePaths)do if entry.target==State.evolveTarget then selected=entry end end
         if selected and selected.partner then
-            for id,u in pairs(Profile.units or {})do if id~=State.evolveUnitId and u.kind==selected.partner then local label=unitLabel(id,u);partners[#partners+1]=label;evolvePartners[label]=id end end
+            for _,teamEntry in ipairs(LobbyRoll.team())do local id,u=teamEntry.id,teamEntry.unit; if id~=State.evolveUnitId and u.kind==selected.partner then local label=unitLabel(id,u);partners[#partners+1]=label;evolvePartners[label]=id end end
         end
         table.sort(paths);table.sort(partners)
         pathPicker:Refresh(#paths>0 and paths or {"ไม่มีร่างที่วิวัฒนาการได้"})
@@ -1766,7 +1791,7 @@ else
         evolveStatus:Set(#materials>0 and table.concat(materials," • ")or "เลือกร่างปลายทาง")
     end
     local options={}
-    for id,u in pairs(Profile and Profile.units or {})do local label=unitLabel(id,u);options[#options+1]=label;evolveUnits[label]=id end
+    for _,teamEntry in ipairs(LobbyRoll.team())do local id,u=teamEntry.id,teamEntry.unit; local label=unitLabel(id,u);options[#options+1]=label;evolveUnits[label]=id end
     table.sort(options)
     sourcePicker=EVO:CreateDropdown({Name="ตัวละครต้นทาง",Options=options,CurrentOption={"เลือกตัวละคร"},Callback=function(o)
         local id=evolveUnits[evoValue(o)];if id then State.evolveUnitId=id;State.evolveTarget="";State.evolvePartner="";saveData();if pathPicker then refreshEvolvePaths()end end
@@ -1777,12 +1802,13 @@ else
     partnerPicker=EVO:CreateDropdown({Name="ตัวคู่สำหรับสูตรผสม",Options={"ไม่ต้องใช้ตัวคู่ / ยังไม่มีตัวคู่"},CurrentOption={"ไม่ต้องใช้ตัวคู่ / ยังไม่มีตัวคู่"},Callback=function(o)State.evolvePartner=evolvePartners[evoValue(o)]or "";saveData()end})
     EVO:CreateButton({Name="วิวัฒนาการตัวที่เลือก 1 ครั้ง",Callback=function()
         refreshProfile()
+        if not LobbyRoll.isEquipped(State.evolveUnitId)then evolveStatus:Set("ตัวต้นทางไม่อยู่ในช่องทีมแล้ว");return end
         local source=LobbyRoll.unit(State.evolveUnitId)
         local entry
         for _,candidate in ipairs(source and Catalog.evolutionsOf(source.kind)or {})do if candidate.target==State.evolveTarget then entry=candidate;break end end
         if not entry then evolveStatus:Set("เลือกตัวละครและร่างปลายทางก่อน");return end
         if entry.recipe.testers then evolveStatus:Set("สูตรนี้จำกัดสิทธิ์ในเกม");return end
-        if entry.partner then local partner=LobbyRoll.unit(State.evolvePartner);if not partner or partner.kind~=entry.partner or State.evolvePartner==State.evolveUnitId then evolveStatus:Set("เลือกตัวคู่ให้ตรงกับสูตรก่อน");return end end
+        if entry.partner then local partner=LobbyRoll.unit(State.evolvePartner);if not LobbyRoll.isEquipped(State.evolvePartner)or not partner or partner.kind~=entry.partner or State.evolvePartner==State.evolveUnitId then evolveStatus:Set("เลือกตัวคู่ให้ตรงกับสูตรก่อน");return end end
         local recipe=entry.recipe
         if (tonumber(Profile.gems)or 0)<(recipe.gems or 0)then evolveStatus:Set("gems ไม่พอ");return end
         for id,n in pairs(recipe.items or {})do if LobbyRoll.count(id)<n then evolveStatus:Set("วัตถุดิบไม่พอ: "..id);return end end
@@ -1791,7 +1817,7 @@ else
     end})
     EVO:CreateButton({Name="รีเฟรชตัวละครและสูตร",Callback=function()
         refreshProfile();options={};evolveUnits={}
-        for id,u in pairs(Profile and Profile.units or {})do local label=unitLabel(id,u);options[#options+1]=label;evolveUnits[label]=id end
+        for _,teamEntry in ipairs(LobbyRoll.team())do local id,u=teamEntry.id,teamEntry.unit; local label=unitLabel(id,u);options[#options+1]=label;evolveUnits[label]=id end
         table.sort(options);sourcePicker:Refresh(options);refreshEvolvePaths()
     end})
     refreshEvolvePaths()
@@ -1802,8 +1828,8 @@ else
     FD:CreateSection("เกณฑ์เลือกคิว")
     FD:CreateDropdown({ Name="เรียงคิว", Options={ "lowest_level (level ต่ำสุดก่อน)", "highest_rarity (rarity สูงสุดก่อน)", "specific_kind (เฉพาะ kind)" }, CurrentOption={ State.feedPriority=="highest_rarity" and "highest_rarity (rarity สูงสุดก่อน)" or State.feedPriority=="specific_kind" and "specific_kind (เฉพาะ kind)" or "lowest_level (level ต่ำสุดก่อน)" }, MultipleOptions=false, Callback=function(o) local v = type(o)=="table" and o[1] or o; if v:find("highest_rarity") then State.feedPriority="highest_rarity" elseif v:find("specific_kind") then State.feedPriority="specific_kind" else State.feedPriority="lowest_level" end; saveData() end })
     FD:CreateSection("ตัวกรอง")
-    local kindListCache = { "all" };for _,k in ipairs(AllKinds)do local u=Catalog.UNITS[k];table.insert(kindListCache,k.." ("..LobbyRoll.unitName(k).." • "..u.rarity..")")end
-    FD:CreateDropdown({ Name="ชนิดตัวละคร (all = ทุกชนิด)", Options=kindListCache, CurrentOption={ State.feedKindFilter == "all" and "all" or State.feedKindFilter }, MultipleOptions=false, Callback=function(o) local v = type(o)=="table" and o[1] or o; if v == "all" then State.feedKindFilter = "all" else State.feedKindFilter = string.match(v, "^([^%s]+)") or v end; saveData() end })
+    local kindListCache = { "all" };local teamKinds={};for _,entry in ipairs(LobbyRoll.team())do local k=entry.unit.kind;if not teamKinds[k]then teamKinds[k]=true;local u=Catalog.UNITS[k];table.insert(kindListCache,k.." ("..LobbyRoll.unitName(k).." • "..u.rarity..")")end end
+    FD:CreateDropdown({ Name="ตัวในทีม (all = ทุกตัวในทีม)", Options=kindListCache, CurrentOption={ State.feedKindFilter == "all" and "all" or State.feedKindFilter }, MultipleOptions=false, Callback=function(o) local v = type(o)=="table" and o[1] or o; if v == "all" then State.feedKindFilter = "all" else State.feedKindFilter = string.match(v, "^([^%s]+)") or v end; saveData() end })
     FD:CreateDropdown({ Name="ความหายากขั้นต่ำ", Options=RARITY_LIST, CurrentOption={ State.feedRarityFilter }, MultipleOptions=false, Callback=function(o) State.feedRarityFilter = type(o)=="table" and o[1] or o; saveData() end })
     FD:CreateDropdown({ Name="หยุดเมื่อเลเวลถึง", Options={ "all", "5", "10", "15", "20", "30", "40", "49" }, CurrentOption={ State.feedMaxLevel }, MultipleOptions=false, Callback=function(o) State.feedMaxLevel = type(o)=="table" and o[1] or o; saveData() end })
     FD:CreateDropdown({ Name="ประเภทอาหาร", Options={ "auto", "candy", "bigcandy" }, CurrentOption={ State.feedFoodType=="candy" and "candy" or State.feedFoodType=="bigcandy" and "bigcandy" or "auto" }, MultipleOptions=false, Callback=function(o) local v = type(o)=="table" and o[1] or o; if v:find("candy") and not v:find("bigcandy") then State.feedFoodType="candy" elseif v:find("bigcandy") then State.feedFoodType="bigcandy" else State.feedFoodType="auto" end; saveData() end })
@@ -1814,13 +1840,12 @@ else
     local traitPicker,statsPicker,traitTargetPicker
     local function unitOptions()
         local options={};unitChoices={}
-        for id,unit in pairs(Profile and Profile.units or {})do
-            if type(unit)=="table"and unit.kind then
-                local label=string.format("%s • Lv.%s • %s • ID %s",LobbyRoll.unitName(unit.kind),tostring(unit.level or 1),LobbyRoll.traitName(unit.trait),tostring(id))
-                options[#options+1]=label;unitChoices[label]=tostring(id)
-            end
+        for _,entry in ipairs(LobbyRoll.team())do
+            local id,unit=entry.id,entry.unit
+            local label=string.format("ช่อง %d • %s • Lv.%s • %s",entry.slot,LobbyRoll.unitName(unit.kind),tostring(unit.level or 1),LobbyRoll.traitName(unit.trait))
+            options[#options+1]=label;unitChoices[label]=id
         end
-        table.sort(options);if #options==0 then options={"ยังไม่มีข้อมูลตัวละคร — กดรีเฟรช"}end
+        if #options==0 then options={"ยังไม่มีตัวในช่องทีม — จัดทีมแล้วกดรีเฟรช"}end
         return options
     end
     local function selectedUnit(id,options)
@@ -1846,9 +1871,9 @@ else
         for _,label in ipairs(options)do if table.find(State.traitTargets,traitChoices[label])then selected[#selected+1]=label end end
         return selected
     end
-    RT:CreateLabel("เลือกตัวในกระเป๋าเป็นรายตัว • หยุดเมื่อได้ Trait ใดก็ได้ที่เลือก หรือคริสตัลหมด")
+    RT:CreateLabel("เลือกเฉพาะตัวในช่องทีมด้านล่าง • หยุดเมื่อได้ Trait ใดก็ได้ที่เลือก หรือคริสตัลหมด")
     local options=unitOptions()
-    traitPicker=RT:CreateDropdown({Name="ตัวละครที่จะรีโรล",Options=options,CurrentOption={selectedUnit(State.traitUnitId,options)},Callback=function(o)selectUnit("trait",o)end})
+    traitPicker=RT:CreateDropdown({Name="ช่องทีมที่จะรีโรล",Options=options,CurrentOption={selectedUnit(State.traitUnitId,options)},Callback=function(o)selectUnit("trait",o)end})
     local traits=traitOptions()
     traitTargetPicker=RT:CreateDropdown({Name="Trait ที่ต้องการ (เลือกได้หลายชื่อ)",Options=traits,CurrentOption=selectedTraits(traits),MultipleOptions=true,Callback=function(o)
         LobbyRoll.stop("trait","เปลี่ยนเป้าหมายแล้ว")
@@ -1861,7 +1886,7 @@ else
     SR:CreateLabel("เลือกเกรดขั้นต่ำแต่ละค่า • ล็อกค่าที่ถึงเป้าแล้วอัตโนมัติ • หยุดเมื่อครบเป้าหมายหรือของหมด")
     SR:CreateLabel("ไม่ล็อก: 1 Juice • ล็อก 1 ค่า: 2 Juice • ล็อก 2 ค่า: 3 Juice + 100 gems / ครั้ง")
     SR:CreateLabel("ล็อกค่าปัจจุบันเองได้สูงสุด 2 ค่า • ค่าที่ถึงเกรดเป้าหมายจะล็อกให้อัตโนมัติ")
-    statsPicker=SR:CreateDropdown({Name="ตัวละครที่จะรีสเตตัส",Options=options,CurrentOption={selectedUnit(State.statsUnitId,options)},Callback=function(o)selectUnit("stats",o)end})
+    statsPicker=SR:CreateDropdown({Name="ช่องทีมที่จะรีสเตตัส",Options=options,CurrentOption={selectedUnit(State.statsUnitId,options)},Callback=function(o)selectUnit("stats",o)end})
     LobbyRoll.modules()
     local gradeOptions={"ไม่กำหนด"}
     for _,grade in ipairs(UnitStats and UnitStats.LADDER or {})do gradeOptions[#gradeOptions+1]=grade end
@@ -1885,8 +1910,21 @@ else
         local traitList=traitOptions();traitTargetPicker:Refresh(traitList)
         Rayfield:Notify({Title="รีเฟรชแล้ว",Content="รายการตัวละครและ Trait มาจากข้อมูลเกม",Duration=3})
     end
-    RT:CreateButton({Name="รีเฟรชตัวละคร / Trait",Callback=refreshRollChoices})
-    SR:CreateButton({Name="รีเฟรชตัวละคร",Callback=refreshRollChoices})
+    task.spawn(function()
+        local signature=""
+        while true do
+            task.wait(2)
+            local parts={}
+            for _,entry in ipairs(LobbyRoll.team())do parts[#parts+1]=entry.slot..":"..entry.id..":"..tostring(entry.unit.level)..":"..tostring(entry.unit.trait)end
+            local current=table.concat(parts,"|")
+            if current~=signature and not LobbyRoll.traitRunning and not LobbyRoll.statsRunning and not LobbyRoll.busy then
+                signature=current
+                local list=unitOptions();traitPicker:Refresh(list);statsPicker:Refresh(list)
+            end
+        end
+    end)
+    RT:CreateButton({Name="รีเฟรชทีม / Trait",Callback=refreshRollChoices})
+    SR:CreateButton({Name="รีเฟรชทีม",Callback=refreshRollChoices})
     task.spawn(function()
         while true do
             task.wait(0.5)
