@@ -1,4 +1,4 @@
--- CandyTD v6.24 • Remember / Record / Retry | SINGLE-FILE SOURCE BUNDLE
+-- CandyTD v6.25 • Remember / Record / Retry | SINGLE-FILE SOURCE BUNDLE
 -- No external Lua/data downloads; Roblox gameplay and Roblox-hosted assets remain online.
 -- WindUI
 -- MIT License
@@ -283,16 +283,18 @@ function ClientSettings.rejoin()
     end)
     if not ok then ClientSettings.status="รีจอยไม่สำเร็จ: "..tostring(reason)end
 end
-function ClientSettings.home()
+function ClientSettings.home(force)
     saveData()
     if not isMatch then ClientSettings.status="อยู่ล็อบบี้แล้ว";return end
     local remotes=RS:FindFirstChild("MatchRemotes")
     local remote=remotes and remotes:FindFirstChild("ReturnToHub")
     local ok,reason=pcall(function()
-        if remote and remote:IsA("RemoteEvent")then remote:FireServer()
+        if force==true then TeleportService:Teleport(111053011787075,LocalPlayer)
+        elseif remote and remote:IsA("RemoteEvent")then remote:FireServer()
         else TeleportService:Teleport(111053011787075,LocalPlayer)end
     end)
     ClientSettings.status=ok and "กำลังกลับล็อบบี้"or("กลับล็อบบี้ไม่สำเร็จ: "..tostring(reason))
+    return ok,reason
 end
 TeleportService.TeleportInitFailed:Connect(function(player,_,reason)
     if player==LocalPlayer then ClientSettings.status="ย้ายเซิร์ฟเวอร์ไม่สำเร็จ: "..tostring(reason)end
@@ -685,12 +687,9 @@ if isMatch then
                     end
                 end
                 local action
-                local returnChallenge=State.autoReturnChallenge and MatchInfo.challenge~=nil and MatchInfo.challenge~=false
+                local returnChallenge=State.autoReturnChallenge and((MatchInfo.challenge~=nil and MatchInfo.challenge~=false)or State._challengeReturnActive)
                 if returnChallenge then
-                    if os.clock()-endedAt>3 and os.clock()-lastVote>10 and(not State._farmRewardPending or os.clock()-endedAt>20)then
-                        lastVote=os.clock();ClientSettings.home()
-                        matchStatus="จบ Challenge แล้ว • กลับล็อบบี้เพื่อเลือกด่านใหม่"
-                    end
+                    matchStatus="จบ Challenge • ระบบกลับล็อบบี้แยกกำลังจัดการ"
                 elseif State.autoRetryLoss and won==false then action="again"
                 elseif State.autoReplay=="again"then action="again"
                 elseif State.autoReplay=="next"then action=won==true and "next"or "again"end
@@ -1509,6 +1508,64 @@ if isMatch then
     end)
 end
 
+local ChallengeReturn={status="ปิดกลับล็อบบี้หลัง Challenge",over=false,overAt=nil,attempts=0,lastAttempt=0,label=nil,nextScan=0,teleportData={}}
+if isMatch then
+    pcall(function()ChallengeReturn.teleportData=game:GetService("TeleportService"):GetLocalPlayerTeleportData()or {}end)
+end
+function ChallengeReturn.isChallenge()
+    if MatchInfo.challenge and MatchInfo.challenge~=false then return true end
+    if type(ChallengeReturn.teleportData)=="table"and ChallengeReturn.teleportData.challenge and ChallengeReturn.teleportData.challenge~=false then return true end
+    return State.autoBattleMode=="challenge"and not(type(MatchInfo.replay)=="table"and MatchInfo.replay.kind=="raid")and MatchInfo.infinite~=true
+end
+function ChallengeReturn.visibleEnd()
+    local label=ChallengeReturn.label
+    if not label or not label.Parent then
+        if os.clock()<ChallengeReturn.nextScan then return false end
+        ChallengeReturn.nextScan=os.clock()+2
+        for _,object in ipairs(PlayerGui:GetDescendants())do
+            if object:IsA("TextLabel")and(object.Text=="VICTORY!"or object.Text=="DEFEAT")then ChallengeReturn.label=object;label=object;break end
+        end
+    end
+    if not label then return false end
+    local object=label
+    while object and object~=PlayerGui do
+        if object:IsA("GuiObject")and not object.Visible then return false end
+        if object:IsA("ScreenGui")and not object.Enabled then return false end
+        object=object.Parent
+    end
+    return true
+end
+if isMatch then
+    task.spawn(function()
+        local remotes=RS:FindFirstChild("MatchRemotes")or RS:WaitForChild("MatchRemotes",20)
+        local event=remotes and remotes:FindFirstChild("Event")
+        if event then event.OnClientEvent:Connect(function(_,kind)
+            if kind=="over"then ChallengeReturn.over=true;ChallengeReturn.overAt=os.clock()
+            elseif kind=="reset"then ChallengeReturn.over=false;ChallengeReturn.overAt=nil;ChallengeReturn.attempts=0;ChallengeReturn.lastAttempt=0;State._challengeReturnActive=false end
+        end)end
+        while true do
+            task.wait(1)
+            local ok,reason=pcall(function()
+                if not State.autoReturnChallenge then ChallengeReturn.status="ปิดกลับล็อบบี้หลัง Challenge";State._challengeReturnActive=false;return end
+                if not ChallengeReturn.isChallenge()then ChallengeReturn.status="รอเข้า Challenge";State._challengeReturnActive=false;return end
+                State._challengeReturnActive=true
+                local ended=ChallengeReturn.over or gameState().over or ChallengeReturn.visibleEnd()
+                if not ended then ChallengeReturn.status="Challenge กำลังเล่น • จะออกเมื่อจบรอบ";return end
+                ChallengeReturn.overAt=ChallengeReturn.overAt or os.clock()
+                local elapsed=os.clock()-ChallengeReturn.overAt
+                if elapsed<3 or(State._farmRewardPending and elapsed<20)then ChallengeReturn.status="จบรอบแล้ว • รอรายงานรางวัลก่อนกลับล็อบบี้";return end
+                if os.clock()-ChallengeReturn.lastAttempt<8 then return end
+                ChallengeReturn.lastAttempt=os.clock();ChallengeReturn.attempts=ChallengeReturn.attempts+1
+                AutoBattle.queue();saveData()
+                local direct=ChallengeReturn.attempts>=2
+                local sent,errorMessage=ClientSettings.home(direct)
+                ChallengeReturn.status=sent and(direct and "คำสั่งเดิมยังไม่ย้าย • วาร์ปกลับล็อบบี้โดยตรง"or "ส่ง ReturnToHub แล้ว • รอย้ายเซิร์ฟเวอร์")or("กลับล็อบบี้ไม่สำเร็จ: "..tostring(errorMessage))
+            end)
+            if not ok then ChallengeReturn.status="ระบบออกจะลองใหม่: "..tostring(reason)end
+        end
+    end)
+end
+
 -- ═══════════ LOBBY LOGIC ═══════════
 if not isMatch then
     local Loop = { lastSummon=0, lastClaim=0, lastPlay=0, lastReroll=0, lastEvolve=0, 
@@ -1571,7 +1628,7 @@ if not isMatch then
 end
 -- ═══════════ UI SETUP ═══════════
 local Window = Rayfield:CreateWindow({
-    Name = "CandyTD Auto-All v6.24 • Record + Retry",
+    Name = "CandyTD Auto-All v6.25 • Record + Retry",
     LoadingTitle = isMatch and "Match Mode" or "Lobby Mode",
     ConfigurationSaving = { Enabled = false },
     KeySystem = false,
@@ -1994,6 +2051,9 @@ end})
 ChallengeTab:CreateToggle({Name="จบ Challenge แล้วกลับล็อบบี้อัตโนมัติ",CurrentValue=State.autoReturnChallenge,Callback=function(on)
     State.autoReturnChallenge=on;saveData();if on then AutoBattle.queue()end
 end})
+local challengeReturnStatus=ChallengeTab:CreateLabel(ChallengeReturn.status)
+task.spawn(function()while true do task.wait(1);challengeReturnStatus:Set(ChallengeReturn.status)end end)
+ChallengeTab:CreateButton({Name="กลับล็อบบี้ตอนนี้",Callback=function()AutoBattle.queue();ClientSettings.home()end})
 ChallengeTab:CreateLabel("ถ้าเปิดกลับล็อบบี้ จะไม่กดเล่นซ้ำ/ด่านถัดไปใน Challenge • เปิดเข้าด่านอัตโนมัติไว้ด้วยเพื่อเข้าใหม่")
 InfiniteTab:CreateToggle({Name="Infinite: กลับล็อบบี้เมื่อจบเวฟเป้าหมาย",CurrentValue=State.autoReturnInfinite,Callback=function(on)
     State.autoReturnInfinite=on;saveData();if on then AutoBattle.queue()end
