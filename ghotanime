@@ -1,4 +1,4 @@
--- CandyTD v6.31 • Remember / Record / Retry | SINGLE-FILE SOURCE BUNDLE
+-- CandyTD v6.32 • Remember / Record / Retry | SINGLE-FILE SOURCE BUNDLE
 -- No external Lua/data downloads; Roblox gameplay and Roblox-hosted assets remain online.
 -- WindUI
 -- MIT License
@@ -137,7 +137,7 @@ local SAVE_FILE = "CandyTD_AutoAll_v1.json"
 -- ═══════════ STATE ═══════════
 local DefaultState = {
     autoUpgrade=true, autoStartWave=false, autoReplay="off", activeSlot=0, autoSellExcess=false,
-    autoRetryLoss=true,planPlayback="snapshot",recordSlot=1,autoBattle=false,autoEnterBattle=false,autoReturnChallenge=false,autoBattleNext=false,autoHeroSlots={},autoHeroOrder={1,2,3,4,5,6},autoCustomOrder=false,autoMaxBeforePlace=false,autoBattleMode="stage",autoInfiniteWorld="candy",autoReturnInfinite=false,infiniteTargetWave=50,autoBattleStage=1,autoChallenge=1,autoHalloweenReplay=false,autoSkills=false,antiAFK=true,fpsLimit=false,fpsCap=30,lowGraphics=true,
+    autoRetryLoss=true,planPlayback="snapshot",recordSlot=1,autoBattle=false,autoEnterBattle=false,autoReturnChallenge=false,autoBattleNext=false,autoHeroSlots={},autoTargeting=true,heroTargets={},autoHeroOrder={1,2,3,4,5,6},autoCustomOrder=false,autoMaxBeforePlace=false,autoBattleMode="stage",autoInfiniteWorld="candy",autoReturnInfinite=false,infiniteTargetWave=50,autoBattleStage=1,autoChallenge=1,autoHalloweenReplay=false,autoSkills=false,antiAFK=true,fpsLimit=false,fpsCap=30,lowGraphics=true,
     traitUnitId="",traitTargets={},statsUnitId="",statsTargets={dmg="S",range="ไม่กำหนด",spa="ไม่กำหนด"},statsLocks={},craftRecipe="",summonBanner="normal",lobbyRewardsVersion=0,evolveUnitId="",evolveTarget="",evolvePartner="",
     autoSummon=false, summonMode="10",
     autoClaimDaily=false, autoClaimLevels=false, autoClaimQuests=false, autoClaimPass=false,
@@ -1678,7 +1678,7 @@ if not isMatch then
 end
 -- ═══════════ UI SETUP ═══════════
 local Window = Rayfield:CreateWindow({
-    Name = "CandyTD Auto-All v6.31 • Record + Retry",
+    Name = "CandyTD Auto-All v6.32 • Record + Retry",
     LoadingTitle = isMatch and "Match Mode" or "Lobby Mode",
     ConfigurationSaving = { Enabled = false },
     KeySystem = false,
@@ -2356,6 +2356,57 @@ end
 InventoryTab:CreateButton({Name="รีเฟรชกระเป๋า",Callback=refreshInventory})
 refreshInventory()
 task.spawn(function()while true do task.wait(5);if not InventoryView.busy then pcall(renderInventory)end end end)
+
+local TargetTab=Window:CreateTab("เป้าหมายฮีโร่",4483362460)
+TargetTab:CreateToggle({Name="ใช้เป้าหมายที่ตั้งไว้",CurrentValue=State.autoTargeting,Callback=function(on)State.autoTargeting=on;saveData()end})
+local targetLabels={"ไม่เปลี่ยน","FIRST • ตัวหน้า","LAST • ตัวท้าย","CLOSE • ตัวใกล้","STRONG • เลือดเยอะสุด"}
+local targetValues={"manual","first","last","closest","strongest"}
+for slot=1,6 do
+    local selectedSlot=slot
+    local current=State.heroTargets[tostring(slot)]or "manual"
+    local selected=targetLabels[table.find(targetValues,current)or 1]
+    TargetTab:CreateDropdown({Name="เป้าหมายช่อง "..slot,Options=targetLabels,CurrentOption={selected},Callback=function(option)
+        local value=type(option)=="table"and option[1]or option
+        State.heroTargets[tostring(selectedSlot)]=targetValues[table.find(targetLabels,value)or 1];saveData()
+    end})
+end
+local targetStatus=TargetTab:CreateLabel("รอข้อมูลฮีโร่")
+if isMatch then
+    task.spawn(function()
+        local attempted={}
+        while true do
+            task.wait(0.5)
+            local ok,reason=pcall(function()
+                if not State.autoTargeting then targetStatus:Set("ปิดปรับเป้าหมาย");return end
+                if Recorder.active or State.activeSlot>0 then targetStatus:Set("พักระหว่างอัด / เล่นแผน");return end
+                if not ctx or not MatchNet then targetStatus:Set("รอเชื่อมข้อมูลฮีโร่");return end
+                local slots=MatchInfo.slots
+                if type(slots)~="table"then targetStatus:Set("รอข้อมูลช่องทีม");return end
+                local modes={}
+                for slot=1,6 do
+                    local kind=slots[slot]or slots[tostring(slot)]
+                    local mode=State.heroTargets[tostring(slot)]
+                    if type(kind)=="string"and mode and mode~="manual"and not modes[kind]then modes[kind]=mode end
+                end
+                local own=mine();local configured=0
+                for _,tower in ipairs(own)do
+                    local mode=modes[tower.unit]
+                    if mode then
+                        configured=configured+1
+                        if tower.targeting~=mode and os.clock()-(attempted[tower.id]or -10)>=3 then
+                            attempted[tower.id]=os.clock()
+                            local result=act("target",tower.id,mode)
+                            targetStatus:Set(result.ok and("ตั้งเป้าหมาย "..tostring(tower.unit).." → "..mode)or("ปรับไม่สำเร็จ: "..tostring(result.reason)))
+                            return
+                        end
+                    end
+                end
+                targetStatus:Set("ฮีโร่ที่ตั้งเป้าหมาย "..configured.." / วางแล้ว "..#own)
+            end)
+            if not ok then targetStatus:Set("อ่านเป้าหมายไม่สำเร็จ: "..tostring(reason))end
+        end
+    end)
+else targetStatus:Set("บันทึกเป้าหมายแล้ว • รอเข้าด่าน")end
 ]=],
 ["lib:WindUI"]=[=[--[[
      _      ___         ____  ______
