@@ -367,10 +367,13 @@ loop(1,function()
         if s.GameOver and not app.ended then
             app.ended=true;app.playing=false
             if app.recording then stopRecord()end
-            local won=(tonumber(s.Health)or 0)>0
+            local music=workspace:FindFirstChild("Music")
+            local outcome=music and music.Value
+            local won=outcome=="Triumph"
+            local lost=outcome=="Lose"or(tonumber(s.Health)or 1)<=0
             local seconds=math.floor(tonumber(s.GameDuration)or 0)
-            session.rounds=session.rounds+1;session.wins=session.wins+(won and 1 or 0);session.losses=session.losses+(won and 0 or 1);session.seconds=session.seconds+seconds
-            table.insert(session.history,1,tostring(s.MapName).." • "..(won and "ชนะ"or "แพ้").." • "..seconds.." วินาที")
+            session.rounds=session.rounds+1;session.wins=session.wins+(won and 1 or 0);session.losses=session.losses+(lost and 1 or 0);session.seconds=session.seconds+seconds
+            table.insert(session.history,1,tostring(s.MapName).." • "..(won and "ชนะ"or(lost and "แพ้"or "จบรอบ • ไม่ทราบผล")).." • "..seconds.." วินาที")
             while #session.history>20 do table.remove(session.history)end
             save();app.endTime=os.clock()
         elseif not s.GameOver and app.ended then app.ended=false;app.planStarted=false end
@@ -388,6 +391,7 @@ loop(1,function()
 end)
 loop(0.3,observe)
 local upgradeTried,targetTried={},{}
+local targetIDs={First=1,Last=2,Strongest=3,Weakest=4,Closest=5,Farthest=6,Random=7}
 loop(1,function()
     if not inMatch()or app.recording or app.playing or gameState().GameOver then return end
     local towers=ownTowers()
@@ -398,8 +402,9 @@ loop(1,function()
     end)
     for _,tower in ipairs(towers)do
         local mode=state.targetModes[tostring(slotOf(tower.Name))]
-        if mode and mode~="ไม่เปลี่ยน"and tostring(tower.State and tower.State.TargetingMode)~=mode and os.clock()-(targetTried[tower.Model]or -10)>5 then targetTried[tower.Model]=os.clock();setTarget(tower,mode)end
-        if state.autoUpgrade and not maxed(tower)and os.clock()-(upgradeTried[tower.Model]or -10)>3 then upgradeTried[tower.Model]=os.clock();if upgrade(tower)then app.actionStatus="อัปเกรด "..tower.Name;break end end
+        local current=tower.State and tower.State.TargetingMode
+        if mode and mode~="ไม่เปลี่ยน"and current~=mode and current~=targetIDs[mode]and os.clock()-(targetTried[tower.Model]or -10)>5 then targetTried[tower.Model]=os.clock();setTarget(tower,mode);return end
+        if state.autoUpgrade and not maxed(tower)and os.clock()-(upgradeTried[tower.Model]or -10)>3 then upgradeTried[tower.Model]=os.clock();if upgrade(tower)then app.actionStatus="อัปเกรด "..tower.Name end;return end
     end
 end)
 loop(5,function()
