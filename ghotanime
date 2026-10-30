@@ -1,4 +1,4 @@
--- CandyTD v6.28 • Remember / Record / Retry | SINGLE-FILE SOURCE BUNDLE
+-- CandyTD v6.29 • Remember / Record / Retry | SINGLE-FILE SOURCE BUNDLE
 -- No external Lua/data downloads; Roblox gameplay and Roblox-hosted assets remain online.
 -- WindUI
 -- MIT License
@@ -137,7 +137,7 @@ local SAVE_FILE = "CandyTD_AutoAll_v1.json"
 -- ═══════════ STATE ═══════════
 local DefaultState = {
     autoUpgrade=true, autoStartWave=false, autoReplay="off", activeSlot=0, autoSellExcess=false,
-    autoRetryLoss=true,planPlayback="snapshot",recordSlot=1,autoBattle=false,autoEnterBattle=false,autoReturnChallenge=false,autoBattleNext=false,autoHeroSlots={},autoBattleMode="stage",autoInfiniteWorld="candy",autoReturnInfinite=false,infiniteTargetWave=50,autoBattleStage=1,autoChallenge=1,autoHalloweenReplay=false,autoSkills=false,antiAFK=true,fpsLimit=false,fpsCap=30,lowGraphics=true,
+    autoRetryLoss=true,planPlayback="snapshot",recordSlot=1,autoBattle=false,autoEnterBattle=false,autoReturnChallenge=false,autoBattleNext=false,autoHeroSlots={},autoHeroOrder={1,2,3,4,5,6},autoCustomOrder=false,autoMaxBeforePlace=false,autoBattleMode="stage",autoInfiniteWorld="candy",autoReturnInfinite=false,infiniteTargetWave=50,autoBattleStage=1,autoChallenge=1,autoHalloweenReplay=false,autoSkills=false,antiAFK=true,fpsLimit=false,fpsCap=30,lowGraphics=true,
     traitUnitId="",traitTargets={},statsUnitId="",statsTargets={dmg="S",range="ไม่กำหนด",spa="ไม่กำหนด"},statsLocks={},craftRecipe="",summonBanner="normal",lobbyRewardsVersion=0,evolveUnitId="",evolveTarget="",evolvePartner="",
     autoSummon=false, summonMode="10",
     autoClaimDaily=false, autoClaimLevels=false, autoClaimQuests=false, autoClaimPass=false,
@@ -733,7 +733,7 @@ if isMatch then
                         local chosen,isSecondary=primary,false
                         if primary.cost>budget then
                             chosen=nil
-                            if not upgradePlan.secondaryUsed then
+                            if not upgradePlan.secondaryUsed and not(State.autoBattle and State.autoMaxBeforePlace)then
                                 for _,candidate in ipairs(candidates)do
                                     if candidate.tower~=primary.tower and candidate.cost<=budget then chosen=candidate;isSecondary=true;break end
                                 end
@@ -1125,6 +1125,10 @@ function AutoBattle.slotEnabled(slot)
     local value=State.autoHeroSlots[tostring(slot)]
     return value~=false
 end
+function AutoBattle.slotPriority(slot)
+    for rank,value in ipairs(State.autoHeroOrder)do if tonumber(value)==tonumber(slot)then return rank end end
+    return 99
+end
 AutoBattle.entryDeadline=math.huge
 function AutoBattle.cooldownRemaining()
     if AutoBattle.entryDeadline==math.huge then return 10 end
@@ -1250,13 +1254,21 @@ if isMatch then
                             local cap=Catalog.placeCap and Catalog.placeCap(kind)or 3
                             if (counts[kind]or 0)<cap then
                                 local row=def.LEVELS[1]
-                                heroes[#heroes+1]={kind=kind,row=row,power=(tonumber(row.dmg)or 0)*(row.attack=="tornado"and 7 or 1)/math.max(tonumber(row.cd)or 1,0.05)}
+                                heroes[#heroes+1]={priority=AutoBattle.slotPriority(slot),kind=kind,row=row,power=(tonumber(row.dmg)or 0)*(row.attack=="tornado"and 7 or 1)/math.max(tonumber(row.cd)or 1,0.05)}
                             end
                         end
                     end
-                    table.sort(heroes,function(a,b)if a.power==b.power then return a.kind<b.kind end;return a.power>b.power end)
+                    table.sort(heroes,function(a,b)if State.autoCustomOrder and a.priority~=b.priority then return a.priority<b.priority end;if a.power==b.power then return a.kind<b.kind end;return a.power>b.power end)
                     local hero=heroes[1]
-                    if total>=(tonumber(MatchInfo.maxTowers)or 20)then AutoBattle.status="วางครบจำนวนสูงสุดแล้ว"
+                    local unfinished=false
+                    if State.autoMaxBeforePlace then
+                        for _,tower in ipairs(mine())do
+                            local def=ctx.UNITS[tower.unit];local level=tonumber(tower.level)or 1
+                            if def and def.LEVELS and def.LEVELS[level+1]then unfinished=true;break end
+                        end
+                    end
+                    if unfinished then AutoBattle.status=State.autoUpgrade and "รออัปเกรดตัวที่วางให้ตันก่อนวางตัวถัดไป"or "พักวาง • เปิดอัปเกรดอัตโนมัติเพื่ออัปให้ตัน"
+                    elseif total>=(tonumber(MatchInfo.maxTowers)or 20)then AutoBattle.status="วางครบจำนวนสูงสุดแล้ว"
                     elseif not hero then AutoBattle.status=type(slots)=="table"and "ช่องที่เปิดวางครบแล้ว หรือยังไม่ได้เปิดช่องฮีโร่"or "รอข้อมูลตัวละครที่นำลงสนาม"
                     elseif (tonumber(gameState().money)or 0)<(placeCost(hero.kind)or math.huge)then AutoBattle.status="เก็บเงินรอวาง "..tostring(hero.kind)
                     else
@@ -1666,7 +1678,7 @@ if not isMatch then
 end
 -- ═══════════ UI SETUP ═══════════
 local Window = Rayfield:CreateWindow({
-    Name = "CandyTD Auto-All v6.28 • Record + Retry",
+    Name = "CandyTD Auto-All v6.29 • Record + Retry",
     LoadingTitle = isMatch and "Match Mode" or "Lobby Mode",
     ConfigurationSaving = { Enabled = false },
     KeySystem = false,
@@ -2088,6 +2100,27 @@ for slot=1,6 do
         State.autoHeroSlots[tostring(selectedSlot)]=on;saveData()
     end})
 end
+AutoTab:CreateSection("ลำดับวางฮีโร่")
+AutoTab:CreateToggle({Name="ใช้ลำดับช่องที่เลือกเอง (ปิด = ตัวแรงก่อน)",CurrentValue=State.autoCustomOrder,Callback=function(on)State.autoCustomOrder=on;saveData()end})
+local orderLabel=AutoTab:CreateLabel("")
+local function showHeroOrder()local labels={}for _,slot in ipairs(State.autoHeroOrder)do labels[#labels+1]=tostring(slot)end;orderLabel:Set("ลำดับช่อง: "..table.concat(labels," → "))end
+local orderPickers={};local updatingOrder=false
+for rank=1,6 do
+    local selectedRank=rank
+    orderPickers[rank]=AutoTab:CreateDropdown({Name="วางลำดับที่ "..rank.." จากช่อง",Options={"1","2","3","4","5","6"},CurrentOption={tostring(State.autoHeroOrder[rank])},Callback=function(option)
+        if updatingOrder then return end
+        local slot=tonumber(type(option)=="table"and option[1]or option);if not slot then return end
+        local previous=State.autoHeroOrder[selectedRank]
+        for position,value in ipairs(State.autoHeroOrder)do if tonumber(value)==slot then State.autoHeroOrder[position]=previous;break end end
+        State.autoHeroOrder[selectedRank]=slot;saveData();showHeroOrder()
+        updatingOrder=true;for position,picker in ipairs(orderPickers)do picker:Set({tostring(State.autoHeroOrder[position])})end;updatingOrder=false
+    end})
+end
+showHeroOrder()
+AutoTab:CreateToggle({Name="อัปเกรดให้ตันก่อนวางตัวถัดไป",CurrentValue=State.autoMaxBeforePlace,Callback=function(on)
+    State.autoMaxBeforePlace=on;if on then State.autoUpgrade=true end;saveData()
+end})
+AutoTab:CreateLabel("วางตามลำดับช่องที่เปิดไว้จนเต็มโควตาช่องนั้นก่อนช่องถัดไป • เปิดอัปให้ตัน: วางทีละตัวแล้วเก็บเงินอัปให้เต็มก่อนวางเพิ่ม")
 AutoTab:CreateToggle({Name="เปิดเล่นอัตโนมัติ",CurrentValue=State.autoBattle,Callback=AutoBattle.enable})
 AutoTab:CreateToggle({Name="ชนะแล้วไปด่านถัดไป (ปิด = ฟาร์มด่านเดิม)",CurrentValue=State.autoBattleNext,Callback=function(on)
     State.autoBattleNext=on
