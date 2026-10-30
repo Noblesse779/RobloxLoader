@@ -1,4 +1,4 @@
--- TDS Auto v1.0 • Lobby + Match | SINGLE-FILE SOURCE BUNDLE
+-- TDS Auto v1.1 • Lobby + Match | SINGLE-FILE SOURCE BUNDLE
 -- No external Lua/data downloads; Roblox gameplay and Roblox-hosted assets remain online.
 -- WindUI
 -- MIT License
@@ -35,7 +35,7 @@ if env.__TDSAuto then env.__TDSAuto.alive=false;for _,connection in ipairs(env._
 local app={alive=true,connections={},status="กำลังเชื่อมเกม",entryStatus="ปิดเข้าอัตโนมัติ",actionStatus="พร้อม",rewardStatus="พร้อม",pickupStatus="ปิดเก็บไอเทม",recording=false,playing=false,epoch=0}
 env.__TDSAuto=app
 local root="TDSAuto_"..player.UserId
-local state={autoEnter=false,mode="survival",difficulty="Molten",night=1,eventEasy=false,players=1,autoUpgrade=false,autoSkip=false,autoSkills=false,autoReturn=false,autoPickup=false,autoDaily=false,autoQuests=false,autoPlaytime=false,antiAFK=true,fps=30,capFPS=false,lowGraphics=false,planSlot=1,autoPlan=false,upgradeOrder="แรงก่อน",targetModes={},enabledSlots={},order={1,2,3,4,5},customOrder=false}
+local state={autoEnter=false,mode="survival",difficulty="Molten",night=1,eventEasy=false,players=1,autoUpgrade=false,autoSkip=false,autoSkills=false,autoReturn=false,autoPickup=false,autoDaily=false,autoQuests=false,autoPlaytime=false,autoCodes=false,codesText="",redeemedCodes={},antiAFK=true,fps=30,capFPS=false,lowGraphics=false,planSlot=1,autoPlan=false,upgradeOrder="แรงก่อน",targetModes={},enabledSlots={},order={1,2,3,4,5},customOrder=false}
 local plans={}
 local session={started=os.time(),rounds=0,wins=0,losses=0,seconds=0,coins=0,gems=0,history={}}
 local function read(path)
@@ -243,7 +243,7 @@ task.spawn(function()
 end)
 local WindUI=loadstring(__BUNDLE_READ("https://github.com/Footagesus/WindUI/releases/download/1.6.66/main.lua"))()
 pcall(function()WindUI:SetParent(player:WaitForChild("PlayerGui"))end)
-local Window=WindUI:CreateWindow({Title="TDS HUB • v1.0",Author="Noblesse779",Folder="TDSAuto",Size=UDim2.fromOffset(780,560),MinSize=Vector2.new(580,380),SideBarWidth=185,Resizable=true,Theme="Plant",Transparent=false,ToggleKey=Enum.KeyCode.RightShift,OpenButton={Title="TDS HUB",Enabled=true,Draggable=true,OnlyMobile=false}})
+local Window=WindUI:CreateWindow({Title="TDS HUB • v1.1",Author="Noblesse779",Folder="TDSAuto",Size=UDim2.fromOffset(780,560),MinSize=Vector2.new(580,380),SideBarWidth=185,Resizable=true,Theme="Plant",Transparent=false,ToggleKey=Enum.KeyCode.RightShift,OpenButton={Title="TDS HUB",Enabled=true,Draggable=true,OnlyMobile=false}})
 local function tab(name,icon)return Window:Tab({Title=name,Icon=icon})end
 local function label(tab,title)return tab:Paragraph({Title=title,Desc=""})end
 local function show(card,text)pcall(function()card:SetTitle(tostring(text))end)end
@@ -315,6 +315,55 @@ toggle(Rewards,"รับภารกิจที่เสร็จแล้ว"
 toggle(Rewards,"รับรางวัลเวลาเล่น","autoPlaytime")
 button(Rewards,"ตรวจรางวัลตอนนี้",reward)
 local rewardCard=label(Rewards,"รอเปิดรับรางวัล")
+local Codes=tab("แลกโค้ด","ticket")
+local codeStatus=label(Codes,"ยังไม่ได้กรอกโค้ด")
+local codeHistory=label(Codes,"ยังไม่มีผลการแลก")
+local codesBusy,codesCancel=false,false
+local attemptedCodes,codeResults={},{}
+local function redeemCodes(manual)
+    if codesBusy then return end
+    if inMatch()then show(codeStatus,"รอกลับล็อบบี้");return end
+    if not mods.Network then show(codeStatus,"รอเชื่อมระบบโค้ด");return end
+    codesBusy=true;codesCancel=false
+    task.spawn(function()
+        local ok,reason=pcall(function()
+            local unique,list={},{}
+            for code in state.codesText:gmatch("[^,%s;]+")do
+                if not unique[code]then unique[code]=true;list[#list+1]=code end
+            end
+            local sent,passed=0,0
+            for _,code in ipairs(list)do
+                if not app.alive or codesCancel or inMatch()or(not manual and not state.autoCodes)then break end
+                if not state.redeemedCodes[code]and(manual or not attemptedCodes[code])then
+                    show(codeStatus,"กำลังแลก: "..code)
+                    local called,result=network("Codes","Redeem",code)
+                    sent=sent+1
+                    local message
+                    if called and type(result)=="table"then
+                        attemptedCodes[code]=true
+                        if result.Result then state.redeemedCodes[code]=true;passed=passed+1;save()end
+                        message=result.Message or(result.Result and "สำเร็จ"or "โค้ดใช้ไม่ได้")
+                    else message="เชื่อมต่อไม่สำเร็จ";attemptedCodes[code]=true end
+                    table.insert(codeResults,1,code.." • "..tostring(message))
+                    while #codeResults>20 do table.remove(codeResults)end
+                    show(codeHistory,table.concat(codeResults,"\n"))
+                    local untilTime=os.clock()+2
+                    while app.alive and not codesCancel and os.clock()<untilTime do task.wait(0.1)end
+                end
+            end
+            show(codeStatus,"ส่ง "..sent.." โค้ด | สำเร็จ "..passed..(codesCancel and " | หยุดแล้ว"or ""))
+        end)
+        codesBusy=false
+        if not ok then show(codeStatus,"แลกโค้ดไม่สำเร็จ: "..tostring(reason))end
+    end)
+end
+Codes:Input({Title="โค้ด — คั่นด้วยช่องว่างหรือจุลภาค",Value=state.codesText,Placeholder="CODE1, CODE2, CODE3",Callback=function(value)
+    state.codesText=tostring(value or "");attemptedCodes={};save()
+end})
+toggle(Codes,"แลกโค้ดอัตโนมัติเมื่ออยู่ล็อบบี้","autoCodes",function(on)if on then redeemCodes(false)end end)
+button(Codes,"แลกโค้ดทั้งหมด",function()redeemCodes(true)end)
+button(Codes,"หยุดแลกโค้ด",function()state.autoCodes=false;codesCancel=true;save();show(codeStatus,"หยุดแลกโค้ด")end)
+task.spawn(function()while app.alive do task.wait(10);if state.autoCodes and not inMatch()then redeemCodes(false)end end end)
 local Bag=tab("กระเป๋า","backpack")
 local balanceCard=label(Bag,"รอข้อมูลเงิน")
 local bagCard=label(Bag,"รอข้อมูลกระเป๋า")
