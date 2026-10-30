@@ -35,7 +35,7 @@ if env.ChickenFarmStop then pcall(env.ChickenFarmStop) end
 local legacy=P:WaitForChild("PlayerGui"):FindFirstChild("ChickenMovementAddon")
 if legacy then legacy:Destroy() end
 local alive=true
-local cfg={farm=false,deposit=true,limit=8,speedOn=false,speed=16,buy=false,upgrade=false,expand=false,recycler=false,rebirth=false,reserve=0,radius=300}
+local cfg={farm=false,eggs=false,food=false,tower=false,boss=false,pumpkin=false,travel="เดิน",deposit=true,limit=8,speedOn=false,speed=16,buy=false,upgrade=false,expand=false,recycler=false,rebirth=false,reserve=0,radius=300}
 local status,started="พร้อม",os.clock()
 local oldHum,oldSpeed,lastSpeed
 local function restore()
@@ -53,10 +53,11 @@ end
 env.ChickenFarmStop=stop
 local WindUI=loadstring(__BUNDLE_READ("https://github.com/Footagesus/WindUI/releases/download/1.6.66/main.lua"))()
 pcall(function() WindUI:SetParent(P.PlayerGui) end)
-Window=WindUI:CreateWindow({Title="CHICKEN HUB • v1.2",Author="Noblesse779",Folder="ChickenFarm",Size=UDim2.fromOffset(780,560),SideBarWidth=185,Resizable=true,Theme="Plant",Transparent=false,ToggleKey=Enum.KeyCode.RightShift,OpenButton={Title="CHICKEN HUB",Enabled=true,Draggable=true,OnlyMobile=false}})
+Window=WindUI:CreateWindow({Title="CHICKEN HUB • v1.3",Author="Noblesse779",Folder="ChickenFarm",Size=UDim2.fromOffset(780,560),SideBarWidth=185,Resizable=true,Theme="Plant",Transparent=false,ToggleKey=Enum.KeyCode.RightShift,OpenButton={Title="CHICKEN HUB",Enabled=true,Draggable=true,OnlyMobile=false}})
 local farm=Window:Tab({Title="เก็บของ / ส่งของ",Icon="wheat"})
 local shop=Window:Tab({Title="ซื้อ / อัปเกรด",Icon="shopping-cart"})
 local chicken=Window:Tab({Title="ไก่ / Rebirth",Icon="egg"})
+local eventsTab=Window:Tab({Title="Tower / อีเวนต์",Icon="swords"})
 local settings=Window:Tab({Title="ตั้งค่า / สถานะ",Icon="settings"})
 local card=farm:Paragraph({Title="พร้อม",Desc=""})
 local shopStatus="ปิดระบบซื้อ / อัปเกรด"
@@ -68,7 +69,10 @@ end
 local function number(tab,title,key,min,max)
     tab:Input({Title=title,Value=tostring(cfg[key]),Callback=function(v)cfg[key]=math.clamp(tonumber(v) or cfg[key],min,max) end})
 end
-toggle(farm,"เดินเก็บของอัตโนมัติ", "farm")
+farm:Dropdown({Title="วิธีเคลื่อนที่",Values={"เดิน","วาร์ป"},Value=cfg.travel,Callback=function(v)cfg.travel=v end})
+toggle(farm,"เก็บของเฉพาะในคอกต่อสู้กลาง", "farm")
+toggle(farm,"เก็บไข่เฉพาะฟาร์มเรา", "eggs")
+toggle(farm,"เก็บอาหารเฉพาะคอกเรา", "food")
 toggle(farm,"ส่งของเข้าเครื่องบดอัตโนมัติ", "deposit")
 number(farm,"จำนวนที่แบกก่อนส่ง", "limit",1,100)
 number(farm,"ระยะค้นหาของ", "radius",20,1500)
@@ -83,6 +87,11 @@ toggle(shop,"ขยายคอก", "expand")
 toggle(shop,"อัปเกรดเครื่องบด", "recycler")
 number(shop,"เงินสำรอง", "reserve",0,1e15)
 toggle(chicken,"Rebirth เมื่อครบเงื่อนไข", "rebirth")
+toggle(eventsTab,"ลง Tower อัตโนมัติ", "tower")
+toggle(eventsTab,"ตีบอสไก่เมื่อเกิด", "boss")
+toggle(eventsTab,"ตีฟักทองเมื่อเกิด", "pumpkin")
+local combatStatus="ปิดระบบต่อสู้"
+local combatCard=eventsTab:Paragraph({Title=combatStatus,Desc=""})
 local mods
 local function modules()
     if mods then return mods end
@@ -116,9 +125,18 @@ local function origin(folder,prefix)
     return typeof(cf)=="CFrame" and cf.Position+Vector3.new(0,3,0) or nil
 end
 local path,waypoints,index,destination,lastPath=nil,nil,1,nil,0
+local lastWarp=0
 local function walk(target)
     local h,r=char();if not h or not r then return false end
     if (r.Position-target).Magnitude<5 then return true end
+    if cfg.travel=="วาร์ป" then
+        if os.clock()-lastWarp>=0.8 then
+            lastWarp=os.clock()
+            h:MoveTo(r.Position)
+            P.Character:PivotTo(CFrame.new(target)*r.CFrame.Rotation)
+        end
+        return (r.Position-target).Magnitude<5
+    end
     if not destination or (destination-target).Magnitude>3 or os.clock()-lastPath>5 then
         lastPath=os.clock();destination=target;waypoints=nil;index=1
         path=PF:CreatePath({AgentCanJump=true})
@@ -134,30 +152,113 @@ local function walk(target)
     h:MoveTo(point);return false
 end
 local rejected=setmetatable({},{__mode="k"})
+local function ownerOf(item)
+    local node=item
+    while node and node~=workspace do
+        local owner=node:GetAttribute("owner") or node:GetAttribute("Owner")
+        if owner~=nil then return tonumber(owner) end
+        node=node.Parent
+    end
+end
+local pitZone=require(RS.Features.Battle.PitZone)
+local coopView=require(RS.Features.Coop.CoopView)
+local gameConfig=require(RS.Content.GameConfig)
 local target,targetSince,lastCarry,lastChange,delivering=nil,0,0,os.clock(),false
 local function nearest()
     local _,r=char();if not r then return end
     local best,distance=nil,cfg.radius
-    for _,tag in ipairs({"StackPrompt","StackBeacon","NestEgg"}) do
+    local tags={}
+    if cfg.farm then tags={"StackPrompt","StackBeacon"} end
+    if cfg.eggs then tags[#tags+1]="NestEgg" end
+    for _,tag in ipairs(tags) do
         for _,item in ipairs(CS:GetTagged(tag)) do
-            local owner=item:GetAttribute("owner") or (item.Parent and item.Parent:GetAttribute("owner"))
-            local valid=item:IsDescendantOf(workspace) and (not owner or tonumber(owner)==P.UserId)
+            local owner=ownerOf(item)
+            local valid=item:IsDescendantOf(workspace) and (not owner or owner==0 or owner==P.UserId)
             if tag=="NestEgg" then valid=valid and tonumber(owner)==P.UserId end
             if item:IsA("ProximityPrompt") then valid=valid and item.Enabled end
             if valid and (not rejected[item] or os.clock()>rejected[item]) then
                 local pos=position(item)
                 local d=pos and (pos-r.Position).Magnitude
-                if d and d<distance then best,distance=item,d end
+                if d and d<distance and (tag=="NestEgg" or pitZone.contains(pos)) then best,distance=item,d end
             end
         end
     end
     return best
 end
 local lastPurchase,lastRebirth=0,0
+local lastOrder,lastTower=0,0
+local function ownTowerActive()
+    local arenas=workspace:FindFirstChild("Arenas")
+    local plot=P:GetAttribute("Plot")
+    local arena=arenas and plot and arenas:FindFirstChild("Arena"..tostring(plot))
+    return arena and arena:GetAttribute("TowerActive")==true
+end
+local eventOrder=false
+local function combat()
+    if not (cfg.tower or cfg.boss or cfg.pumpkin or eventOrder) then return end
+    local m=modules()
+    if ownTowerActive() then combatStatus="กำลังสู้ Tower";return true end
+    local eventState=require(P.PlayerScripts.UI["2d"].event.LiveEventState).events()
+    local pumpkinLive=cfg.pumpkin and eventState.pumpkinPinata~=nil
+    local bossId=workspace:GetAttribute("BossBodyId")
+    local bossLive=cfg.boss and typeof(bossId)=="string" and bossId~=""
+    if pumpkinLive or bossLive then
+        combatStatus=pumpkinLive and "ฟักทองเกิด • สั่งไก่ต่อสู้" or "บอสไก่เกิด • สั่งไก่ต่อสู้"
+        if os.clock()-lastOrder>=4 and m.mode.order()~="chaos" then
+            lastOrder=os.clock()
+            if m.controller:setOrder("chaos") then m.mode.order("chaos");eventOrder=true end
+        end
+        return true
+    end
+    if eventOrder then
+        if m.controller:setOrder("coop") then m.mode.order("coop");eventOrder=false end
+        combatStatus="อีเวนต์จบ • เรียกกลับคอก"
+        return true
+    end
+    if cfg.tower then
+        if os.clock()-lastTower<12 then return end
+        if m.mode.where()~="corral" then
+            combatStatus="รอไก่กลับคอกก่อนลง Tower"
+            if os.clock()-lastOrder>=4 then lastOrder=os.clock();if m.controller:setOrder("coop") then m.mode.order("coop") end end
+            return
+        end
+        lastTower=os.clock()
+        local result=m.remotes.invoke(m.remotes.defs.TowerStart)
+        if result and result.ok then m.mode.order("tower");combatStatus="เริ่ม Tower แล้ว"
+        else combatStatus="Tower • "..tostring(type(result)=="table" and (result.error or result.message) or "noResponse") end
+    else combatStatus="รอบอส / ฟักทองเกิด" end
+end
+local foodSlot,foodSince,foodBlocked=nil,0,{}
+local function collectFood()
+    if not cfg.food then foodSlot=nil;return end
+    local m=modules();local v=m.coop.coopView()
+    local point=origin("Coops","Coop")
+    if not v or not point then return end
+    local folder=workspace:FindFirstChild("Coops")
+    local model=folder and folder:FindFirstChild("Coop"..tostring(P:GetAttribute("Plot")))
+    local cf=model and model:GetAttribute("Origin")
+    if typeof(cf)~="CFrame" then return end
+    if foodSlot and (not v.gens[foodSlot] or v.gens[foodSlot].corn<=0 or os.clock()-foodSince>12) then
+        foodBlocked[foodSlot]=os.clock()+8;foodSlot=nil
+    end
+    if not foodSlot then
+        for slot,g in pairs(v.gens or {}) do
+            if g.corn>0 and (not foodBlocked[slot] or os.clock()>foodBlocked[slot]) then foodSlot=slot;foodSince=os.clock();break end
+        end
+    end
+    if foodSlot then
+        local p=coopView.slotLocal(foodSlot,v.slots,gameConfig.world.plotSize)
+        local flat=Vector3.new(p.X,0,p.Z)
+        local inward=flat.Magnitude>0 and -flat.Unit*3.5 or Vector3.new()
+        local targetPoint=cf:PointToWorldSpace(p+inward+Vector3.new(0,3.4,0))
+        status="เก็บอาหารคอกเรา • ช่อง "..tostring(foodSlot)
+        walk(targetPoint);return true
+    end
+end
 local function transactions()
     if not(cfg.buy or cfg.upgrade or cfg.expand or cfg.recycler or cfg.rebirth) then return end
     local m=modules()
-    if cfg.rebirth and os.clock()-lastRebirth>15 then
+    if cfg.rebirth and not ownTowerActive() and not eventOrder and os.clock()-lastRebirth>15 then
         local rb=m.data.rebirth();local count=type(rb)=="table" and rb.count or tonumber(rb) or 0
         local required=m.experiment.floorFor(P,count)
         if (m.data.towerBest() or 0)>=required then
@@ -226,6 +327,7 @@ task.spawn(function()
             if carry~=lastCarry then lastCarry=carry;lastChange=os.clock() end
             if cfg.deposit and carry>0 and (carry>=cfg.limit or os.clock()-lastChange>20) then delivering=true end
             if not cfg.deposit or carry==0 then delivering=false end
+            combat()
             if delivering then
                 local point=homeOverride or origin("Recyclers","Recycler")
                 status=point and "กำลังส่งของ • "..carry or "ไม่พบจุดเครื่องบด"
@@ -233,12 +335,13 @@ task.spawn(function()
                 return
             end
             if transactions() then return end
-            if not cfg.farm then return end
+            if not(cfg.farm or cfg.eggs) then collectFood();return end
+            if target and ((CS:HasTag(target,"NestEgg") and not cfg.eggs) or (not CS:HasTag(target,"NestEgg") and not cfg.farm)) then target=nil end
             if not target or not target:IsDescendantOf(workspace) or os.clock()-targetSince>18 then
                 if target then rejected[target]=os.clock()+20 end
                 target=nearest();targetSince=os.clock()
             end
-            if not target then status="รอของในระยะค้นหา";return end
+            if not target then if not collectFood() then status="รอของในคอก / ไข่ฟาร์มเรา" end;return end
             local pos=position(target);if not pos then target=nil;return end
             status="เดินเก็บ • "..target.Name
             if target:IsA("ProximityPrompt") and (pos-r.Position).Magnitude<=math.max(0,target.MaxActivationDistance-1) then
@@ -250,6 +353,7 @@ task.spawn(function()
         pcall(function()
             card:SetTitle(status)
             shopCard:SetTitle(shopStatus)
+            combatCard:SetTitle(combatStatus)
             detail:SetTitle(string.format("เวลา %d นาที • แบก %d • ความเร็ว %s",math.floor((os.clock()-started)/60),tonumber(P:GetAttribute("scrapCarry")) or 0,tostring(cfg.speed)))
         end)
         task.wait(0.5)
