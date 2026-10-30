@@ -1,4 +1,4 @@
--- CandyTD v6.30 • Remember / Record / Retry | SINGLE-FILE SOURCE BUNDLE
+-- CandyTD v6.31 • Remember / Record / Retry | SINGLE-FILE SOURCE BUNDLE
 -- No external Lua/data downloads; Roblox gameplay and Roblox-hosted assets remain online.
 -- WindUI
 -- MIT License
@@ -1678,7 +1678,7 @@ if not isMatch then
 end
 -- ═══════════ UI SETUP ═══════════
 local Window = Rayfield:CreateWindow({
-    Name = "CandyTD Auto-All v6.30 • Record + Retry",
+    Name = "CandyTD Auto-All v6.31 • Record + Retry",
     LoadingTitle = isMatch and "Match Mode" or "Lobby Mode",
     ConfigurationSaving = { Enabled = false },
     KeySystem = false,
@@ -2277,6 +2277,85 @@ FarmTab:CreateButton({Name="ล้างสถิติและเริ่ม�
 end})
 refreshFarmStats()
 task.spawn(function()while true do task.wait(2);local ok,reason=pcall(refreshFarmStats);if not ok then FarmStats.status="แสดงสถิติไม่สำเร็จ: "..tostring(reason)end end end)
+
+local InventoryTab=Window:CreateTab("กระเป๋าไอเทม",4483362460)
+local InventoryView={busy=false,profile=nil,cached=nil,status="รอข้อมูลกระเป๋า",path="CandyTD_Inventory_"..LocalPlayer.UserId.."_v1.json"}
+local inventoryStatus=InventoryTab:CreateLabel(InventoryView.status)
+local inventoryBalance=InventoryTab:CreateLabel("Gems: —")
+local inventoryItems=InventoryTab:CreateLabel("ยังไม่มีข้อมูลไอเทม")
+if type(readfile)=="function"then
+    local ok,text=pcall(readfile,InventoryView.path)
+    if ok then local valid,data=pcall(HttpService.JSONDecode,HttpService,text)
+        if valid and type(data)=="table"and type(data.items)=="table"then InventoryView.cached=data end
+    end
+end
+local function inventorySnapshot(profile)
+    local data={items={},names={},gems=tonumber(profile.gems),updatedAt=os.time()}
+    for id,count in pairs(profile.items)do
+        count=tonumber(count)
+        if count and count>0 then
+            id=tostring(id);data.items[id]=math.floor(count)
+            local def=Catalog and Catalog.ITEMS and Catalog.ITEMS[id]
+            data.names[id]=def and def.name or id
+        end
+    end
+    return data
+end
+local function renderInventory()
+    local profile=InventoryView.profile or Profile
+    if not isMatch and LobbyExtras then
+        local native=LobbyExtras.context()
+        if native and type(native.profile)=="table"then profile=native.profile end
+    end
+    local data,fromCache
+    if type(profile)=="table"and type(profile.items)=="table"then
+        data=inventorySnapshot(profile)
+        if not InventoryView.cached or data.gems~=InventoryView.cached.gems or HttpService:JSONEncode(data.items)~=HttpService:JSONEncode(InventoryView.cached.items)then
+            InventoryView.cached=data
+            if type(writefile)=="function"then pcall(writefile,InventoryView.path,HttpService:JSONEncode(data))end
+        end
+        InventoryView.status="ข้อมูลโปรไฟล์ล่าสุดที่ได้รับ"
+    else data=InventoryView.cached;fromCache=true end
+    if data then
+        local lines,total={},0
+        for id,count in pairs(data.items)do
+            local def=Catalog and Catalog.ITEMS and Catalog.ITEMS[id]
+            local name=def and def.name or(data.names and data.names[id])or id
+            lines[#lines+1]=tostring(name).." ×"..tostring(count);total=total+1
+        end
+        table.sort(lines)
+        inventoryBalance:Set("Gems: "..tostring(data.gems or "—").." | ไอเทม "..total.." ชนิด")
+        inventoryItems:Set(#lines>0 and table.concat(lines,"\n")or "ไม่มีไอเทม")
+        if fromCache then InventoryView.status="ข้อมูลที่บันทึกไว้ • "..os.date("%d/%m %H:%M",tonumber(data.updatedAt)or os.time()).." • ยังไม่ได้รับข้อมูลสดในด่าน"end
+    else
+        inventoryBalance:Set("Gems: —");inventoryItems:Set("ยังไม่ได้รับข้อมูลกระเป๋า")
+        InventoryView.status="ไม่พบข้อมูลกระเป๋าในด่านนี้"
+    end
+    inventoryStatus:Set(InventoryView.status)
+end
+local function refreshInventory()
+    if InventoryView.busy then return end
+    InventoryView.busy=true;inventoryStatus:Set("กำลังอ่านกระเป๋า")
+    task.spawn(function()
+        local ok,reason=pcall(function()
+            local remotes=RS:FindFirstChild("HubRemotes")
+            local remote=remotes and remotes:FindFirstChild("GetProfile")
+            if remote and remote:IsA("RemoteFunction")then
+                local response=remote:InvokeServer()
+                if type(response)=="table"and type(response.profile)=="table"then
+                    InventoryView.profile=response.profile
+                    if not isMatch then Profile=response.profile end
+                end
+            end
+            renderInventory()
+        end)
+        InventoryView.busy=false
+        if not ok then inventoryStatus:Set("อ่านกระเป๋าไม่สำเร็จ: "..tostring(reason))end
+    end)
+end
+InventoryTab:CreateButton({Name="รีเฟรชกระเป๋า",Callback=refreshInventory})
+refreshInventory()
+task.spawn(function()while true do task.wait(5);if not InventoryView.busy then pcall(renderInventory)end end end)
 ]=],
 ["lib:WindUI"]=[=[--[[
      _      ___         ____  ______
