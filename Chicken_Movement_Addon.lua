@@ -53,12 +53,14 @@ end
 env.ChickenFarmStop=stop
 local WindUI=loadstring(__BUNDLE_READ("https://github.com/Footagesus/WindUI/releases/download/1.6.66/main.lua"))()
 pcall(function() WindUI:SetParent(P.PlayerGui) end)
-Window=WindUI:CreateWindow({Title="CHICKEN HUB • v1.1",Author="Noblesse779",Folder="ChickenFarm",Size=UDim2.fromOffset(780,560),SideBarWidth=185,Resizable=true,Theme="Plant",Transparent=false,ToggleKey=Enum.KeyCode.RightShift,OpenButton={Title="CHICKEN HUB",Enabled=true,Draggable=true,OnlyMobile=false}})
+Window=WindUI:CreateWindow({Title="CHICKEN HUB • v1.2",Author="Noblesse779",Folder="ChickenFarm",Size=UDim2.fromOffset(780,560),SideBarWidth=185,Resizable=true,Theme="Plant",Transparent=false,ToggleKey=Enum.KeyCode.RightShift,OpenButton={Title="CHICKEN HUB",Enabled=true,Draggable=true,OnlyMobile=false}})
 local farm=Window:Tab({Title="เก็บของ / ส่งของ",Icon="wheat"})
 local shop=Window:Tab({Title="ซื้อ / อัปเกรด",Icon="shopping-cart"})
 local chicken=Window:Tab({Title="ไก่ / Rebirth",Icon="egg"})
 local settings=Window:Tab({Title="ตั้งค่า / สถานะ",Icon="settings"})
 local card=farm:Paragraph({Title="พร้อม",Desc=""})
+local shopStatus="ปิดระบบซื้อ / อัปเกรด"
+local shopCard=shop:Paragraph({Title=shopStatus,Desc=""})
 local detail=settings:Paragraph({Title="เริ่มแล้ว",Desc=""})
 local function toggle(tab,title,key)
     tab:Toggle({Title=title,Value=cfg[key],Callback=function(v)cfg[key]=v;if key=="speedOn" and not v then restore() end end})
@@ -168,10 +170,14 @@ local function transactions()
         end
     end
     if os.clock()-lastPurchase<4 then return end
-    local v=m.coop.coopView();local rv=m.recycler.recyclerView();local choices={}
+    local v=(cfg.buy or cfg.upgrade or cfg.expand) and m.coop.coopView() or nil
+    local rv=cfg.recycler and m.recycler.recyclerView() or nil
+    local choices={}
     local money=m.data.money():toNumber()-cfg.reserve
+    local nextCost=nil
     local function add(cost,label,fn,point)
         cost=tonumber(cost)
+        if cost and (not nextCost or cost<nextCost) then nextCost=cost end
         if cost and cost>=0 and cost<=money then choices[#choices+1]={cost=cost,label=label,fn=fn,point=point} end
     end
     if v then
@@ -179,7 +185,7 @@ local function transactions()
         if cfg.buy and v.buySlot then add(v.buyCost,"ซื้อเครื่องผลิต",function()return m.coop.buyGenerator(v.buySlot)end,point) end
         if cfg.expand and v.canExpand then add(v.expandCost,"ขยายคอก",m.coop.expand,point) end
         if cfg.upgrade then for slot,g in pairs(v.gens or {}) do
-            if g.canUpgrade then local s=slot;add(g.upgradeCost,"อัปเกรดเครื่องผลิต",function()return m.coop.upgradeGenerator(s)end,point) end
+            if g.canUpgrade then local s=slot;add(g.upgradeCost,"อัปเกรดเครื่องผลิตช่อง "..tostring(s),function()return m.coop.upgradeGenerator(s)end,point) end
         end end
     end
     if cfg.recycler and rv and rv.canUpgrade and not rv.locked and not rv.floorLocked and not rv.busy then add(rv.upgradeCost,"อัปเกรดเครื่องบด",m.recycler.upgrade,origin("Recyclers","Recycler")) end
@@ -187,10 +193,25 @@ local function transactions()
     local choice=choices[1]
     if choice then
         status=choice.label
-        if choice.point and not walk(choice.point) then return true end
+        -- Native purchase buttons invoke directly; an unreachable coop centre must not block purchases.
+        shopStatus=choice.label.." • ราคา "..tostring(choice.cost)
+        pcall(function()shopCard:SetTitle(shopStatus)end)
         lastPurchase=os.clock();local result=choice.fn()
-        status=result and result.ok and choice.label.." สำเร็จ" or choice.label.." ไม่สำเร็จ"
+        local reason=type(result)=="table" and (result.error or result.message or result.reason) or "noResponse"
+        status=result and result.ok and choice.label.." สำเร็จ" or choice.label.." • "..tostring(reason or "rejected")
+        shopStatus=status
         return true
+    end
+    if nextCost then
+        shopStatus=string.format("รอเงิน • ใช้ได้ %.0f / ต้องใช้ %.0f",money,nextCost)
+    elseif not v and (cfg.buy or cfg.upgrade or cfg.expand) then
+        shopStatus="รอข้อมูลคอกจากเกม"
+    elseif rv and (rv.locked or rv.floorLocked) then
+        shopStatus="เครื่องบดติดเงื่อนไข • Tower ชั้น "..tostring(rv.floorReq or "?")
+    elseif rv and rv.busy then
+        shopStatus="เครื่องบดกำลังทำงาน"
+    else
+        shopStatus="ไม่มีรายการที่อัปได้ • ตรวจเลเวลสูงสุด / เงื่อนไข"
     end
 end
 task.spawn(function()
@@ -225,9 +246,10 @@ task.spawn(function()
                 rejected[target]=os.clock()+3;target=nil
             else walk(pos) end
         end)
-        if not ok then status="ข้อผิดพลาด • "..tostring(err):sub(1,90);warn(err) end
+        if not ok then status="ข้อผิดพลาด • "..tostring(err):sub(1,160);shopStatus=status;warn(err) end
         pcall(function()
             card:SetTitle(status)
+            shopCard:SetTitle(shopStatus)
             detail:SetTitle(string.format("เวลา %d นาที • แบก %d • ความเร็ว %s",math.floor((os.clock()-started)/60),tonumber(P:GetAttribute("scrapCarry")) or 0,tostring(cfg.speed)))
         end)
         task.wait(0.5)
