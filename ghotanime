@@ -1,4 +1,4 @@
--- CandyTD v6.27 • Remember / Record / Retry | SINGLE-FILE SOURCE BUNDLE
+-- CandyTD v6.28 • Remember / Record / Retry | SINGLE-FILE SOURCE BUNDLE
 -- No external Lua/data downloads; Roblox gameplay and Roblox-hosted assets remain online.
 -- WindUI
 -- MIT License
@@ -137,7 +137,7 @@ local SAVE_FILE = "CandyTD_AutoAll_v1.json"
 -- ═══════════ STATE ═══════════
 local DefaultState = {
     autoUpgrade=true, autoStartWave=false, autoReplay="off", activeSlot=0, autoSellExcess=false,
-    autoRetryLoss=true,planPlayback="snapshot",recordSlot=1,autoBattle=false,autoEnterBattle=false,autoReturnChallenge=false,autoBattleNext=false,autoBattleMode="stage",autoInfiniteWorld="candy",autoReturnInfinite=false,infiniteTargetWave=50,autoBattleStage=1,autoChallenge=1,autoHalloweenReplay=false,autoSkills=false,antiAFK=true,fpsLimit=false,fpsCap=30,lowGraphics=true,
+    autoRetryLoss=true,planPlayback="snapshot",recordSlot=1,autoBattle=false,autoEnterBattle=false,autoReturnChallenge=false,autoBattleNext=false,autoHeroSlots={},autoBattleMode="stage",autoInfiniteWorld="candy",autoReturnInfinite=false,infiniteTargetWave=50,autoBattleStage=1,autoChallenge=1,autoHalloweenReplay=false,autoSkills=false,antiAFK=true,fpsLimit=false,fpsCap=30,lowGraphics=true,
     traitUnitId="",traitTargets={},statsUnitId="",statsTargets={dmg="S",range="ไม่กำหนด",spa="ไม่กำหนด"},statsLocks={},craftRecipe="",summonBanner="normal",lobbyRewardsVersion=0,evolveUnitId="",evolveTarget="",evolvePartner="",
     autoSummon=false, summonMode="10",
     autoClaimDaily=false, autoClaimLevels=false, autoClaimQuests=false, autoClaimPass=false,
@@ -1120,6 +1120,11 @@ if not isMatch then
 end
 
 local AutoBattle={status="ปิดเล่นอัตโนมัติ",map=nil,points={},blocked={},queued=false,challengeStatus="รอข้อมูล Challenges"}
+State.autoHeroSlots=type(State.autoHeroSlots)=="table"and State.autoHeroSlots or {}
+function AutoBattle.slotEnabled(slot)
+    local value=State.autoHeroSlots[tostring(slot)]
+    return value~=false
+end
 AutoBattle.entryDeadline=math.huge
 function AutoBattle.cooldownRemaining()
     if AutoBattle.entryDeadline==math.huge then return 10 end
@@ -1238,8 +1243,8 @@ if isMatch then
                         if ok and type(data)=="table"then slots=data.slots end
                     end
                     local seen={}
-                    for _,kind in pairs(type(slots)=="table"and slots or {})do
-                        local def=type(kind)=="string"and ctx.UNITS[kind]
+                    for slot,kind in pairs(type(slots)=="table"and slots or {})do
+                        local def=AutoBattle.slotEnabled(slot)and type(kind)=="string"and ctx.UNITS[kind]
                         if def and def.LEVELS and def.LEVELS[1]and not seen[kind]then
                             seen[kind]=true
                             local cap=Catalog.placeCap and Catalog.placeCap(kind)or 3
@@ -1252,7 +1257,7 @@ if isMatch then
                     table.sort(heroes,function(a,b)if a.power==b.power then return a.kind<b.kind end;return a.power>b.power end)
                     local hero=heroes[1]
                     if total>=(tonumber(MatchInfo.maxTowers)or 20)then AutoBattle.status="วางครบจำนวนสูงสุดแล้ว"
-                    elseif not hero then AutoBattle.status=type(slots)=="table"and "วางครบโควตาทีมแล้ว"or "รอข้อมูลตัวละครที่นำลงสนาม"
+                    elseif not hero then AutoBattle.status=type(slots)=="table"and "ช่องที่เปิดวางครบแล้ว หรือยังไม่ได้เปิดช่องฮีโร่"or "รอข้อมูลตัวละครที่นำลงสนาม"
                     elseif (tonumber(gameState().money)or 0)<(placeCost(hero.kind)or math.huge)then AutoBattle.status="เก็บเงินรอวาง "..tostring(hero.kind)
                     else
                         local best,bestScore,bestKey
@@ -1324,6 +1329,15 @@ do
             end
         end
     end
+end
+function FarmStats.timeText(seconds)
+    seconds=math.max(0,math.floor(tonumber(seconds)or 0))
+    return string.format("%d ชม. %02d นาที %02d วินาที",math.floor(seconds/3600),math.floor(seconds/60)%60,seconds%60)
+end
+function FarmStats.currentSeconds()
+    if not isMatch then return 0 end
+    local record=FarmStats.data.rounds[FarmStats.roundKey()]
+    return record and record.seconds or math.max(0,os.time()-FarmStats.roundStarted)
 end
 function FarmStats.save()
     if type(writefile)~="function"then FarmStats.status="ตัวรันไม่รองรับบันทึกไฟล์ • สถิติอยู่เฉพาะรอบเปิดสคริปต์นี้";return end
@@ -1652,7 +1666,7 @@ if not isMatch then
 end
 -- ═══════════ UI SETUP ═══════════
 local Window = Rayfield:CreateWindow({
-    Name = "CandyTD Auto-All v6.27 • Record + Retry",
+    Name = "CandyTD Auto-All v6.28 • Record + Retry",
     LoadingTitle = isMatch and "Match Mode" or "Lobby Mode",
     ConfigurationSaving = { Enabled = false },
     KeySystem = false,
@@ -2066,6 +2080,14 @@ EntryTab:CreateToggle({Name="เข้าด่านอัตโนมัติ
     saveData()
 end})
 EntryTab:CreateLabel("ปิดสวิตช์นี้จากในด่านได้ ค่าบันทึกเชื่อมกับล็อบบี้ • ไม่หยุดการเล่นรอบปัจจุบัน")
+AutoTab:CreateSection("เลือกช่องฮีโร่ที่จะวาง")
+AutoTab:CreateLabel("เลือกได้หลายช่อง 1–6 • ปิดช่องไหนจะหยุดวางเพิ่มจากช่องนั้น • ตัวที่วางแล้วจะไม่ถูกขาย")
+for slot=1,6 do
+    local selectedSlot=slot
+    AutoTab:CreateToggle({Name="วางฮีโร่ช่อง "..selectedSlot,CurrentValue=AutoBattle.slotEnabled(selectedSlot),Callback=function(on)
+        State.autoHeroSlots[tostring(selectedSlot)]=on;saveData()
+    end})
+end
 AutoTab:CreateToggle({Name="เปิดเล่นอัตโนมัติ",CurrentValue=State.autoBattle,Callback=AutoBattle.enable})
 AutoTab:CreateToggle({Name="ชนะแล้วไปด่านถัดไป (ปิด = ฟาร์มด่านเดิม)",CurrentValue=State.autoBattleNext,Callback=function(on)
     State.autoBattleNext=on
@@ -2216,13 +2238,13 @@ local function refreshFarmStats()
     for _,stage in pairs(FarmStats.data.stages)do
         completed=completed+stage.completed;wins=wins+stage.wins;losses=losses+stage.losses;gems=gems+stage.gems;seconds=seconds+stage.seconds
         for id,count in pairs(stage.items)do items[id]=(items[id]or 0)+count end
-        stages[#stages+1]=string.format("%s • %s: %d รอบ | ชนะ %d แพ้ %d | %d gems",stage.mode,stage.name,stage.completed,stage.wins,stage.losses,stage.gems)
+        stages[#stages+1]=string.format("%s • %s: %d รอบ | ชนะ %d แพ้ %d | %d gems",stage.mode,stage.name,stage.completed,stage.wins,stage.losses,stage.gems).." | เวลารวม "..FarmStats.timeText(stage.seconds)
     end
     table.sort(stages)
     if isMatch then
         local key,id,mode=FarmStats.stageKey()
         local stage=FarmStats.data.stages[key];local def=Catalog and Catalog.stage and Catalog.stage(id)
-        farmCurrent:Set(string.format("ด่านปัจจุบัน: %s • %s\nจบแล้ว %d รอบ | ชนะ %d แพ้ %d | ได้ %d gems",mode,def and def.name or tostring(id),stage and stage.completed or 0,stage and stage.wins or 0,stage and stage.losses or 0,stage and stage.gems or 0).."\n"..FarmStats.itemText(stage and stage.items or {}))
+        farmCurrent:Set(string.format("ด่านปัจจุบัน: %s • %s\nจบแล้ว %d รอบ | ชนะ %d แพ้ %d | ได้ %d gems",mode,def and def.name or tostring(id),stage and stage.completed or 0,stage and stage.wins or 0,stage and stage.losses or 0,stage and stage.gems or 0).."\nรอบนี้ติดตามแล้ว: "..FarmStats.timeText(FarmStats.currentSeconds()).." | ด่านนี้รอบที่จบรวม: "..FarmStats.timeText(stage and stage.seconds or 0).."\n"..FarmStats.itemText(stage and stage.items or {}))
     else farmCurrent:Set("อยู่ล็อบบี้ • สถิติเก็บต่อจากสนามต่อสู้และไฟล์เดิม")end
     farmSummary:Set(string.format("รวม %d รอบ | ชนะ %d แพ้ %d\nได้รับ %d gems | เวลาที่ติดตามในรอบจบ %d นาที %d วินาที",completed,wins,losses,gems,math.floor(seconds/60),seconds%60))
     farmItems:Set("ไอเทมรวม: "..FarmStats.itemText(items))
@@ -2232,7 +2254,7 @@ local function refreshFarmStats()
         if index>10 then break end
         local record=FarmStats.data.rounds[key]
         if record then local stage=FarmStats.data.stages[record.stage]
-            history[#history+1]=string.format("%s • %s • %s • +%d gems • %s",os.date("%H:%M",record.endedAt),stage and stage.name or record.stage,record.won and "ชนะ"or "แพ้",record.gems,record.reported and(record.reason or FarmStats.itemText(record.items))or "ยังไม่ได้รับรายงานรางวัล")
+            history[#history+1]=string.format("%s • %s • %s • +%d gems • %s",os.date("%H:%M",record.endedAt),stage and stage.name or record.stage,record.won and "ชนะ"or "แพ้",record.gems,record.reported and(record.reason or FarmStats.itemText(record.items))or "ยังไม่ได้รับรายงานรางวัล").." | ใช้เวลา "..FarmStats.timeText(record.seconds)
         end
     end
     farmHistory:Set(#history>0 and table.concat(history,"\n")or "ยังไม่มีประวัติรอบ")
