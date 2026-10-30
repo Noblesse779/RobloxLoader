@@ -1,4 +1,4 @@
--- CandyTD v6.29 • Remember / Record / Retry | SINGLE-FILE SOURCE BUNDLE
+-- CandyTD v6.30 • Remember / Record / Retry | SINGLE-FILE SOURCE BUNDLE
 -- No external Lua/data downloads; Roblox gameplay and Roblox-hosted assets remain online.
 -- WindUI
 -- MIT License
@@ -64,7 +64,7 @@ function Rayfield:CreateWindow(options)
             return tab:Input({Title=options.Name,Placeholder=options.Placeholder or "",Value=options.CurrentValue or "",Callback=options.Callback})
         end
         function wrapped:CreateButton(options)
-            local button=tab:Button({Title=options.Name or "Button",Desc=options.Description,Callback=options.Callback})
+            local button=tab:Button({Title=options.Name or "Button",Desc=nil,Callback=options.Callback})
             return button
         end
         function wrapped:CreateToggle(options)
@@ -76,7 +76,7 @@ function Rayfield:CreateWindow(options)
                 proxy.CurrentValue=value
                 if options.Callback then options.Callback(value)end
             end
-            nativeToggle=tab:Toggle({Title=options.Name or "Toggle",Desc=options.Description,Value=proxy.CurrentValue,Callback=changed})
+            nativeToggle=tab:Toggle({Title=options.Name or "Toggle",Desc=nil,Value=proxy.CurrentValue,Callback=changed})
             function proxy:Set(value)
                 value=value==true
                 if self.CurrentValue==value then return end
@@ -103,7 +103,7 @@ function Rayfield:CreateWindow(options)
             end
             local proxy={CurrentOption=type(current)=="table" and current or {current}}
             local dropdown=tab:Dropdown({
-                Title=options.Name or "Dropdown",Desc=options.Description,Values=choices,Value=value,
+                Title=options.Name or "Dropdown",Desc=nil,Values=choices,Value=value,
                 Multi=multiple,AllowNone=false,SearchBarEnabled=#choices>10,
                 Callback=function(selected)
                     local values=type(selected)=="table" and selected or {selected}
@@ -1678,7 +1678,7 @@ if not isMatch then
 end
 -- ═══════════ UI SETUP ═══════════
 local Window = Rayfield:CreateWindow({
-    Name = "CandyTD Auto-All v6.29 • Record + Retry",
+    Name = "CandyTD Auto-All v6.30 • Record + Retry",
     LoadingTitle = isMatch and "Match Mode" or "Lobby Mode",
     ConfigurationSaving = { Enabled = false },
     KeySystem = false,
@@ -1716,7 +1716,6 @@ if isMatch then
     task.spawn(function()while true do task.wait(1);resultStatus:Set(matchStatus.." • "..playbackStatus)end end)
     local SlotsTab=Window:CreateTab("Auto Slots",6034689657)
     SlotsTab:CreateSection("จำกระดาน + อัดการวาง")
-    SlotsTab:CreateLabel("อัดวาง/อัปเกรด/ขาย/เป้าหมาย/สกิล/เวฟ/ความเร็ว • ปิดออโต้อัปเกรดเมื่อต้องการเล่นตามลำดับอัปในเทป")
     SlotsTab:CreateDropdown({Name="วิธีเล่นแผน",Options={"จำกระดานตามเวฟ","เล่นเทปที่อัด"},
         CurrentOption={State.planPlayback=="record"and "เล่นเทปที่อัด"or "จำกระดานตามเวฟ"},
         Callback=function(o)
@@ -1782,7 +1781,6 @@ else
     local LB = Window:CreateTab("ทีม / ล็อบบี้", 4483362459)
     local SummonTab=Window:CreateTab("สุ่มตัวละคร",4483362459)
     local RewardsTab=Window:CreateTab("รับรางวัล",4483362459)
-    LB:CreateLabel("เมนูตัวละครใช้เฉพาะทีม 6 ช่องด้านล่าง • เปลี่ยนทีมแล้วกดรีเฟรชทีมในเมนูที่ต้องการ")
     local teamSummary=LB:CreateLabel("กำลังอ่านทีม")
     task.spawn(function()while true do task.wait(2);local lines={};for _,entry in ipairs(LobbyRoll.team())do lines[#lines+1]="ช่อง "..entry.slot.." • "..LobbyRoll.unitName(entry.unit.kind).." • Lv."..tostring(entry.unit.level or 1)end;teamSummary:Set(#lines>0 and table.concat(lines,"\n")or "ยังไม่ได้ใส่ตัวละครในทีม")end end)
     SummonTab:CreateSection("สุ่มตัวละคร")
@@ -1808,7 +1806,6 @@ else
     end})
     task.spawn(function()while true do task.wait(0.5);rewardStatus:Set(LobbyExtras.rewardStatus)end end)
     local CF=Window:CreateTab("คราฟต์",4483362461)
-    CF:CreateLabel("สูตรและจำนวนวัตถุดิบอ่านจากเกม • การคราฟต์ใช้ไอเทมจริง")
     local craftMap,craftOptions={},{}
     for _,recipe in ipairs(Catalog and Catalog.CRAFTS or {})do
         local def=Catalog.ITEMS[recipe.id];local label=def and def.name or recipe.id
@@ -1834,7 +1831,6 @@ else
         end
     end end)
     local GM=Window:CreateTab("เมนูเกมทั้งหมด",4483362460)
-    GM:CreateLabel("เปิดหน้าต่างเดิมของเกม • กด Right Shift ซ่อนเมนูสคริปต์เพื่อใช้งาน • การซื้อ/ลบ/เริ่มกิจกรรมให้เลือกเองในหน้าต่างเกม")
     for _,entry in ipairs({
         {"inventory","กระเป๋าตัวละคร / จัดทีม / ล็อกตัว / สกิน"},
         {"items","กระเป๋าไอเทม"},{"summon","สุ่มตัวละคร / แบนเนอร์กิจกรรม"},
@@ -1868,7 +1864,6 @@ else
     end})
 
     local EVO=Window:CreateTab("วิวัฒนาการ",4483362461)
-    EVO:CreateLabel("เลือกเฉพาะตัวที่ใส่ในทีมและร่างปลายทาง • สูตรผสมต้องเลือกตัวคู่ด้วย • กดครั้งเดียวต่อการวิวัฒนาการ")
     local evolveUnits,evolvePaths,evolvePartners={},{},{}
     local sourcePicker,pathPicker,partnerPicker
     local evolveStatus=EVO:CreateLabel("เลือกตัวละครก่อน")
@@ -1978,7 +1973,6 @@ else
         for _,label in ipairs(options)do if table.find(State.traitTargets,traitChoices[label])then selected[#selected+1]=label end end
         return selected
     end
-    RT:CreateLabel("เลือกเฉพาะตัวในช่องทีมด้านล่าง • หยุดเมื่อได้ Trait ใดก็ได้ที่เลือก หรือคริสตัลหมด")
     local options=unitOptions()
     traitPicker=RT:CreateDropdown({Name="ช่องทีมที่จะรีโรล",Options=options,CurrentOption={selectedUnit(State.traitUnitId,options)},Callback=function(o)selectUnit("trait",o)end})
     local traits=traitOptions()
@@ -1990,9 +1984,6 @@ else
     RT:CreateButton({Name="หยุดรีโรล",Callback=function()LobbyRoll.stop("trait")end})
     local traitStatus=RT:CreateLabel(LobbyRoll.traitStatus)
     local traitCurrent=RT:CreateLabel("ยังไม่เลือกตัวละคร")
-    SR:CreateLabel("เลือกเกรดขั้นต่ำแต่ละค่า • ล็อกค่าที่ถึงเป้าแล้วอัตโนมัติ • หยุดเมื่อครบเป้าหมายหรือของหมด")
-    SR:CreateLabel("ไม่ล็อก: 1 Juice • ล็อก 1 ค่า: 2 Juice • ล็อก 2 ค่า: 3 Juice + 100 gems / ครั้ง")
-    SR:CreateLabel("ล็อกค่าปัจจุบันเองได้สูงสุด 2 ค่า • ค่าที่ถึงเกรดเป้าหมายจะล็อกให้อัตโนมัติ")
     statsPicker=SR:CreateDropdown({Name="ช่องทีมที่จะรีสเตตัส",Options=options,CurrentOption={selectedUnit(State.statsUnitId,options)},Callback=function(o)selectUnit("stats",o)end})
     LobbyRoll.modules()
     local gradeOptions={"ไม่กำหนด"}
@@ -2071,7 +2062,6 @@ SettingsTab:CreateToggle({Name="ภาพต่ำสุด — ปิดเง�
 SettingsTab:CreateSection("เซิร์ฟเวอร์")
 SettingsTab:CreateButton({Name="รีจอยเซิร์ฟเวอร์เดิม",Callback=ClientSettings.rejoin})
 SettingsTab:CreateButton({Name="กลับหน้าหลัก / ล็อบบี้เกม",Callback=ClientSettings.home})
-SettingsTab:CreateLabel("บันทึกข้อมูลก่อนย้าย • หลังย้ายเซิร์ฟเวอร์ให้รันสคริปต์ใหม่ • Anti-AFK ไม่ป้องกันเน็ตหลุด")
 local SettingsStatus=SettingsTab:CreateLabel(ClientSettings.status)
 task.spawn(function()while true do task.wait(0.5);SettingsStatus:Set(ClientSettings.status)end end)
 
@@ -2080,7 +2070,6 @@ local EntryTab=Window:CreateTab("เข้าด่าน / โหมด",448336
 local ChallengeTab=Window:CreateTab("Challenges",4483362460)
 local InfiniteTab=Window:CreateTab("Infinite",4483362460)
 local HalloweenTab=Window:CreateTab("ฮาโลวีน",4483362460)
-AutoTab:CreateLabel("ไม่ต้องอัด • เลือกตัวแรงจากทีมที่นำลงสนาม • วางใกล้จุดเกิดศัตรูและให้ระยะยิงครอบคลุมทางโค้ง")
 EntryTab:CreateToggle({Name="เข้าด่านอัตโนมัติเมื่ออยู่ล็อบบี้ — ค่าเดียวกันทุกแมพ",CurrentValue=State.autoEnterBattle,Callback=function(on)
     State.autoEnterBattle=on
     State.autoPlay=false
@@ -2091,9 +2080,7 @@ EntryTab:CreateToggle({Name="เข้าด่านอัตโนมัติ
     else AutoBattle.status="ปิดเข้าออโต้แล้ว • กลับล็อบบี้จะไม่เข้าด่านเอง"end
     saveData()
 end})
-EntryTab:CreateLabel("ปิดสวิตช์นี้จากในด่านได้ ค่าบันทึกเชื่อมกับล็อบบี้ • ไม่หยุดการเล่นรอบปัจจุบัน")
 AutoTab:CreateSection("เลือกช่องฮีโร่ที่จะวาง")
-AutoTab:CreateLabel("เลือกได้หลายช่อง 1–6 • ปิดช่องไหนจะหยุดวางเพิ่มจากช่องนั้น • ตัวที่วางแล้วจะไม่ถูกขาย")
 for slot=1,6 do
     local selectedSlot=slot
     AutoTab:CreateToggle({Name="วางฮีโร่ช่อง "..selectedSlot,CurrentValue=AutoBattle.slotEnabled(selectedSlot),Callback=function(on)
@@ -2120,7 +2107,6 @@ showHeroOrder()
 AutoTab:CreateToggle({Name="อัปเกรดให้ตันก่อนวางตัวถัดไป",CurrentValue=State.autoMaxBeforePlace,Callback=function(on)
     State.autoMaxBeforePlace=on;if on then State.autoUpgrade=true end;saveData()
 end})
-AutoTab:CreateLabel("วางตามลำดับช่องที่เปิดไว้จนเต็มโควตาช่องนั้นก่อนช่องถัดไป • เปิดอัปให้ตัน: วางทีละตัวแล้วเก็บเงินอัปให้เต็มก่อนวางเพิ่ม")
 AutoTab:CreateToggle({Name="เปิดเล่นอัตโนมัติ",CurrentValue=State.autoBattle,Callback=AutoBattle.enable})
 AutoTab:CreateToggle({Name="ชนะแล้วไปด่านถัดไป (ปิด = ฟาร์มด่านเดิม)",CurrentValue=State.autoBattleNext,Callback=function(on)
     State.autoBattleNext=on
@@ -2133,7 +2119,6 @@ end})
 local challengeReturnStatus=ChallengeTab:CreateLabel(ChallengeReturn.status)
 task.spawn(function()while true do task.wait(1);challengeReturnStatus:Set(ChallengeReturn.status)end end)
 ChallengeTab:CreateButton({Name="กลับล็อบบี้ตอนนี้",Callback=function()AutoBattle.queue();ClientSettings.home()end})
-ChallengeTab:CreateLabel("ถ้าเปิดกลับล็อบบี้ จะไม่กดเล่นซ้ำ/ด่านถัดไปใน Challenge • เปิดเข้าด่านอัตโนมัติไว้ด้วยเพื่อเข้าใหม่")
 InfiniteTab:CreateToggle({Name="Infinite: กลับล็อบบี้เมื่อจบเวฟเป้าหมาย",CurrentValue=State.autoReturnInfinite,Callback=function(on)
     State.autoReturnInfinite=on;saveData();if on then AutoBattle.queue()end
 end})
@@ -2144,10 +2129,8 @@ InfiniteTab:CreateInput({Name="Infinite: กรอกเวฟอื่นเอ
     local wave=tonumber(value)
     if wave and wave>=1 and wave<=100000 then State.infiniteTargetWave=math.floor(wave);saveData()end
 end})
-InfiniteTab:CreateLabel("นับเมื่อจบเวฟนั้นแล้ว ไม่ออกตอนเพิ่งเริ่ม • เปิดเข้าด่านอัตโนมัติไว้เพื่อวน Infinite โลกเดิมหลังกลับล็อบบี้")
 local infiniteStatus=InfiniteTab:CreateLabel(InfiniteTarget.status)
 task.spawn(function()while true do task.wait(1);infiniteStatus:Set(InfiniteTarget.status)end end)
-AutoTab:CreateLabel("เปิดระบบนี้จะเปิดเวฟ/อัปเกรด/สกิล/แพ้เล่นซ้ำ • ใช้เฉพาะทีมที่ใส่มา ไม่เปลี่ยนทีมและไม่ขายตัวเอง")
 local autoStatus=AutoTab:CreateLabel(AutoBattle.status)
 if not isMatch then
     local entryPicker,entryMap,refreshEntryOptions
@@ -2197,8 +2180,6 @@ if not isMatch then
         entryPicker:Refresh(list);entryPicker:Set({selected});refreshingEntry=false
     end
     EntryTab:CreateButton({Name="รีเฟรชรายการด่าน / โลก",Callback=function()refreshProfile();buildStageList();refreshEntryOptions()end})
-    EntryTab:CreateLabel("เลือก Infinite แล้วรายการจะแสดงโลก Infinite เท่านั้น • ตั้งเวฟเป้าหมายในแท็บ Infinite")
-    InfiniteTab:CreateLabel("เลือกโลกได้ที่ เข้าด่าน / โหมด → Infinite → ด่าน / โลกที่จะเข้า")
     local challenges=ChallengeTab:CreateLabel("กำลังอ่าน Challenges")
     local function refreshChallenges()
         local lines={}
@@ -2213,18 +2194,13 @@ if not isMatch then
 
     refreshChallenges()
 else
-    AutoTab:CreateLabel("อยู่ในด่านแล้ว: เปิดสวิตช์เพื่อเริ่มวางตัวได้ทันที • หากกำลังอัดหรือเล่นเทป ให้หยุดก่อน")
 end
-AutoTab:CreateLabel("หลังย้ายเซิร์ฟเวอร์จะรันต่อให้เมื่อรองรับ queue_on_teleport มิฉะนั้นต้องรันลิงก์เดิมใหม่ • ไม่รับประกันชัยชนะทุกทีม/ทุกเงื่อนไข")
 task.spawn(function()while true do task.wait(1);autoStatus:Set(AutoBattle.status)end end)
 
-AutoTab:CreateLabel("เลือกโหมดและเปิดวาร์ปที่ เข้าด่าน / โหมด • ตั้งเป้าเวฟที่ Infinite • ตั้งเล่นต่อใช้นมที่ ฮาโลวีน")
 HalloweenTab:CreateSection("Halloween Raid — Bug Milk")
 HalloweenTab:CreateToggle({Name="ใช้นมเล่นต่ออัตโนมัติเมื่อจบรอบ",CurrentValue=State.autoHalloweenReplay,Callback=function(on)
     State.autoHalloweenReplay=on;saveData();if on then AutoBattle.queue()end
 end})
-HalloweenTab:CreateLabel("เข้ากิจกรรมรอบแรกจากประตูเกม • เมื่อจบรอบ ระบบตรวจนมและจ่ายตามราคาที่เกมกำหนด • ไม่ซื้อหรือเติมนมให้เอง")
-HalloweenTab:CreateLabel("ใช้ได้ทั้งชนะและแพ้เมื่อเกมอนุญาตเล่นต่อ • นมไม่พอหรือกิจกรรมปิดจะไม่จ่าย")
 if not isMatch then HalloweenTab:CreateButton({Name="เปิดหน้ากิจกรรมฮาโลวีนในเกม",Callback=function()LobbyExtras.open("raid")end})end
 local halloweenStatus=HalloweenTab:CreateLabel(HalloweenReplay.status)
 local halloweenMilk=HalloweenTab:CreateLabel("รอข้อมูล Bug Milk")
@@ -2258,7 +2234,6 @@ if not isMatch then
 end
 
 local FarmTab=Window:CreateTab("สถิติฟาร์ม",4483362460)
-FarmTab:CreateLabel("เริ่มเก็บตั้งแต่เปิดรุ่นนี้ • นับรอบที่จบ แยกด่านปกติ/Challenge • รางวัลนับเฉพาะผลจริงจากเซิร์ฟเวอร์")
 local farmCurrent=FarmTab:CreateLabel("กำลังอ่านด่านปัจจุบัน")
 local farmSummary=FarmTab:CreateLabel("ยังไม่มีรอบที่จบ")
 local farmItems=FarmTab:CreateLabel("ยังไม่มีรางวัล")
