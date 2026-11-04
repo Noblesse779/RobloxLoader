@@ -1,4 +1,4 @@
--- Animal Throw Hub v1.3 | SINGLE-FILE SOURCE BUNDLE
+-- Animal Throw Hub v1.4 | SINGLE-FILE SOURCE BUNDLE
 -- No external Lua/data downloads; Roblox gameplay and Roblox-hosted assets remain online.
 -- WindUI
 -- MIT License
@@ -35,7 +35,7 @@ local P=Players.LocalPlayer
 local env=(getgenv and getgenv()) or _G
 if env.AnimalThrowHubStop then pcall(env.AnimalThrowHubStop) end
 local alive=true
-local defaults={autoTrain=false,bonus=false,autoThrow=false,meter=false,super=false,skipReveal=false,fastThrow=false,autoFood=false,equipFood=false,stand=false,fence=false,equipBest=false,place=false,eggs=false,sell=false,offline=false,free=false,antiAFK=false,lowGraphics=false,fpsLimit=false,trainSeconds=60,throwsPerCycle=5,throwPower=100,powerOn=false,meterTarget=0.94,reserve=0,food="ดีที่สุดที่ซื้อไหว",egg="ทุกชนิด",sellRarity="Common",sellIncome=0,keepNames="",sellMutations=false,keepBest=10,fps=30}
+local defaults={autoTrain=false,bonus=false,autoThrow=false,meter=false,super=false,skipReveal=false,fastThrow=false,autoFood=false,equipFood=false,stand=false,fence=false,equipBest=false,place=false,eggs=false,sell=false,offline=false,free=false,antiAFK=false,lowGraphics=false,fpsLimit=false,trainSeconds=60,throwsPerCycle=5,throwPause=3,throwPower=100,powerOn=false,meterTarget=0.94,reserve=0,food="ดีที่สุดที่ซื้อไหว",egg="ทุกชนิด",sellRarity="Common",sellIncome=0,keepNames="",sellMutations=false,keepBest=10,fps=30}
 local cfg={}
 for k,v in pairs(defaults)do cfg[k]=v end
 local folder="AnimalThrowHub_120219252362013"
@@ -61,6 +61,7 @@ end
 loadSettings()
 local function clamp(k,lo,hi)cfg[k]=math.clamp(cfg[k],lo,hi)end
 clamp("trainSeconds",5,3600);clamp("throwsPerCycle",1,100);clamp("throwPower",1,100)
+clamp("throwPause",1.5,30)
 clamp("meterTarget",0.4,0.99);clamp("reserve",0,1e100);clamp("sellIncome",0,1e100)
 clamp("keepBest",0,10000);clamp("fps",10,240)
 local function save()
@@ -74,6 +75,7 @@ local function save()
     if not ok then warn(err)end
 end
 local status,lastResult="กำลังเตรียมระบบ","พร้อม"
+local growthStatus="รอตรวจเงินและอุปกรณ์"
 local connections,patches={},{}
 local Window,modules,ownedTraining=false,nil,false
 local uiHost
@@ -114,7 +116,7 @@ for index,key in ipairs({"ScreenGui","NotificationGui","DropdownGui","TooltipGui
         end)
     end
 end
-Window=WindUI:CreateWindow({Title="ANIMAL THROW HUB • v1.3",Author="Noblesse779",Folder=folder,Size=UDim2.fromOffset(820,590),SideBarWidth=190,Resizable=true,Theme="Plant",Transparent=false,ToggleKey=Enum.KeyCode.RightShift,OpenButton={Title="ANIMAL HUB",Enabled=true,Draggable=true,OnlyMobile=false}})
+Window=WindUI:CreateWindow({Title="ANIMAL THROW HUB • v1.4",Author="Noblesse779",Folder=folder,Size=UDim2.fromOffset(820,590),SideBarWidth=190,Resizable=true,Theme="Plant",Transparent=false,ToggleKey=Enum.KeyCode.RightShift,OpenButton={Title="ANIMAL HUB",Enabled=true,Draggable=true,OnlyMobile=false}})
 local tabs={}
 for _,spec in ipairs({{"main","ฝึก / โยน","target"},{"shop","ร้าน / อัปเกรด","shopping-cart"},{"animals","สัตว์ / ฟาร์ม","paw-print"},{"sell","ขาย / ตัวกรอง","coins"},{"eggs","ไข่ / รางวัล","egg"},{"bag","กระเป๋า / สถิติ","chart-no-axes-combined"},{"settings","ตั้งค่า","settings"}})do tabs[spec[1]]=Window:Tab({Title=spec[2],Icon=spec[3]})end
 local cards={}
@@ -143,6 +145,7 @@ toggle("main","กดโบนัสฝึกอัตโนมัติ","bonus
 number("main","ฝึกกี่วินาทีก่อนสลับโยน","trainSeconds",5,3600)
 toggle("main","โยนอาหารอัตโนมัติ","autoThrow")
 number("main","จำนวนโยนก่อนกลับไปฝึก","throwsPerCycle",1,100)
+number("main","พักระหว่างรอบโยน (วินาที)","throwPause",1.5,30)
 toggle("main","กดเกจโยนอัตโนมัติ","meter")
 number("main","เป้าเกจ 0.40–0.99","meterTarget",0.4,0.99)
 toggle("main","ตั้งแรงโยนอัตโนมัติ","powerOn")
@@ -150,7 +153,7 @@ number("main","แรงโยน %","throwPower",1,100)
 toggle("main","ใช้ Super Throw ที่มีอัตโนมัติ","super")
 toggle("main","ข้ามฉากแสดงสัตว์ที่ได้","skipReveal")
 toggle("main","โยนเร็ว / ข้ามอนิเมชันโยน","fastThrow")
-toggle("shop","ซื้ออาหารอัตโนมัติ","autoFood")
+toggle("shop","ซื้อและใส่อาหารดีที่สุดที่เงินถึงก่อน","autoFood")
 toggle("shop","สวมอาหารที่เลือกอัตโนมัติ","equipFood")
 local foodDrop=dropdown("shop","อาหาร","food",{"ดีที่สุดที่ซื้อไหว"})
 toggle("shop","อัปเกรดเครื่องฝึกอัตโนมัติ","stand")
@@ -310,6 +313,18 @@ if not initOk then
 end
 modules=initResult
 local equipDirty=true
+local growthDirty,growthThreshold=true,nil
+local function growthEnabled()return cfg.autoFood or cfg.equipFood or cfg.stand or cfg.fence end
+connections[#connections+1]=modules.data:Observe("Money",function()
+    growthDirty=true
+    if (ownedTraining or cfg.autoTrain)and growthEnabled()and growthThreshold and (tonumber(get("Money",0))or 0)-cfg.reserve>=growthThreshold then
+        modules.training.Stop()
+    end
+end)
+for _,key in ipairs({"Stand","FenceLevel","OwnedFoods","EquippedFood"})do
+    connections[#connections+1]=modules.data:Observe(key,function()growthDirty=true end)
+end
+connections[#connections+1]=modules.throw.Finished:Connect(function()growthDirty=true end)
 local function invalidateAnimals()
     animalsDirty,animalListDirty,equipDirty=true,true,true
 end
@@ -423,9 +438,12 @@ onChange.fps=function(value)if cfg.fpsLimit and type(setfpscap)=="function"then 
 onChange.autoTrain=function(value)if not value and ownedTraining then modules.training.Stop()end end
 local foodIds={}
 local foodValues={"ดีที่สุดที่ซื้อไหว"}
-for i,food in ipairs(modules.foods.List or{})do
-    local label=tostring(i).." • "..tostring(food.Name or food.ModelName or food.Bait or i).." • $"..string.format("%.3g",food.Price or 0)
-    foodIds[label]=i;foodValues[#foodValues+1]=label
+for i=1,modules.foods.CountAll()do
+    local food=modules.foods.Get(i)
+    if food then
+        local label=tostring(i).." • "..tostring(food.Name or food.ModelName or food.Bait or i).." • $"..string.format("%.3g",food.Price or 0)
+        foodIds[label]=i;foodValues[#foodValues+1]=label
+    end
 end
 foodDrop:Refresh(foodValues)
 if foodIds[cfg.food]then foodDrop:Select(cfg.food)end
@@ -450,32 +468,85 @@ local function launch(fn)
         taskBusy=false
     end)
 end
-local function shopStep()
+local function growthAction()
     local money=(tonumber(get("Money",0))or 0)-cfg.reserve
-    if cfg.stand then
-        local nextStand=modules.stands.Get((get("Stand",0)or 0)+1)
-        if nextStand and nextStand.Price<=money then invoke("Stand_Upgrade");return true end
-    end
-    if cfg.fence then
-        local nextFence=modules.fences.Get((get("FenceLevel",0)or 0)+1)
-        if nextFence and nextFence.Price<=money then invoke("Plot_UpgradeFence");return true end
+    growthThreshold=nil
+    local function nextPrice(price)
+        if type(price)=="number"and (not growthThreshold or price<growthThreshold)then growthThreshold=price end
     end
     if cfg.autoFood or cfg.equipFood then
-        local selected=foodIds[cfg.food]
         local owned=get("OwnedFoods",{})
-        if not selected then
-            for i,food in ipairs(modules.foods.List or{})do
-                if (owned[i]==true or owned[tostring(i)]==true or cfg.autoFood and food.Price<=money)then selected=i end
+        local equipped=tonumber(get("EquippedFood",1))or 1
+        local selected=not cfg.autoFood and foodIds[cfg.food]or nil
+        local selectedOwned=false
+        for i=modules.foods.CountAll(),1,-1 do
+            local food=modules.foods.Get(i)
+            if food then
+                local has=owned[i]==true or owned[tostring(i)]==true or i==equipped
+                if not has and i>equipped then nextPrice(food.Price)end
+                if not selected and (has or cfg.autoFood and food.Price<=money)then selected=i;selectedOwned=has end
             end
         end
         if selected then
-            if cfg.autoFood and owned[selected]~=true and owned[tostring(selected)]~=true then
-                local food=modules.foods.Get(selected)
-                if food and food.Price<=money then invoke("Shop_Buy",selected);return true end
-            elseif cfg.equipFood and get("EquippedFood",get("Food",nil))~=selected then invoke("Shop_Equip",selected);return true end
+            selectedOwned=selectedOwned or owned[selected]==true or owned[tostring(selected)]==true or selected==equipped
+            if cfg.autoFood and not selectedOwned then
+                return {remote="Shop_Buy",index=selected,label="ซื้ออาหารอันดับ "..selected,kind="food",ack=function()
+                    return modules.data:GetPath("OwnedFoods."..selected)==true or tonumber(get("EquippedFood"))==selected
+                end}
+            end
+            if (cfg.autoFood or cfg.equipFood)and selectedOwned and equipped~=selected then
+                return {remote="Shop_Equip",index=selected,label="ใส่อาหารอันดับ "..selected,kind="food",ack=function()return tonumber(get("EquippedFood"))==selected end}
+            end
+        end
+    end
+    if cfg.stand then
+        local current=tonumber(get("Stand",0))or 0
+        local item=modules.stands.Get(current+1)
+        if item then
+            nextPrice(item.Price)
+            if item.Price<=money then return {remote="Stand_Upgrade",label="อัปเครื่องฝึกเป็น "..tostring(current+1),kind="stand",ack=function()return (tonumber(get("Stand",0))or 0)>current end}end
+        end
+    end
+    if cfg.fence then
+        local current=tonumber(get("FenceLevel",0))or 0
+        local item=modules.fences.Get(current+1)
+        if item then
+            nextPrice(item.Price)
+            if item.Price<=money then return {remote="Plot_UpgradeFence",label="อัปรั้วเป็น "..tostring(current+1),kind="fence",ack=function()return (tonumber(get("FenceLevel",0))or 0)>current end}end
         end
     end
 end
+local growthPending,growthRetryAt=nil,0
+local function shopStep()
+    if not growthEnabled()then growthPending=nil;growthDirty=false;return false end
+    if growthPending then
+        if growthPending.action.ack()then growthStatus="ยืนยันแล้ว • "..growthPending.action.label;growthPending=nil;growthDirty=true
+        elseif os.clock()<growthPending.deadline then status="รอข้อมูลยืนยัน • "..growthPending.action.label;growthStatus=status;return true
+        else
+            lastResult="ข้อมูลซื้อยังไม่อัปเดต • "..growthPending.action.label
+            growthPending=nil;growthRetryAt=os.clock()+5;growthDirty=true
+        end
+    end
+    if os.clock()<growthRetryAt then status=lastResult;growthStatus=status;return true end
+    if not growthDirty then return false end
+    local action=growthAction()
+    if not action then
+        growthDirty=false
+        growthStatus=growthThreshold and string.format("ตรวจครบ • ใช้ได้ %.3g / อัปถัดไป %.3g",math.max(0,(tonumber(get("Money",0))or 0)-cfg.reserve),growthThreshold)or "ตรวจครบ • อุปกรณ์ถึงขั้นสูงสุดที่เปิดอยู่"
+        return false
+    end
+    status=action.label;growthStatus=status
+    local result
+    if action.index then result=invoke(action.remote,action.index)else result=invoke(action.remote)end
+    if result.Ok then
+        growthPending={action=action,deadline=os.clock()+8}
+        growthDirty=true
+    else
+        growthRetryAt=os.clock()+5;growthDirty=true;status=lastResult;growthStatus=status
+    end
+    return true
+end
+for _,key in ipairs({"autoFood","equipFood","stand","fence","reserve","food"})do onChange[key]=function()growthDirty=true end end
 local function placementStep()
     local list=animals();local placed=0
     for _,a in ipairs(list)do if a.entry.Placed then placed=placed+1 end end
@@ -522,6 +593,7 @@ local function approachThrow()
     local launch=modules.area.GetLaunchPosition()
     if typeof(launch)~="Vector3"then return false,"ไม่พบจุดโยนของเกม"end
     local position=launch+Vector3.new(0,humanoid.HipHeight+root.Size.Y/2+0.1,0)
+    if (root.Position-position).Magnitude<5 then return true end
     status="กำลังไปยืนจุดโยน"
     root.Anchored=false
     root.AssemblyLinearVelocity=Vector3.zero
@@ -572,12 +644,17 @@ local function fastThrow()
         end
     end)
     if pending then pcall(function()modules.remote.Invoke("Throw_Cancel")end)end
-    pcall(returnFromThrow)
+    if not success or not cfg.autoThrow or cfg.autoTrain and remainingThrows<=1 then pcall(returnFromThrow)end
     if modules.state.Busy=="Throw"then modules.state.Busy=nil end
     if not ok then error(err)end
     return success
 end
+local throwRequested,nextThrowAt=false,0
 patch(modules.throw,"Start",function(original)return function(...)
+    if alive and cfg.autoThrow and not throwRequested then return false end
+    throwRequested=false
+    if os.clock()<nextThrowAt then return false end
+    nextThrowAt=os.clock()+cfg.throwPause
     if alive and cfg.fastThrow then return fastThrow()end
     if alive and cfg.autoThrow and idle()then
         modules.state.Busy="ThrowApproach"
@@ -603,7 +680,16 @@ local function actor()
     if not alive or os.clock()<startupUntil or not ready()then return end
     if cfg.offline and tonumber(modules.data:GetPath("OfflinePending.Base")or 0)>0 and due("offline",8)then modules.offline.Claim();return end
     if modules.training.IsRunning()then
-        if ownedTraining and (not cfg.autoTrain or cfg.autoThrow and modules.training.GetTrainingTime()>=cfg.trainSeconds)then
+        if growthEnabled()and growthDirty and cfg.autoTrain then
+            local action=growthAction()
+            if action then
+                status="หยุดฝึกเพื่อ "..action.label
+                modules.training.Stop()
+                return
+            end
+            growthDirty=false
+        end
+        if (ownedTraining or cfg.autoTrain)and (not cfg.autoTrain or cfg.autoThrow and modules.training.GetTrainingTime()>=cfg.trainSeconds)then
             modules.training.Stop();remainingThrows=math.floor(cfg.throwsPerCycle)
         end
         status="กำลังฝึก • "..math.floor(modules.training.GetTrainingTime()).." วินาที"
@@ -617,7 +703,7 @@ local function actor()
         local desired=math.clamp(math.floor(maximum*cfg.throwPower/100+0.5),minimum,maximum)
         if get("ThrowPower")~=desired then invoke("Player_SetThrowPower",desired);return end
     end
-    if (cfg.stand or cfg.fence or cfg.autoFood or cfg.equipFood)and due("shop",4)then if shopStep()then return end end
+    if growthEnabled()and shopStep()then return end
     if (cfg.equipBest or cfg.place)and equipDirty and due("equipBest",6)then
         equipDirty=false
         local list=animals()
@@ -643,9 +729,10 @@ local function actor()
         if cfg.autoThrow then remainingThrows=math.floor(cfg.throwsPerCycle)end
         return
     end
-    if cfg.autoThrow and due("throw",2)then
+    if cfg.autoThrow and os.clock()>=nextThrowAt and due("throw",cfg.throwPause)then
         status="กำลังโยนอาหาร"
         local before=tonumber(get("Throws",0))or 0
+        throwRequested=true
         local completed=modules.throw.Start()
         if completed==true or (tonumber(get("Throws",0))or 0)>before then remainingThrows=math.max(0,remainingThrows-1)end
     else status="พร้อม"end
@@ -682,7 +769,7 @@ task.spawn(function()
                 local gained={};for name,count in pairs(received)do gained[#gained+1]=name.." ×"..count end;table.sort(gained)
                 if modules.training.IsRunning()then status="กำลังฝึก • "..math.floor(modules.training.GetTrainingTime()).." วินาที"end
                 showCard("main",(os.clock()<startupUntil and "รอเริ่มระบบ "..math.ceil(startupUntil-os.clock()).." วินาที"or status).."\n"..lastResult)
-                showCard("shop",lastResult)
+                showCard("shop",growthStatus)
                 local placed=0;for _,a in ipairs(list)do if a.entry.Placed then placed=placed+1 end end
                 showCard("animals","สัตว์ "..#list.." • วาง "..placed.."/"..modules.fences.SlotsFor(get("FenceLevel",0)))
                 local eligible=0;for rank,a in ipairs(list)do if canSell(a,rank)then eligible=eligible+1 end end
