@@ -1,4 +1,4 @@
--- Animal Throw Hub v1.1 | SINGLE-FILE SOURCE BUNDLE
+-- Animal Throw Hub v1.2 | SINGLE-FILE SOURCE BUNDLE
 -- No external Lua/data downloads; Roblox gameplay and Roblox-hosted assets remain online.
 -- WindUI
 -- MIT License
@@ -35,7 +35,7 @@ local P=Players.LocalPlayer
 local env=(getgenv and getgenv()) or _G
 if env.AnimalThrowHubStop then pcall(env.AnimalThrowHubStop) end
 local alive=true
-local defaults={autoTrain=false,bonus=false,autoThrow=false,meter=false,super=false,skipReveal=false,autoFood=false,equipFood=false,stand=false,fence=false,equipBest=false,place=false,eggs=false,sell=false,offline=false,free=false,antiAFK=false,lowGraphics=false,fpsLimit=false,trainSeconds=60,throwsPerCycle=5,throwPower=100,powerOn=false,meterTarget=0.94,reserve=0,food="ดีที่สุดที่ซื้อไหว",egg="ทุกชนิด",sellRarity="Common",sellIncome=0,keepNames="",sellMutations=false,keepBest=10,fps=30}
+local defaults={autoTrain=false,bonus=false,autoThrow=false,meter=false,super=false,skipReveal=false,fastThrow=false,autoFood=false,equipFood=false,stand=false,fence=false,equipBest=false,place=false,eggs=false,sell=false,offline=false,free=false,antiAFK=false,lowGraphics=false,fpsLimit=false,trainSeconds=60,throwsPerCycle=5,throwPower=100,powerOn=false,meterTarget=0.94,reserve=0,food="ดีที่สุดที่ซื้อไหว",egg="ทุกชนิด",sellRarity="Common",sellIncome=0,keepNames="",sellMutations=false,keepBest=10,fps=30}
 local cfg={}
 for k,v in pairs(defaults)do cfg[k]=v end
 local folder="AnimalThrowHub_120219252362013"
@@ -87,7 +87,7 @@ end
 local function stop()
     if not alive then return end
     alive=false;save()
-    for _,c in ipairs(connections)do c:Disconnect()end
+    for _,c in ipairs(connections)do if type(c)=="function"then pcall(c)else c:Disconnect()end end
     for _,p in ipairs(patches)do if p.object[p.key]==p.wrapper then p.object[p.key]=p.original end end
     if modules and ownedTraining then pcall(modules.training.Stop)end
     restoreGraphics()
@@ -114,7 +114,7 @@ for index,key in ipairs({"ScreenGui","NotificationGui","DropdownGui","TooltipGui
         end)
     end
 end
-Window=WindUI:CreateWindow({Title="ANIMAL THROW HUB • v1.1",Author="Noblesse779",Folder=folder,Size=UDim2.fromOffset(820,590),SideBarWidth=190,Resizable=true,Theme="Plant",Transparent=false,ToggleKey=Enum.KeyCode.RightShift,OpenButton={Title="ANIMAL HUB",Enabled=true,Draggable=true,OnlyMobile=false}})
+Window=WindUI:CreateWindow({Title="ANIMAL THROW HUB • v1.2",Author="Noblesse779",Folder=folder,Size=UDim2.fromOffset(820,590),SideBarWidth=190,Resizable=true,Theme="Plant",Transparent=false,ToggleKey=Enum.KeyCode.RightShift,OpenButton={Title="ANIMAL HUB",Enabled=true,Draggable=true,OnlyMobile=false}})
 local tabs={}
 for _,spec in ipairs({{"main","ฝึก / โยน","target"},{"shop","ร้าน / อัปเกรด","shopping-cart"},{"animals","สัตว์ / ฟาร์ม","paw-print"},{"sell","ขาย / ตัวกรอง","coins"},{"eggs","ไข่ / รางวัล","egg"},{"bag","กระเป๋า / สถิติ","chart-no-axes-combined"},{"settings","ตั้งค่า","settings"}})do tabs[spec[1]]=Window:Tab({Title=spec[2],Icon=spec[3]})end
 local cards={}
@@ -149,6 +149,7 @@ toggle("main","ตั้งแรงโยนอัตโนมัติ","power
 number("main","แรงโยน %","throwPower",1,100)
 toggle("main","ใช้ Super Throw ที่มีอัตโนมัติ","super")
 toggle("main","ข้ามฉากแสดงสัตว์ที่ได้","skipReveal")
+toggle("main","โยนเร็ว / ข้ามอนิเมชันโยน","fastThrow")
 toggle("shop","ซื้ออาหารอัตโนมัติ","autoFood")
 toggle("shop","สวมอาหารที่เลือกอัตโนมัติ","equipFood")
 local foodDrop=dropdown("shop","อาหาร","food",{"ดีที่สุดที่ซื้อไหว"})
@@ -156,7 +157,7 @@ toggle("shop","อัปเกรดเครื่องฝึกอัตโ�
 toggle("shop","อัปเกรดรั้วอัตโนมัติ","fence")
 number("shop","เงินสำรอง","reserve",0,1e100)
 toggle("animals","Equip Best อัตโนมัติ","equipBest")
-toggle("animals","วางสัตว์ในช่องว่างอัตโนมัติ","place")
+toggle("animals","จัดสัตว์ด้วยสวมใส่สิ่งที่ดีที่สุด","place")
 local animalDrop,selectedAnimal=nil,nil
 local animalLookup={}
 local function safeAction(label,fn)
@@ -198,7 +199,7 @@ local function initModules()
     assert(client,"ไม่พบ Client")
     local c=client:WaitForChild("Controllers",20);assert(c,"ไม่พบ Controllers")
     local m={}
-    for k,name in pairs({data="DataController",state="ClientState",training="TrainingController",throw="ThrowController",meter="ThrowMeter",super="SuperThrow",reveal="RevealSequence",plot="PlotController",offline="OfflineEarnings"})do m[k]=requireNamed(c,name)end
+    for k,name in pairs({data="DataController",state="ClientState",input="InputActions",training="TrainingController",throw="ThrowController",meter="ThrowMeter",super="SuperThrow",reveal="RevealSequence",plot="PlotController",offline="OfflineEarnings",screen="ScreenFX",camera="CameraRig",movement="Movement",hud="HUDController",fog="FogController"})do m[k]=requireNamed(c,name)end
     m.remote=requireNamed(RS.Shared,"Remotes")
     m.mutations=requireNamed(RS.Shared,"Mutations")
     for k,name in pairs({foods="FoodsConfig",stands="StandsConfig",fences="FenceConfig",eggs="EggsConfig",economy="AnimalEconomy",levels="LevelConfig"})do m[k]=requireNamed(RS.Config,name)end
@@ -217,7 +218,10 @@ local function invoke(name,...)
     lastResult=name.." • "..(result.Ok and "สำเร็จ" or tostring(result.Reason or "Rejected"))
     return result
 end
+local animalCache,animalsDirty=nil,true
+local animalListDirty=true
 local function animals()
+    if animalCache and not animalsDirty then return animalCache end
     local list={}
     for id,a in pairs(get("Animals",{}))do
         if type(a)=="table"then
@@ -227,6 +231,7 @@ local function animals()
         end
     end
     table.sort(list,function(a,b)if a.income==b.income then return tostring(a.id)<tostring(b.id)end return a.income>b.income end)
+    animalCache,animalsDirty=list,false
     return list
 end
 local function ready()
@@ -251,7 +256,7 @@ local function refreshAnimals()
         animalLookup[label]=a.id;values[#values+1]=label
     end
     if #values==0 then values={"ไม่มีสัตว์"}end
-    animalDrop:Refresh(values)
+    animalDrop:Refresh(values);animalListDirty=false
 end
 local function withAnimal(remote)
     if not ready()or selectedAnimal==nil then lastResult="เลือกสัตว์ก่อน";return end
@@ -302,17 +307,37 @@ if not initOk then
     return
 end
 modules=initResult
-local activeMeter,activeSuper
+local equipDirty=true
+local function invalidateAnimals()
+    animalsDirty,animalListDirty,equipDirty=true,true,true
+end
+connections[#connections+1]=modules.data:ObserveTable("Animals",invalidateAnimals)
+connections[#connections+1]=modules.data:Observe("Animals",invalidateAnimals)
+connections[#connections+1]=P:GetAttributeChangedSignal("BestIncome"):Connect(invalidateAnimals)
+local activeMeter,activeSuper,activeConfirm,meterAccepted
 local function patch(object,key,make)
     local original=object[key]
     assert(type(original)=="function","ไม่พบ "..key)
     local wrapper=make(original)
     object[key]=wrapper;patches[#patches+1]={object=object,key=key,original=original,wrapper=wrapper}
 end
+local evaluateMeter
+patch(modules.input,"BindPressed",function(original)return function(name,priority,callback,...)
+    local captured=activeMeter and name=="Confirm"and priority==50
+    if captured then activeConfirm=callback end
+    local unbind=original(name,priority,callback,...)
+    return function()
+        if captured and activeConfirm==callback then activeConfirm=nil end
+        return unbind()
+    end
+end end)
 patch(modules.meter,"Run",function(original)return function(self,...)
     activeMeter=self
+    meterAccepted=false
+    local listener=self.Marker:GetPropertyChangedSignal("Position"):Connect(function()if evaluateMeter then evaluateMeter()end end)
     local result=table.pack(pcall(original,self,...))
-    if activeMeter==self then activeMeter=nil end
+    listener:Disconnect()
+    if activeMeter==self then activeMeter=nil;activeConfirm=nil end
     if not result[1]then error(result[2])end
     return table.unpack(result,2,result.n)
 end end)
@@ -355,14 +380,15 @@ local function press(button)
         VIM:SendMouseButtonEvent(point.X,point.Y,0,false,game,0)
     end
 end
-local frameClock=0
-connections[#connections+1]=Run.RenderStepped:Connect(function(dt)
-    if not alive then return end
-    frameClock=frameClock+dt;if frameClock<0.03 then return end;frameClock=0
-    if cfg.meter and activeMeter and activeMeter.Marker and activeMeter.Marker.Parent and not activeMeter.TapsBlocked then
-        if 1-activeMeter.Marker.Position.Y.Scale>=cfg.meterTarget then pcall(confirm)end
+evaluateMeter=function()
+    if not alive or not cfg.meter or meterAccepted or not activeMeter or activeMeter.TapsBlocked then return end
+    if activeMeter.Marker and activeMeter.Marker.Parent and 1-activeMeter.Marker.Position.Y.Scale>=cfg.meterTarget then
+        if activeConfirm then
+            local ok,accepted=pcall(activeConfirm)
+            if ok and accepted then meterAccepted=true end
+        else pcall(confirm)end
     end
-end)
+end
 local bonusQueue={}
 local function watchGui(item)
     if item:IsA("GuiButton")and item.Name=="TapBonus"then bonusQueue[item]=true end
@@ -467,9 +493,73 @@ local function placementStep()
             end end
         end
     end
-    if cfg.place then for _,a in ipairs(list)do if not a.entry.Placed then return invoke("Plot_PlaceAnimal",a.id,point).Ok end end end
 end
 local remainingThrows=0
+local trainingToken=0
+local function armTrainingStop()
+    trainingToken=trainingToken+1
+    local token=trainingToken
+    if not ownedTraining or not cfg.autoThrow then return end
+    local remaining=math.max(0.1,cfg.trainSeconds-modules.training.GetTrainingTime())
+    task.delay(remaining,function()
+        if alive and ownedTraining and cfg.autoThrow and token==trainingToken then
+            remainingThrows=math.floor(cfg.throwsPerCycle)
+            modules.training.Stop()
+        end
+    end)
+end
+onChange.trainSeconds=armTrainingStop
+onChange.autoThrow=armTrainingStop
+onChange.equipBest=function()equipDirty=true end
+onChange.place=function()equipDirty=true end
+local function fastThrow()
+    if not idle()then return end
+    modules.state.Busy="Throw"
+    local pending,success=false,false
+    local ok,err=pcall(function()
+        local start=invoke("Throw_Start")
+        if not start.Ok then return end
+        pending=true
+        if cfg.super and (tonumber(get("SuperThrows",0))or 0)>0 then invoke("Throw_UseSuper")end
+        -- The native meter accepts confirmation only after 0.35 seconds.
+        task.wait(0.36)
+        local result=invoke("Throw_Resolve",cfg.meterTarget)
+        if not result.Ok then return end
+        local completed=invoke("Throw_Complete")
+        local retries=0
+        while alive and not completed.Ok and retries<3 do
+            local reason=tostring(completed.Reason or "")
+            if reason~="TooEarly"and reason~="TooSoon"and reason~="Cooldown"and reason~="Wait"and reason~="Pending"and reason~="InFlight"and reason~="NotLanded"then break end
+            status="รอเซิร์ฟเวอร์ยืนยันสัตว์"
+            task.wait(math.clamp(tonumber(completed.RetryAfter or completed.Wait)or tonumber(result.FlightTime)or 1.5,0.5,5))
+            retries=retries+1;completed=invoke("Throw_Complete")
+        end
+        if completed.Ok then
+            pending,success=false,true;invalidateAnimals()
+            modules.throw.Finished:Fire(result)
+            status="ได้รับสัตว์ • "..tostring(result.ModelName or "สำเร็จ")
+        end
+    end)
+    if pending then pcall(function()modules.remote.Invoke("Throw_Cancel")end)end
+    if modules.state.Busy=="Throw"then modules.state.Busy=nil end
+    if not ok then error(err)end
+    return success
+end
+patch(modules.throw,"Start",function(original)return function(...)
+    if alive and cfg.fastThrow then return fastThrow()end
+    return original(...)
+end end)
+tabs.main:Button({Title="ยกเลิกฉากโยนค้าง / คืนกล้อง",Callback=function()safeAction("คืนกล้อง",function()
+    modules.remote.Invoke("Throw_Cancel")
+    pcall(modules.super.Abort);pcall(modules.screen.Reset);pcall(modules.camera.Release)
+    pcall(modules.fog.EndFlight);pcall(modules.movement.Unlock);pcall(modules.hud.SetGameplayVisible,true)
+    local char=P.Character;local h=char and char:FindFirstChildOfClass("Humanoid")
+    local root=char and char:FindFirstChild("HumanoidRootPart")
+    if root then root.Anchored=false end
+    workspace.CurrentCamera.CameraType=Enum.CameraType.Custom
+    if h then workspace.CurrentCamera.CameraSubject=h end
+    modules.state.Busy=nil;status="ยกเลิกคำสั่งโยนและคืนกล้องแล้ว"
+end)end})
 local startupUntil=os.clock()+5
 local function actor()
     if not alive or os.clock()<startupUntil or not ready()then return end
@@ -490,14 +580,26 @@ local function actor()
         if get("ThrowPower")~=desired then invoke("Player_SetThrowPower",desired);return end
     end
     if (cfg.stand or cfg.fence or cfg.autoFood or cfg.equipFood)and due("shop",4)then if shopStep()then return end end
-    if cfg.equipBest and due("equipBest",15)then invoke("Plot_EquipBest");return end
-    if (cfg.eggs or cfg.place)and due("place",5)then if placementStep()then return end end
+    if (cfg.equipBest or cfg.place)and equipDirty and due("equipBest",6)then
+        equipDirty=false
+        local list=animals()
+        local slots=modules.fences.SlotsFor(get("FenceLevel",0))
+        local needs=false
+        for rank,a in ipairs(list)do if (a.entry.Placed==true)~=(rank<=slots)then needs=true;break end end
+        if needs then
+            local result=invoke("Plot_EquipBest")
+            if not result.Ok then equipDirty=true end
+            return
+        end
+    end
+    if cfg.eggs and due("place",8)then if placementStep()then return end end
     if cfg.sell and due("sell",5)then sellBatch(false)end
     if cfg.autoTrain and (not cfg.autoThrow or remainingThrows<=0)and due("train",4)then
         status="เริ่มฝึก";ownedTraining=true
         modules.plot.TeleportToStand(false)
         task.wait(0.5)
         if not alive or not cfg.autoTrain then ownedTraining=false;return end
+        armTrainingStop()
         -- Start blocks for the native training sequence. The scheduler below stops it independently.
         modules.training.Start();ownedTraining=false
         if cfg.autoThrow then remainingThrows=math.floor(cfg.throwsPerCycle)end
@@ -506,8 +608,8 @@ local function actor()
     if cfg.autoThrow and due("throw",2)then
         status="กำลังโยนอาหาร"
         local before=tonumber(get("Throws",0))or 0
-        modules.throw.Start()
-        if (tonumber(get("Throws",0))or 0)>before then remainingThrows=math.max(0,remainingThrows-1)end
+        local completed=modules.throw.Start()
+        if completed==true or (tonumber(get("Throws",0))or 0)>before then remainingThrows=math.max(0,remainingThrows-1)end
     else status="พร้อม"end
 end
 task.spawn(function()
@@ -516,48 +618,51 @@ task.spawn(function()
             if cfg.bonus then for button in pairs(bonusQueue)do if button.Parent then pcall(press,button)else bonusQueue[button]=nil end end end
             if cfg.super and activeSuper and not activeSuper.Dead and activeSuper.State=="Offer" and (tonumber(get("SuperThrows",0))or 0)>0 and due("super",2)then activeSuper:UseSaved()end
             if cfg.meter and modules.state.Busy=="Hatch" and due("hatchTap",0.5)then confirm()end
-            if ownedTraining and modules.training.IsRunning()and (not cfg.autoTrain or cfg.autoThrow and modules.training.GetTrainingTime()>=cfg.trainSeconds)then modules.training.Stop()end
-            if modules.training.IsRunning()then status="กำลังฝึก • "..math.floor(modules.training.GetTrainingTime()).." วินาที"end
             if not taskBusy then launch(actor)end
         end)
         if not ok then lastResult=tostring(err);warn(err)end
-        task.wait(0.25)
+        task.wait(1)
     end
 end)
+local displayed={}
+local function showCard(name,text)
+    if displayed[name]~=text then displayed[name]=text;cards[name]:SetTitle(text)end
+end
 task.spawn(function()
     while alive do
         local ok,err=pcall(function()
             if ready()then
                 if not baselineMoney then baselineMoney=tonumber(get("Money",0))or 0;baselineThrows=tonumber(get("Throws",0))or 0 end
                 local list=animals()
-                for _,a in ipairs(list)do
+                if animalListDirty then for _,a in ipairs(list)do
                     if not seenAnimals[tostring(a.id)]then
                         seenAnimals[tostring(a.id)]=true
                         if initialAnimals then local name=tostring(a.entry.ModelName);received[name]=(received[name]or 0)+1 end
                     end
-                end
+                end end
                 initialAnimals=true
                 local gained={};for name,count in pairs(received)do gained[#gained+1]=name.." ×"..count end;table.sort(gained)
-                cards.main:SetTitle(os.clock()<startupUntil and "รอเริ่มระบบ "..math.ceil(startupUntil-os.clock()).." วินาที"or status)
-                cards.shop:SetTitle(lastResult)
+                if modules.training.IsRunning()then status="กำลังฝึก • "..math.floor(modules.training.GetTrainingTime()).." วินาที"end
+                showCard("main",os.clock()<startupUntil and "รอเริ่มระบบ "..math.ceil(startupUntil-os.clock()).." วินาที"or status)
+                showCard("shop",lastResult)
                 local placed=0;for _,a in ipairs(list)do if a.entry.Placed then placed=placed+1 end end
-                cards.animals:SetTitle("สัตว์ "..#list.." • วาง "..placed.."/"..modules.fences.SlotsFor(get("FenceLevel",0)))
+                showCard("animals","สัตว์ "..#list.." • วาง "..placed.."/"..modules.fences.SlotsFor(get("FenceLevel",0)))
                 local eligible=0;for rank,a in ipairs(list)do if canSell(a,rank)then eligible=eligible+1 end end
-                cards.sell:SetTitle("ผ่านตัวกรอง "..eligible.." • ขายแล้ว "..soldCount.." ตัว • "..lastResult)
-                cards.eggs:SetTitle("Super Throw เหลือ "..tostring(get("SuperThrows",0)).." • "..lastResult)
-                cards.bag:SetTitle(string.format("เวลา %d นาที • โยน %d ครั้ง • เงินเปลี่ยน %+.3g\n%s",math.floor((os.clock()-sessionStart)/60),(tonumber(get("Throws",0))or 0)-baselineThrows,(tonumber(get("Money",0))or 0)-baselineMoney,#gained>0 and table.concat(gained," • ")or "ยังไม่ได้สัตว์ใหม่"))
+                showCard("sell","ผ่านตัวกรอง "..eligible.." • ขายแล้ว "..soldCount.." ตัว • "..lastResult)
+                showCard("eggs","Super Throw เหลือ "..tostring(get("SuperThrows",0)).." • "..lastResult)
+                showCard("bag",string.format("เวลา %d นาที • โยน %d ครั้ง • เงินเปลี่ยน %+.3g\n%s",math.floor((os.clock()-sessionStart)/60),(tonumber(get("Throws",0))or 0)-baselineThrows,(tonumber(get("Money",0))or 0)-baselineMoney,#gained>0 and table.concat(gained," • ")or "ยังไม่ได้สัตว์ใหม่"))
                 local tools={}
                 for _,container in ipairs({P:FindFirstChild("Backpack"),P.Character})do
                     if container then for _,tool in ipairs(container:GetChildren())do if tool:IsA("Tool")then local name=tostring(tool:GetAttribute("EggKey")or tool.Name);tools[name]=(tools[name]or 0)+1 end end end
                 end
                 local contents={};for name,count in pairs(tools)do contents[#contents+1]=name.." ×"..count end;table.sort(contents)
                 inventoryCard:SetTitle(string.format("เลเวล %s • เครื่องฝึก %s • รั้ว %s\nสัตว์ %d • อาหารที่ใส่ %s\n%s",tostring(get("Level",1)),tostring(get("Stand",0)),tostring(get("FenceLevel",0)),#list,tostring(get("EquippedFood",1)),#contents>0 and table.concat(contents," • ")or "ไม่มี Tool ในกระเป๋า"))
-                uiTicks=uiTicks+1;if uiTicks%15==1 then refreshAnimals()end
-            else cards.main:SetTitle("รอข้อมูลผู้เล่นจากเกม")end
-            cards.settings:SetTitle(storage..(cfg.meter and not VIM and " • ใช้เกจออโต้ไม่ได้: ไม่มี VirtualInputManager"or ""))
+                if animalListDirty then refreshAnimals()end
+            else showCard("main","รอข้อมูลผู้เล่นจากเกม")end
+            showCard("settings",storage)
         end)
         if not ok then warn(err);pcall(function()cards.main:SetTitle(tostring(err))end)end
-        task.wait(1)
+        task.wait(3)
     end
 end)
 onChange.lowGraphics(cfg.lowGraphics)
