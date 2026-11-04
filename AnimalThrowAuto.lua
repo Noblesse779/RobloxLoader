@@ -1,4 +1,4 @@
--- Animal Throw Hub v1.4 | SINGLE-FILE SOURCE BUNDLE
+-- Animal Throw Hub v1.5 | SINGLE-FILE SOURCE BUNDLE
 -- No external Lua/data downloads; Roblox gameplay and Roblox-hosted assets remain online.
 -- WindUI
 -- MIT License
@@ -35,7 +35,7 @@ local P=Players.LocalPlayer
 local env=(getgenv and getgenv()) or _G
 if env.AnimalThrowHubStop then pcall(env.AnimalThrowHubStop) end
 local alive=true
-local defaults={autoTrain=false,bonus=false,autoThrow=false,meter=false,super=false,skipReveal=false,fastThrow=false,autoFood=false,equipFood=false,stand=false,fence=false,equipBest=false,place=false,eggs=false,sell=false,offline=false,free=false,antiAFK=false,lowGraphics=false,fpsLimit=false,trainSeconds=60,throwsPerCycle=5,throwPause=3,throwPower=100,powerOn=false,meterTarget=0.94,reserve=0,food="ดีที่สุดที่ซื้อไหว",egg="ทุกชนิด",sellRarity="Common",sellIncome=0,keepNames="",sellMutations=false,keepBest=10,fps=30}
+local defaults={autoTrain=false,bonus=false,autoThrow=false,meter=false,super=false,skipReveal=false,fastThrow=false,autoFood=false,equipFood=false,stand=false,fence=false,equipBest=false,place=false,eggs=false,sell=false,offline=false,free=false,antiAFK=false,lowGraphics=false,fpsLimit=false,trainSeconds=60,throwsPerCycle=5,throwPause=3,throwPower=100,powerOn=false,rawPower=false,customPower=30000,meterTarget=0.94,reserve=0,food="ดีที่สุดที่ซื้อไหว",egg="ทุกชนิด",sellRarity="Common",sellIncome=0,keepNames="",sellMutations=false,keepBest=10,fps=30}
 local cfg={}
 for k,v in pairs(defaults)do cfg[k]=v end
 local folder="AnimalThrowHub_120219252362013"
@@ -62,6 +62,7 @@ loadSettings()
 local function clamp(k,lo,hi)cfg[k]=math.clamp(cfg[k],lo,hi)end
 clamp("trainSeconds",5,3600);clamp("throwsPerCycle",1,100);clamp("throwPower",1,100)
 clamp("throwPause",1.5,30)
+clamp("customPower",1,9999999)
 clamp("meterTarget",0.4,0.99);clamp("reserve",0,1e100);clamp("sellIncome",0,1e100)
 clamp("keepBest",0,10000);clamp("fps",10,240)
 local function save()
@@ -116,7 +117,7 @@ for index,key in ipairs({"ScreenGui","NotificationGui","DropdownGui","TooltipGui
         end)
     end
 end
-Window=WindUI:CreateWindow({Title="ANIMAL THROW HUB • v1.4",Author="Noblesse779",Folder=folder,Size=UDim2.fromOffset(820,590),SideBarWidth=190,Resizable=true,Theme="Plant",Transparent=false,ToggleKey=Enum.KeyCode.RightShift,OpenButton={Title="ANIMAL HUB",Enabled=true,Draggable=true,OnlyMobile=false}})
+Window=WindUI:CreateWindow({Title="ANIMAL THROW HUB • v1.5",Author="Noblesse779",Folder=folder,Size=UDim2.fromOffset(820,590),SideBarWidth=190,Resizable=true,Theme="Plant",Transparent=false,ToggleKey=Enum.KeyCode.RightShift,OpenButton={Title="ANIMAL HUB",Enabled=true,Draggable=true,OnlyMobile=false}})
 local tabs={}
 for _,spec in ipairs({{"main","ฝึก / โยน","target"},{"shop","ร้าน / อัปเกรด","shopping-cart"},{"animals","สัตว์ / ฟาร์ม","paw-print"},{"sell","ขาย / ตัวกรอง","coins"},{"eggs","ไข่ / รางวัล","egg"},{"bag","กระเป๋า / สถิติ","chart-no-axes-combined"},{"settings","ตั้งค่า","settings"}})do tabs[spec[1]]=Window:Tab({Title=spec[2],Icon=spec[3]})end
 local cards={}
@@ -150,6 +151,18 @@ toggle("main","กดเกจโยนอัตโนมัติ","meter")
 number("main","เป้าเกจ 0.40–0.99","meterTarget",0.4,0.99)
 toggle("main","ตั้งแรงโยนอัตโนมัติ","powerOn")
 number("main","แรงโยน %","throwPower",1,100)
+toggle("main","ทดลองส่งพลังที่กำหนดตรง","rawPower")
+number("main","ค่าพลังที่ขอ 1–9999999","customPower",1,9999999)
+local sendCustomPower
+local powerStatus="ยังไม่ได้ทดลองส่งค่าพลัง"
+local lastPowerAttempt,lastServerDistance=nil,nil
+local powerCard=tabs.main:Paragraph({Title=powerStatus,Desc=""})
+tabs.main:Button({Title="ส่งค่าพลังที่กำหนด 1 ครั้ง",Callback=function()
+    if sendCustomPower then
+        lastPowerAttempt=nil
+        task.spawn(function()local ok,err=pcall(sendCustomPower);if not ok then powerStatus=tostring(err)end end)
+    end
+end})
 toggle("main","ใช้ Super Throw ที่มีอัตโนมัติ","super")
 toggle("main","ข้ามฉากแสดงสัตว์ที่ได้","skipReveal")
 toggle("main","โยนเร็ว / ข้ามอนิเมชันโยน","fastThrow")
@@ -223,6 +236,17 @@ local function invoke(name,...)
     lastResult=name.." • "..(result.Ok and "สำเร็จ" or tostring(result.Reason or "Rejected"))
     return result
 end
+sendCustomPower=function()
+    if not modules or not modules.data:IsReady()then powerStatus="รอข้อมูลเกม";return false end
+    local requested=math.floor(math.clamp(cfg.customPower,1,9999999))
+    if lastPowerAttempt==requested then return false end
+    lastPowerAttempt=requested
+    local result=invoke("Player_SetThrowPower",requested)
+    powerStatus="ขอ "..requested.." • "..(result.Ok and "รับคำสั่งแล้ว"or "ปฏิเสธ: "..tostring(result.Reason or "Unknown"))
+    return true
+end
+onChange.rawPower=function()lastPowerAttempt=nil end
+onChange.customPower=function()lastPowerAttempt=nil end
 local animalCache,animalsDirty=nil,true
 local animalListDirty=true
 local function animals()
@@ -628,6 +652,7 @@ local function fastThrow()
         task.wait(0.36)
         local result=invoke("Throw_Resolve",cfg.meterTarget)
         if not result.Ok then return end
+        lastServerDistance=tonumber(result.Distance)
         local completed=invoke("Throw_Complete")
         local retries=0
         while alive and not completed.Ok and retries<3 do
@@ -697,7 +722,9 @@ local function actor()
     end
     if not idle()then status="เกมกำลังทำงาน • "..tostring(modules.state.Busy or "หน้าต่างรางวัล");return end
     if cfg.free and not get("FreeAnimalClaimed",false)and due("free",20)then invoke("Shop_ClaimFree");return end
-    if cfg.powerOn and due("power",10)then
+    if cfg.rawPower then
+        if sendCustomPower()then return end
+    elseif cfg.powerOn and due("power",10)then
         local maximum=modules.levels.ThrowPowerForLevel(tonumber(get("Level",1))or 1)
         local minimum=math.min(modules.levels.MinThrowPower,maximum)
         local desired=math.clamp(math.floor(maximum*cfg.throwPower/100+0.5),minimum,maximum)
@@ -769,6 +796,9 @@ task.spawn(function()
                 local gained={};for name,count in pairs(received)do gained[#gained+1]=name.." ×"..count end;table.sort(gained)
                 if modules.training.IsRunning()then status="กำลังฝึก • "..math.floor(modules.training.GetTrainingTime()).." วินาที"end
                 showCard("main",(os.clock()<startupUntil and "รอเริ่มระบบ "..math.ceil(startupUntil-os.clock()).." วินาที"or status).."\n"..lastResult)
+                local powerText=powerStatus.."\nค่าบันทึก "..tostring(get("ThrowPower","ไม่พบ")).." • สูงสุดตามเลเวล "..tostring(modules.levels.ThrowPowerForLevel(get("Level",1)))
+                if lastServerDistance then powerText=powerText.." • ระยะจากเซิร์ฟเวอร์ "..tostring(lastServerDistance)end
+                if displayed.power~=powerText then displayed.power=powerText;powerCard:SetTitle(powerText)end
                 showCard("shop",growthStatus)
                 local placed=0;for _,a in ipairs(list)do if a.entry.Placed then placed=placed+1 end end
                 showCard("animals","สัตว์ "..#list.." • วาง "..placed.."/"..modules.fences.SlotsFor(get("FenceLevel",0)))
