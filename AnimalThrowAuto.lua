@@ -1,4 +1,4 @@
--- Animal Throw Hub v1.2 | SINGLE-FILE SOURCE BUNDLE
+-- Animal Throw Hub v1.3 | SINGLE-FILE SOURCE BUNDLE
 -- No external Lua/data downloads; Roblox gameplay and Roblox-hosted assets remain online.
 -- WindUI
 -- MIT License
@@ -114,7 +114,7 @@ for index,key in ipairs({"ScreenGui","NotificationGui","DropdownGui","TooltipGui
         end)
     end
 end
-Window=WindUI:CreateWindow({Title="ANIMAL THROW HUB • v1.2",Author="Noblesse779",Folder=folder,Size=UDim2.fromOffset(820,590),SideBarWidth=190,Resizable=true,Theme="Plant",Transparent=false,ToggleKey=Enum.KeyCode.RightShift,OpenButton={Title="ANIMAL HUB",Enabled=true,Draggable=true,OnlyMobile=false}})
+Window=WindUI:CreateWindow({Title="ANIMAL THROW HUB • v1.3",Author="Noblesse779",Folder=folder,Size=UDim2.fromOffset(820,590),SideBarWidth=190,Resizable=true,Theme="Plant",Transparent=false,ToggleKey=Enum.KeyCode.RightShift,OpenButton={Title="ANIMAL HUB",Enabled=true,Draggable=true,OnlyMobile=false}})
 local tabs={}
 for _,spec in ipairs({{"main","ฝึก / โยน","target"},{"shop","ร้าน / อัปเกรด","shopping-cart"},{"animals","สัตว์ / ฟาร์ม","paw-print"},{"sell","ขาย / ตัวกรอง","coins"},{"eggs","ไข่ / รางวัล","egg"},{"bag","กระเป๋า / สถิติ","chart-no-axes-combined"},{"settings","ตั้งค่า","settings"}})do tabs[spec[1]]=Window:Tab({Title=spec[2],Icon=spec[3]})end
 local cards={}
@@ -201,6 +201,8 @@ local function initModules()
     local m={}
     for k,name in pairs({data="DataController",state="ClientState",input="InputActions",training="TrainingController",throw="ThrowController",meter="ThrowMeter",super="SuperThrow",reveal="RevealSequence",plot="PlotController",offline="OfflineEarnings",screen="ScreenFX",camera="CameraRig",movement="Movement",hud="HUDController",fog="FogController"})do m[k]=requireNamed(c,name)end
     m.remote=requireNamed(RS.Shared,"Remotes")
+    m.area=requireNamed(RS.Shared,"AreaUtil")
+    m.game=requireNamed(RS.Config,"GameConfig")
     m.mutations=requireNamed(RS.Shared,"Mutations")
     for k,name in pairs({foods="FoodsConfig",stands="StandsConfig",fences="FenceConfig",eggs="EggsConfig",economy="AnimalEconomy",levels="LevelConfig"})do m[k]=requireNamed(RS.Config,name)end
     m.format=requireNamed(RS.Shared,"NumberFormat")
@@ -512,13 +514,42 @@ onChange.trainSeconds=armTrainingStop
 onChange.autoThrow=armTrainingStop
 onChange.equipBest=function()equipDirty=true end
 onChange.place=function()equipDirty=true end
+local function approachThrow()
+    local char=P.Character
+    local root=char and char:FindFirstChild("HumanoidRootPart")
+    local humanoid=char and char:FindFirstChildOfClass("Humanoid")
+    if not(root and humanoid and humanoid.Health>0)then return false,"ไม่พบตัวละครพร้อมโยน"end
+    local launch=modules.area.GetLaunchPosition()
+    if typeof(launch)~="Vector3"then return false,"ไม่พบจุดโยนของเกม"end
+    local position=launch+Vector3.new(0,humanoid.HipHeight+root.Size.Y/2+0.1,0)
+    status="กำลังไปยืนจุดโยน"
+    root.Anchored=false
+    root.AssemblyLinearVelocity=Vector3.zero
+    char:PivotTo(CFrame.lookAt(position,position+Vector3.new(0,0,-10)))
+    task.wait(0.3)
+    return alive and root.Parent~=nil
+end
+local function returnFromThrow()
+    local char=P.Character
+    local root=char and char:FindFirstChild("HumanoidRootPart")
+    local plots=workspace:FindFirstChild("Plots")
+    local plot=plots and plots:FindFirstChild(tostring(P:GetAttribute("PlotIndex")))
+    if root and plot and plot:IsA("BasePart")then
+        local position=plot.Position+modules.game.Plot.EntranceOffset
+        root.Anchored=false
+        root.AssemblyLinearVelocity=Vector3.zero
+        char:PivotTo(CFrame.lookAt(position,position+Vector3.new(0,0,1)))
+    end
+end
 local function fastThrow()
     if not idle()then return end
     modules.state.Busy="Throw"
     local pending,success=false,false
     local ok,err=pcall(function()
+        local positioned,reason=approachThrow()
+        if not positioned then status=reason or "ยกเลิกก่อนเริ่มโยน";return end
         local start=invoke("Throw_Start")
-        if not start.Ok then return end
+        if not start.Ok then status=lastResult;return end
         pending=true
         if cfg.super and (tonumber(get("SuperThrows",0))or 0)>0 then invoke("Throw_UseSuper")end
         -- The native meter accepts confirmation only after 0.35 seconds.
@@ -541,12 +572,19 @@ local function fastThrow()
         end
     end)
     if pending then pcall(function()modules.remote.Invoke("Throw_Cancel")end)end
+    pcall(returnFromThrow)
     if modules.state.Busy=="Throw"then modules.state.Busy=nil end
     if not ok then error(err)end
     return success
 end
 patch(modules.throw,"Start",function(original)return function(...)
     if alive and cfg.fastThrow then return fastThrow()end
+    if alive and cfg.autoThrow and idle()then
+        modules.state.Busy="ThrowApproach"
+        local ok,positioned,reason=pcall(approachThrow)
+        if modules.state.Busy=="ThrowApproach"then modules.state.Busy=nil end
+        if not ok or not positioned then status=tostring(reason or positioned);return false end
+    end
     return original(...)
 end end)
 tabs.main:Button({Title="ยกเลิกฉากโยนค้าง / คืนกล้อง",Callback=function()safeAction("คืนกล้อง",function()
@@ -643,7 +681,7 @@ task.spawn(function()
                 initialAnimals=true
                 local gained={};for name,count in pairs(received)do gained[#gained+1]=name.." ×"..count end;table.sort(gained)
                 if modules.training.IsRunning()then status="กำลังฝึก • "..math.floor(modules.training.GetTrainingTime()).." วินาที"end
-                showCard("main",os.clock()<startupUntil and "รอเริ่มระบบ "..math.ceil(startupUntil-os.clock()).." วินาที"or status)
+                showCard("main",(os.clock()<startupUntil and "รอเริ่มระบบ "..math.ceil(startupUntil-os.clock()).." วินาที"or status).."\n"..lastResult)
                 showCard("shop",lastResult)
                 local placed=0;for _,a in ipairs(list)do if a.entry.Placed then placed=placed+1 end end
                 showCard("animals","สัตว์ "..#list.." • วาง "..placed.."/"..modules.fences.SlotsFor(get("FenceLevel",0)))
