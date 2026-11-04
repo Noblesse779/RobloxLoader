@@ -1,4 +1,4 @@
--- Animal Throw Hub v1.0 | SINGLE-FILE SOURCE BUNDLE
+-- Animal Throw Hub v1.1 | SINGLE-FILE SOURCE BUNDLE
 -- No external Lua/data downloads; Roblox gameplay and Roblox-hosted assets remain online.
 -- WindUI
 -- MIT License
@@ -35,7 +35,7 @@ local P=Players.LocalPlayer
 local env=(getgenv and getgenv()) or _G
 if env.AnimalThrowHubStop then pcall(env.AnimalThrowHubStop) end
 local alive=true
-local defaults={autoTrain=false,bonus=false,autoThrow=false,meter=false,super=false,autoFood=false,equipFood=false,stand=false,fence=false,equipBest=false,place=false,eggs=false,sell=false,offline=false,free=false,antiAFK=false,lowGraphics=false,fpsLimit=false,trainSeconds=60,throwsPerCycle=5,throwPower=100,powerOn=false,meterTarget=0.94,reserve=0,food="ดีที่สุดที่ซื้อไหว",egg="ทุกชนิด",sellRarity="Common",sellIncome=0,keepNames="",sellMutations=false,keepBest=10,fps=30}
+local defaults={autoTrain=false,bonus=false,autoThrow=false,meter=false,super=false,skipReveal=false,autoFood=false,equipFood=false,stand=false,fence=false,equipBest=false,place=false,eggs=false,sell=false,offline=false,free=false,antiAFK=false,lowGraphics=false,fpsLimit=false,trainSeconds=60,throwsPerCycle=5,throwPower=100,powerOn=false,meterTarget=0.94,reserve=0,food="ดีที่สุดที่ซื้อไหว",egg="ทุกชนิด",sellRarity="Common",sellIncome=0,keepNames="",sellMutations=false,keepBest=10,fps=30}
 local cfg={}
 for k,v in pairs(defaults)do cfg[k]=v end
 local folder="AnimalThrowHub_120219252362013"
@@ -76,6 +76,7 @@ end
 local status,lastResult="กำลังเตรียมระบบ","พร้อม"
 local connections,patches={},{}
 local Window,modules,ownedTraining=false,nil,false
+local uiHost
 local changedGraphics={}
 local function restoreGraphics()
     for item,props in pairs(changedGraphics)do
@@ -92,11 +93,28 @@ local function stop()
     restoreGraphics()
     if cfg.fpsLimit and type(setfpscap)=="function" then pcall(setfpscap,60)end
     if Window then pcall(function()Window:Destroy()end)end
+    if uiHost then uiHost:Destroy()end
 end
 env.AnimalThrowHubStop=stop
 local WindUI=loadstring(__BUNDLE_READ("https://github.com/Footagesus/WindUI/releases/download/1.6.66/main.lua"))()
-pcall(function()WindUI:SetParent(P:WaitForChild("PlayerGui"))end)
-Window=WindUI:CreateWindow({Title="ANIMAL THROW HUB • v1.0",Author="Noblesse779",Folder=folder,Size=UDim2.fromOffset(820,590),SideBarWidth=190,Resizable=true,Theme="Plant",Transparent=false,ToggleKey=Enum.KeyCode.RightShift,OpenButton={Title="ANIMAL HUB",Enabled=true,Draggable=true,OnlyMobile=false}})
+-- The game's HUDController hides direct ScreenGui children during training/throwing.
+-- Keep only our library screens in a private folder; never change native screens.
+uiHost=Instance.new("Folder")
+uiHost.Name="AnimalThrowHubInterface"
+uiHost.Parent=P:WaitForChild("PlayerGui")
+WindUI:SetParent(uiHost)
+for index,key in ipairs({"ScreenGui","NotificationGui","DropdownGui","TooltipGui"})do
+    local screen=WindUI[key]
+    if typeof(screen)=="Instance" and screen:IsA("ScreenGui")then
+        screen.ResetOnSpawn=false
+        screen.DisplayOrder=2500+index*10
+        screen.Enabled=true
+        connections[#connections+1]=screen:GetPropertyChangedSignal("Enabled"):Connect(function()
+            if alive and screen.Parent and not screen.Enabled then screen.Enabled=true end
+        end)
+    end
+end
+Window=WindUI:CreateWindow({Title="ANIMAL THROW HUB • v1.1",Author="Noblesse779",Folder=folder,Size=UDim2.fromOffset(820,590),SideBarWidth=190,Resizable=true,Theme="Plant",Transparent=false,ToggleKey=Enum.KeyCode.RightShift,OpenButton={Title="ANIMAL HUB",Enabled=true,Draggable=true,OnlyMobile=false}})
 local tabs={}
 for _,spec in ipairs({{"main","ฝึก / โยน","target"},{"shop","ร้าน / อัปเกรด","shopping-cart"},{"animals","สัตว์ / ฟาร์ม","paw-print"},{"sell","ขาย / ตัวกรอง","coins"},{"eggs","ไข่ / รางวัล","egg"},{"bag","กระเป๋า / สถิติ","chart-no-axes-combined"},{"settings","ตั้งค่า","settings"}})do tabs[spec[1]]=Window:Tab({Title=spec[2],Icon=spec[3]})end
 local cards={}
@@ -130,6 +148,7 @@ number("main","เป้าเกจ 0.40–0.99","meterTarget",0.4,0.99)
 toggle("main","ตั้งแรงโยนอัตโนมัติ","powerOn")
 number("main","แรงโยน %","throwPower",1,100)
 toggle("main","ใช้ Super Throw ที่มีอัตโนมัติ","super")
+toggle("main","ข้ามฉากแสดงสัตว์ที่ได้","skipReveal")
 toggle("shop","ซื้ออาหารอัตโนมัติ","autoFood")
 toggle("shop","สวมอาหารที่เลือกอัตโนมัติ","equipFood")
 local foodDrop=dropdown("shop","อาหาร","food",{"ดีที่สุดที่ซื้อไหว"})
@@ -179,7 +198,7 @@ local function initModules()
     assert(client,"ไม่พบ Client")
     local c=client:WaitForChild("Controllers",20);assert(c,"ไม่พบ Controllers")
     local m={}
-    for k,name in pairs({data="DataController",state="ClientState",training="TrainingController",throw="ThrowController",meter="ThrowMeter",super="SuperThrow",plot="PlotController",offline="OfflineEarnings"})do m[k]=requireNamed(c,name)end
+    for k,name in pairs({data="DataController",state="ClientState",training="TrainingController",throw="ThrowController",meter="ThrowMeter",super="SuperThrow",reveal="RevealSequence",plot="PlotController",offline="OfflineEarnings"})do m[k]=requireNamed(c,name)end
     m.remote=requireNamed(RS.Shared,"Remotes")
     m.mutations=requireNamed(RS.Shared,"Mutations")
     for k,name in pairs({foods="FoodsConfig",stands="StandsConfig",fences="FenceConfig",eggs="EggsConfig",economy="AnimalEconomy",levels="LevelConfig"})do m[k]=requireNamed(RS.Config,name)end
@@ -301,6 +320,14 @@ patch(modules.super,"Begin",function(original)return function(...)
     local instance=original(...);activeSuper=instance;return instance
 end end)
 local VIM
+patch(modules.reveal,"Run",function(original)return function(...)
+    if alive and cfg.skipReveal then
+        lastResult="ข้ามฉากสัตว์ • รอเกมยืนยันรางวัล"
+        -- The native ThrowController proceeds to Throw_Complete and its own cleanup.
+        return
+    end
+    return original(...)
+end end)
 pcall(function()VIM=game:GetService("VirtualInputManager")end)
 local lastKey=0
 local function confirm()
