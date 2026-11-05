@@ -1,4 +1,4 @@
--- Animal Throw Hub v1.5 | SINGLE-FILE SOURCE BUNDLE
+-- Animal Throw Hub v1.6 | SINGLE-FILE SOURCE BUNDLE
 -- No external Lua/data downloads; Roblox gameplay and Roblox-hosted assets remain online.
 -- WindUI
 -- MIT License
@@ -117,7 +117,7 @@ for index,key in ipairs({"ScreenGui","NotificationGui","DropdownGui","TooltipGui
         end)
     end
 end
-Window=WindUI:CreateWindow({Title="ANIMAL THROW HUB • v1.5",Author="Noblesse779",Folder=folder,Size=UDim2.fromOffset(820,590),SideBarWidth=190,Resizable=true,Theme="Plant",Transparent=false,ToggleKey=Enum.KeyCode.RightShift,OpenButton={Title="ANIMAL HUB",Enabled=true,Draggable=true,OnlyMobile=false}})
+Window=WindUI:CreateWindow({Title="ANIMAL THROW HUB • v1.6",Author="Noblesse779",Folder=folder,Size=UDim2.fromOffset(820,590),SideBarWidth=190,Resizable=true,Theme="Plant",Transparent=false,ToggleKey=Enum.KeyCode.RightShift,OpenButton={Title="ANIMAL HUB",Enabled=true,Draggable=true,OnlyMobile=false}})
 local tabs={}
 for _,spec in ipairs({{"main","ฝึก / โยน","target"},{"shop","ร้าน / อัปเกรด","shopping-cart"},{"animals","สัตว์ / ฟาร์ม","paw-print"},{"sell","ขาย / ตัวกรอง","coins"},{"eggs","ไข่ / รางวัล","egg"},{"bag","กระเป๋า / สถิติ","chart-no-axes-combined"},{"settings","ตั้งค่า","settings"}})do tabs[spec[1]]=Window:Tab({Title=spec[2],Icon=spec[3]})end
 local cards={}
@@ -151,7 +151,7 @@ toggle("main","กดเกจโยนอัตโนมัติ","meter")
 number("main","เป้าเกจ 0.40–0.99","meterTarget",0.4,0.99)
 toggle("main","ตั้งแรงโยนอัตโนมัติ","powerOn")
 number("main","แรงโยน %","throwPower",1,100)
-toggle("main","ทดลองส่งพลังที่กำหนดตรง","rawPower")
+toggle("main","ส่งพลังที่กำหนดก่อนเริ่มโยนทุกรอบ","rawPower")
 number("main","ค่าพลังที่ขอ 1–9999999","customPower",1,9999999)
 local sendCustomPower
 local powerStatus="ยังไม่ได้ทดลองส่งค่าพลัง"
@@ -236,10 +236,10 @@ local function invoke(name,...)
     lastResult=name.." • "..(result.Ok and "สำเร็จ" or tostring(result.Reason or "Rejected"))
     return result
 end
-sendCustomPower=function()
+sendCustomPower=function(force)
     if not modules or not modules.data:IsReady()then powerStatus="รอข้อมูลเกม";return false end
     local requested=math.floor(math.clamp(cfg.customPower,1,9999999))
-    if lastPowerAttempt==requested then return false end
+    if not force and lastPowerAttempt==requested then return false end
     lastPowerAttempt=requested
     local result=invoke("Player_SetThrowPower",requested)
     powerStatus="ขอ "..requested.." • "..(result.Ok and "รับคำสั่งแล้ว"or "ปฏิเสธ: "..tostring(result.Reason or "Unknown"))
@@ -362,6 +362,13 @@ local function patch(object,key,make)
     local wrapper=make(original)
     object[key]=wrapper;patches[#patches+1]={object=object,key=key,original=original,wrapper=wrapper}
 end
+patch(modules.remote,"Invoke",function(original)return function(name,...)
+    if alive and cfg.rawPower and name=="Throw_Start"then
+        -- Wait for the setting response before starting; no timed race or repeated polling.
+        sendCustomPower(true)
+    end
+    return original(name,...)
+end end)
 local evaluateMeter
 patch(modules.input,"BindPressed",function(original)return function(name,priority,callback,...)
     local captured=activeMeter and name=="Confirm"and priority==50
@@ -722,9 +729,7 @@ local function actor()
     end
     if not idle()then status="เกมกำลังทำงาน • "..tostring(modules.state.Busy or "หน้าต่างรางวัล");return end
     if cfg.free and not get("FreeAnimalClaimed",false)and due("free",20)then invoke("Shop_ClaimFree");return end
-    if cfg.rawPower then
-        if sendCustomPower()then return end
-    elseif cfg.powerOn and due("power",10)then
+    if not cfg.rawPower and cfg.powerOn and due("power",10)then
         local maximum=modules.levels.ThrowPowerForLevel(tonumber(get("Level",1))or 1)
         local minimum=math.min(modules.levels.MinThrowPower,maximum)
         local desired=math.clamp(math.floor(maximum*cfg.throwPower/100+0.5),minimum,maximum)
